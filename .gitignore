@@ -1,0 +1,59 @@
+# Visual Studio and JetBrains IDEs
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+_ReSharper*/
+*.DotSettings.user
+
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Avalonia generated output
+Avalonia.Designer.HostApp/
+
+# Packages and local tools
+packages/
+.nuget/
+.store/
+
+# Runtime files and logs
+logs/
+*.log
+*.pid
+*.dmp
+
+# Local VPN configuration and secrets
+config.json
+config.local.json
+appsettings.Local.json
+*.local.json
+*.secret.json
+*.secrets.json
+*.pfx
+*.p12
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+
+# Bundled/downloaded native runtime artifacts
+xray.exe
+xray
+wintun.dll
+geoip.dat
+geosite.dat
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
