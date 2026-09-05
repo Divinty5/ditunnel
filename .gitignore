@@ -28,9 +28,13 @@ packages/
 
 # Runtime files and logs
 logs/
+diagnostics/
 *.log
 *.pid
 *.dmp
+*.pcap
+*.pcapng
+*.har
 
 # Local VPN configuration and secrets
 config.json
@@ -39,6 +43,10 @@ appsettings.Local.json
 *.local.json
 *.secret.json
 *.secrets.json
+*.subscription
+*.subscription.txt
+profiles.local.*
+subscriptions.local.*
 *.pfx
 *.p12
 *.key
