@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiTunnel.App\DiTunnel.App.csproj" />
+    <ProjectReference Include="..\DiTunnel.Infrastructure.Xray\DiTunnel.Infrastructure.Xray.csproj" />
+    <ProjectReference Include="..\DiTunnel.Platform.Windows\DiTunnel.Platform.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

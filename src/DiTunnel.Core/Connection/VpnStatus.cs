@@ -1,0 +1,9 @@
+namespace DiTunnel.Core.Connection;
+
+public sealed record VpnStatus(
+    VpnConnectionState State,
+    string? Message = null,
+    DateTimeOffset? ConnectedAt = null)
+{
+    public static VpnStatus Disconnected { get; } = new(VpnConnectionState.Disconnected);
+}

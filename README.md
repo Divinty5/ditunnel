@@ -24,7 +24,19 @@ No real server addresses, credentials, subscription URLs, signing keys or genera
 
 ## Development
 
-The repository currently contains the project brief and development plan. Build instructions will be added with the initial solution and application projects.
+Requirements:
+
+- Visual Studio 2026 with the .NET desktop development workload, or .NET SDK 10.0.302+
+
+Open `DiTunnel.sln` in Visual Studio and set `DiTunnel.Desktop` as the startup project, or run from a terminal:
+
+```powershell
+dotnet restore
+dotnet build
+dotnet run --project src/DiTunnel.Desktop
+```
+
+The current application is a UI scaffold. Its Connect button remains disabled until the Xray lifecycle is implemented.
 
 ## License
 

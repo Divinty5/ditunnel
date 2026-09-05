@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:DiTunnel.App.ViewModels"
+             x:Class="DiTunnel.App.Views.MainView"
+             x:DataType="vm:MainViewModel"
+             d:DesignWidth="960"
+             d:DesignHeight="640"
+             mc:Ignorable="d">
+  <Design.DataContext>
+    <vm:MainViewModel />
+  </Design.DataContext>
+
+  <Grid Background="#0B0912">
+    <Border Width="560"
+            Padding="44"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Background="#151122"
+            BorderBrush="#33265A"
+            BorderThickness="1"
+            CornerRadius="28">
+      <StackPanel Spacing="20">
+        <Image Width="148"
+               Height="148"
+               HorizontalAlignment="Center"
+               Source="/Assets/icon.png"
+               Stretch="Uniform" />
+        <TextBlock HorizontalAlignment="Center"
+                   FontSize="36"
+                   FontWeight="SemiBold"
+                   Text="{Binding ProductName}" />
+        <Border Padding="14,8"
+                HorizontalAlignment="Center"
+                Background="#241B3D"
+                CornerRadius="18">
+          <TextBlock Foreground="#B9A2FF"
+                     Text="{Binding StatusText}" />
+        </Border>
+        <Button MinWidth="220"
+                HorizontalAlignment="Center"
+                HorizontalContentAlignment="Center"
+                IsEnabled="False"
+                Content="Подключить" />
+        <TextBlock MaxWidth="420"
+                   HorizontalAlignment="Center"
+                   Foreground="#A9A3B5"
+                   Text="{Binding StageText}"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

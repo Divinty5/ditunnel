@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <Product>Di-Tunnel</Product>
+    <Company>Di Vinty Interactive</Company>
+    <Authors>Di Vinty Interactive</Authors>
+    <RepositoryUrl>https://github.com/Divinty5/ditunnel</RepositoryUrl>
+  </PropertyGroup>
+</Project>
