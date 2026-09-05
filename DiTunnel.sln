@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiTunnel.Platform.Windows",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiTunnel.Desktop", "src\DiTunnel.Desktop\DiTunnel.Desktop.csproj", "{79F010BD-D6A9-43E1-971D-9633DB24A4CA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiTunnel.Infrastructure.Xray.Tests", "tests\DiTunnel.Infrastructure.Xray.Tests\DiTunnel.Infrastructure.Xray.Tests.csproj", "{3C6FF550-4AB5-42FE-882D-2485DCF2998B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -101,6 +103,18 @@ Global
 		{79F010BD-D6A9-43E1-971D-9633DB24A4CA}.Release|x64.Build.0 = Release|Any CPU
 		{79F010BD-D6A9-43E1-971D-9633DB24A4CA}.Release|x86.ActiveCfg = Release|Any CPU
 		{79F010BD-D6A9-43E1-971D-9633DB24A4CA}.Release|x86.Build.0 = Release|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Debug|x64.Build.0 = Debug|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Debug|x86.Build.0 = Debug|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Release|x64.ActiveCfg = Release|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Release|x64.Build.0 = Release|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Release|x86.ActiveCfg = Release|Any CPU
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -112,5 +126,6 @@ Global
 		{9F79DAAD-A6AA-4FBE-9424-9A30519AACBB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{7F69328C-19A5-4199-9505-281A7144EC8E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{79F010BD-D6A9-43E1-971D-9633DB24A4CA} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{3C6FF550-4AB5-42FE-882D-2485DCF2998B} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

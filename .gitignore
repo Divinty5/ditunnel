@@ -24,6 +24,7 @@ Avalonia.Designer.HostApp/
 packages/
 .nuget/
 .store/
+.tools/
 
 # Runtime files and logs
 logs/

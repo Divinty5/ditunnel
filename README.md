@@ -38,6 +38,16 @@ dotnet run --project src/DiTunnel.Desktop
 
 The current application is a UI scaffold. Its Connect button remains disabled until the Xray lifecycle is implemented.
 
+### Xray-core runtime
+
+Install the pinned Windows x64 runtime into the ignored `.tools` directory:
+
+```powershell
+.\scripts\Install-Xray.ps1
+```
+
+The script downloads the official release archive and verifies its SHA-256 before extraction. The pinned version and digest are stored in `eng/xray-version.json`; runtime binaries are never committed.
+
 ## License
 
 No license has been selected yet. The source is publicly visible, but no reuse rights are granted until a license is added.
