@@ -1,0 +1,48 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+
+namespace DiTunnel.Infrastructure.Xray;
+
+public static class XrayServerProbe
+{
+    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(12));
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        var content = configuration.Build(address.ToString(), false, port).Replace("\"loglevel\":\"none\"", "\"loglevel\":\"info\"");
+        await File.WriteAllTextAsync(path, content, timeout.Token);
+        await using var manager = new XrayProcessManager(new XrayOptions { ExecutablePath = runtime, WorkingDirectory = Path.GetDirectoryName(runtime)!, ShutdownTimeout = TimeSpan.FromMilliseconds(250) });
+        var certificateError = 0;
+        manager.LogReceived += entry =>
+        {
+            if (entry.Message.Contains("x509:", StringComparison.OrdinalIgnoreCase) || entry.Message.Contains("failed to verify certificate", StringComparison.OrdinalIgnoreCase))
+                Interlocked.Exchange(ref certificateError, 1);
+        };
+        try
+        {
+            await manager.StartAsync(path, timeout.Token);
+            using var handler = new HttpClientHandler { UseProxy = true, Proxy = new WebProxy($"socks5://127.0.0.1:{port}") };
+            using var client = new HttpClient(handler);
+            var watch = Stopwatch.StartNew();
+            using var response = await client.GetAsync("https://1.1.1.1/cdn-cgi/trace", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            response.EnsureSuccessStatusCode();
+            return watch.Elapsed.TotalMilliseconds;
+        }
+        catch (HttpRequestException)
+        {
+            await manager.StopAsync(CancellationToken.None);
+            if (Volatile.Read(ref certificateError) != 0)
+                throw new InvalidOperationException("Сертификат VPN-сервера не прошёл проверку. Проверьте SNI и сертификат.");
+            throw new InvalidOperationException("Сервер не ответил через Xray. Проверьте интернет-соединение и настройки профиля.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("Проверка сервера превысила 12 секунд.");
+        }
+    }
+}
