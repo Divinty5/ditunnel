@@ -22,9 +22,9 @@ public sealed class TunnelHostControlTests
         if (cancel) await File.WriteAllTextAsync(config + ".stop", "stop");
         string Quote(string value) => "'" + value.Replace("'", "''") + "'";
         // Only mock OS network access. Execute the real production control/cleanup code in Windows PowerShell 5.
-        var command = "function Get-DnsClientNrptRule {}\nfunction Remove-DnsClientNrptRule {}\nfunction Clear-DnsClientCache {}\n" +
+        var command = "function Get-DnsClientNrptRule {}\nfunction Remove-DnsClientNrptRule {}\nfunction Clear-DnsClientCache {}\nfunction Get-NetAdapter {}\n" +
             "function Find-NetRoute { throw [InvalidOperationException]::new('synthetic precheck failure') }\n" +
-            $"& {Quote(script)} -RuntimePath 'unused' -ConfigurationPath {Quote(config)} -ServerAddress '192.0.2.1' -OwnerProcessId {Environment.ProcessId}";
+            $"& {Quote(script)} -RuntimePath 'unused' -ConfigurationPath {Quote(config)} -ServerAddress '192.0.2.1' -OwnerProcessId {Environment.ProcessId} -TunnelName 'DiTunnel-test'";
         var info = new ProcessStartInfo
         {
             FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),

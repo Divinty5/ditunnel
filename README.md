@@ -9,11 +9,11 @@ Di-Tunnel — VPN-клиент для **Windows**. Он подключает в�
 ## Установка
 
 1. Откройте страницу [последнего релиза](https://github.com/Divinty5/ditunnel/releases/latest).
-2. Скачайте `Di-Tunnel-0.3.4-Setup-x64.exe` и рядом лежащий файл `.sha256`.
+2. Скачайте `Di-Tunnel-0.3.5-Setup-x64.exe` и рядом лежащий файл `.sha256`.
 3. При желании сверьте SHA-256 установщика:
 
    ```powershell
-   Get-FileHash .\Di-Tunnel-0.3.4-Setup-x64.exe -Algorithm SHA256
+   Get-FileHash .\Di-Tunnel-0.3.5-Setup-x64.exe -Algorithm SHA256
    ```
 
 4. Запустите установщик и подтвердите запрос Windows UAC.

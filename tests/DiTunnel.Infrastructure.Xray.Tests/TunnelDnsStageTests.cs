@@ -8,8 +8,8 @@ public sealed class TunnelDnsStageTests
     [Theory]
     [InlineData("rule", "FAILED_DNS_RULE")]
     [InlineData("cache", "FAILED_DNS_CACHE")]
-    [InlineData("none", "READY_2")]
-    public async Task DnsErrorsAreDistinctFromDelayedRouteSelection(string failure, string expected)
+    [InlineData("none", "READY")]
+    public async Task DnsErrorsAreReportedByTheirOwnStage(string failure, string expected)
     {
         if (!OperatingSystem.IsWindows()) return;
         var root = new DirectoryInfo(AppContext.BaseDirectory);
@@ -19,7 +19,7 @@ public sealed class TunnelDnsStageTests
         var start = source.IndexOf("    if ($SplitTunnelMode -ne 'ProxySelected')", StringComparison.Ordinal);
         var end = source.IndexOf("    Enter-Stage 'PROBE'", start, StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start);
-        // Execute the exact production DNS/route-check block with network cmdlets replaced by in-memory stubs.
+        // Execute the exact production DNS block with network cmdlets replaced by in-memory stubs.
         var setup = " $failure = '" + failure + "'\n" + """
             $ErrorActionPreference = 'Stop'
             $ProgressPreference = 'SilentlyContinue'
@@ -27,7 +27,6 @@ public sealed class TunnelDnsStageTests
             $dnsComment = 'test'
             $SplitTunnelMode = 'BypassSelected'
             $splitIps = @()
-            $calls = 0
             function Enter-Stage($name) { $script:stage = $name }
             function Test-StopRequested { return $false }
             function Add-OwnedRoute { }
@@ -39,13 +38,8 @@ public sealed class TunnelDnsStageTests
                 return [pscustomobject]@{Name='test'}
             }
             function Clear-DnsClientCache { if ($failure -eq 'cache') { throw 'synthetic DNS cache failure' } }
-            function Find-NetRoute {
-                $script:calls++
-                $selected = if ($script:calls -eq 1) { 2 } else { 99 }
-                return @([pscustomobject]@{IPAddress='192.0.2.1'}, [pscustomobject]@{InterfaceIndex=$selected; NextHop='0.0.0.0'})
-            }
             """;
-        var command = setup + "\ntry {\n" + source[start..end] + "\n[Console]::Out.WriteLine('READY_' + $calls)\n} catch { [Console]::Out.WriteLine('FAILED_' + $stage) }";
+        var command = setup + "\ntry {\n" + source[start..end] + "\n[Console]::Out.WriteLine('READY')\n} catch { [Console]::Out.WriteLine('FAILED_' + $stage) }";
         var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"))
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) }) info.ArgumentList.Add(argument);

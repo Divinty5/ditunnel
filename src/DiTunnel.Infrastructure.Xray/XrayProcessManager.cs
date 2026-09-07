@@ -92,10 +92,13 @@ public sealed class XrayProcessManager : IXrayProcessManager
         {
             EnsureNotRunning();
 
-            var validationResult = await ValidateCoreAsync(configurationPath, cancellationToken).ConfigureAwait(false);
-            if (!validationResult.IsValid)
+            if (_options.ValidateConfigurationBeforeStart)
             {
-                throw new XrayConfigurationException(validationResult);
+                var validationResult = await ValidateCoreAsync(configurationPath, cancellationToken).ConfigureAwait(false);
+                if (!validationResult.IsValid)
+                {
+                    throw new XrayConfigurationException(validationResult);
+                }
             }
 
             var fullConfigurationPath = ResolveConfigurationPath(configurationPath);

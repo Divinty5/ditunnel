@@ -18,12 +18,19 @@ public static partial class Diagnostics
         var files = new List<string>();
         var current = Path.Combine(directory, "last-network.log");
         if (File.Exists(current)) files.Add(current);
+        var xray = Path.Combine(directory, "last-xray.log");
+        if (File.Exists(xray)) files.Add(xray);
         var history = Path.Combine(directory, "logs");
         if (Directory.Exists(history)) files.AddRange(Directory.GetFiles(history, "network-*.log").OrderByDescending(File.GetLastWriteTimeUtc).Take(30));
         foreach (var file in files)
         {
             using var input = new StreamReader(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
             using var output = new StreamWriter(zip.CreateEntry(Path.GetFileName(file)).Open());
+            if (Path.GetFileName(file).Equals("last-xray.log", StringComparison.OrdinalIgnoreCase))
+            {
+                for (var count = 0; count < 20 && input.ReadLine() is { } line; count++) output.WriteLine(line);
+                continue;
+            }
             for (var count = 0; count < 10000 && input.ReadLine() is { } line; count++)
                 if (SafeLine().IsMatch(line) && DateTimeOffset.TryParse(line.Split(' ', 2)[0], out _)) output.WriteLine(line);
         }

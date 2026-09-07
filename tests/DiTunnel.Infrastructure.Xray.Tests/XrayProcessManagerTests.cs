@@ -27,6 +27,13 @@ public sealed class XrayProcessManagerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new XrayProcessManager(options));
     }
 
+    [Fact]
+    public void ConfigurationValidationIsEnabledByDefault()
+    {
+        var options = new XrayOptions { ExecutablePath = "xray.exe", WorkingDirectory = "." };
+        Assert.True(options.ValidateConfigurationBeforeStart);
+    }
+
     private static XrayProcessManager CreateManager()
     {
         return new XrayProcessManager(new XrayOptions

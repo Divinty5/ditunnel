@@ -80,3 +80,12 @@ Version 0.3.0 adds desktop settings, tray lifecycle, subscription refresh/limits
 - Di-Tunnel-0.3.4-Setup-x64.exe is built as a self-contained x64 installer with the pinned Xray runtime, Wintun and the network recovery script.
 
 The following remain outside the verified scope: kill-switch behavior, sleep/wake and interface-change recovery, exhaustive IPv6/DNS leak tests, per-process split rules, and multi-domain service definitions such as YouTube.
+
+## Update 0.3.5 — 2026-09-07
+
+- On a corporate Windows workstation, VLESS HTTPUpgrade, VLESS WebSocket, Shadowsocks and Hysteria 2 each established a TUN connection during manual testing. With Hysteria 2 active, `api4.ipify.org`, `ifconfig.me/ip`, Telegram Web and YouTube used the VPN egress address.
+- Other active VPN clients are detected before Di-Tunnel changes TUN addresses or routes. The checked HTTPS probe reaches the configured server before a tunnel is created; it does not by itself prove TUN routing.
+- Error notices can be copied from the main screen. Selecting another subscription profile while connected starts an automatic disconnect and reconnect sequence.
+- The Windows tray icon, dynamic connection status and menu have been restored after a temporary diagnostic isolation test.
+- Known workstation-specific issue: on this corporate device, the desktop process can terminate with Windows event `0xC0000005` in `ntdll.dll` after several consecutive automatic profile switches. The issue persisted after rebooting a pending Kaspersky Endpoint Security update and with the tray disabled. Individual connection attempts remain usable; the root cause could not be established without a permitted native crash dump.
+- Di-Tunnel-0.3.5-Setup-x64.exe is built as a self-contained x64 installer with the pinned Xray runtime, Wintun and the network recovery script.

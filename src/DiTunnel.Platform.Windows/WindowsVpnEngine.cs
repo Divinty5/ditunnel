@@ -46,15 +46,15 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             var splitAddresses = await ResolveSplitAddressesAsync(policy, timeout.Token);
             sessionDirectory = WindowsRuntime.CreateSession();
             var configPath = Path.Combine(sessionDirectory, "config.json");
+            var tunnelName = $"DiTunnel-{Guid.NewGuid():N}"[..17];
             Publish(VpnConnectionState.Connecting, "Проверяем сервер через Xray (до 12 секунд)…");
             delayMilliseconds = await XrayServerProbe.MeasureAsync(configuration, address, runtime, configPath, timeout.Token);
             Publish(VpnConnectionState.Connecting, "Запускаем сетевой модуль Windows…");
-            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy), timeout.Token);
-            await using (var validator = new XrayProcessManager(new XrayOptions { ExecutablePath = runtime, WorkingDirectory = Path.GetDirectoryName(runtime)! }))
-            {
-                var validation = await validator.ValidateConfigurationAsync(configPath, timeout.Token);
-                if (!validation.IsValid) throw new InvalidOperationException("Xray отклонил конфигурацию профиля. Маршруты не изменены.");
-            }
+            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName), timeout.Token);
+            // On Windows, `xray run -test` initializes the TUN inbound and therefore creates a
+            // short-lived Wintun adapter. Starting the real host immediately afterwards can race
+            // that adapter's removal. The SOCKS probe above already validates the profile and
+            // outbound; let the single network host create and own the TUN adapter.
             var start = new ProcessStartInfo
             {
                 FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
@@ -62,7 +62,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 RedirectStandardOutput = true, RedirectStandardError = true
             };
             var splitDomains = policy.Domains.Where(domain => !string.IsNullOrWhiteSpace(domain)).Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => domain.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase);
-            foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-RuntimePath", runtime, "-ConfigurationPath", configPath, "-ServerAddress", address.ToString(), "-OwnerProcessId", Environment.ProcessId.ToString(), "-SplitTunnelMode", policy.Mode.ToString(), "-SplitAddresses", string.Join(',', splitAddresses.Select(ip => ip.ToString())), "-SplitDomains", string.Join(';', splitDomains) }) start.ArgumentList.Add(argument);
+            foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-RuntimePath", runtime, "-ConfigurationPath", configPath, "-ServerAddress", address.ToString(), "-OwnerProcessId", Environment.ProcessId.ToString(), "-TunnelName", tunnelName, "-SplitTunnelMode", policy.Mode.ToString(), "-SplitAddresses", string.Join(',', splitAddresses.Select(ip => ip.ToString())), "-SplitDomains", string.Join(';', splitDomains) }) start.ArgumentList.Add(argument);
             stopping = false;
             cleanupFailed = false;
             host = Process.Start(start) ?? throw new InvalidOperationException("Не удалось запустить сетевой модуль.");
@@ -99,6 +99,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         string? line;
         string? error = null;
         var rollbackConfirmed = false;
+        var probeWarning = false;
         var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiTunnel", "last-network.log");
         try
         {
@@ -112,7 +113,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         catch (UnauthorizedAccessException) { }
         while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|ERROR_[A-Za-z0-9_-]+|CONNECTED|STOPPED|CANCELLED)$"))
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|ERROR_[A-Za-z0-9_-]+|PROBE_WARNING|CONNECTED|STOPPED|CANCELLED)$"))
                 await AppendDiagnosticAsync(logPath, line);
             if (line.StartsWith("STAGE_", StringComparison.Ordinal))
             {
@@ -121,11 +122,9 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                     "STAGE_PRECHECK" => "Проверяем маршруты и настройки Windows…",
                     "STAGE_XRAY" => "Создаём TUN-адаптер (до 20 секунд)…",
                     "STAGE_ADDRESSES" => "Назначаем адреса TUN-адаптеру…",
-                    "STAGE_ADDRESS_READY" => "Ожидаем готовности адреса TUN (до 10 секунд)…",
                     "STAGE_ROUTES" => "Настраиваем маршруты IPv4 и IPv6…",
                     "STAGE_DNS_RULE" => "Создаём правило DNS для туннеля…",
                     "STAGE_DNS_CACHE" => "Обновляем кэш DNS…",
-                    "STAGE_ROUTE_CHECK" => "Ожидаем выбора маршрута через TUN (до 5 секунд)…",
                     "STAGE_PROBE" => "Проверяем интернет через TUN (до 15 секунд)…",
                     "STAGE_CLEANUP" => "Восстанавливаем маршруты и DNS…",
                     _ => "Выполняем сетевую операцию…"
@@ -136,12 +135,30 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 error ??= $"Сбой настройки Windows на этапе {line[12..]}. Маршруты будут восстановлены.";
             if (line.StartsWith("ERROR_COMMAND_", StringComparison.Ordinal)) error += $" Команда: {line[14..]}.";
             if (line.StartsWith("ERROR_NATIVE_", StringComparison.Ordinal)) error += $" Код Windows: {line[13..]}.";
+            if (line.StartsWith("ERROR_ROUTE_CODE_", StringComparison.Ordinal)) error += $" Код route.exe: {line[17..]}.";
+            if (line.StartsWith("ERROR_XRAY_EXIT_", StringComparison.Ordinal)) error = $"Xray-core завершился во время работы туннеля. Код: {line[16..]}.";
+            if (line.StartsWith("ERROR_ROUTE_", StringComparison.Ordinal))
+                error += $" Маршрут: {line[12..] switch { "IPV4_LOW" => "IPv4 0.0.0.0/1", "IPV4_HIGH" => "IPv4 128.0.0.0/1", "IPV6_LOW" => "IPv6 ::/1", "IPV6_HIGH" => "IPv6 8000::/1", _ => "к адресу сервера" }}.";
+            if (line.StartsWith("ERROR_ROUTE_REASON_", StringComparison.Ordinal))
+                error += $" Причина: {line[19..] switch { "DUPLICATE" => "такой маршрут уже существует", "NOT_FOUND" => "Windows не нашла интерфейс или маршрут", "ACCESS_DENIED" => "недостаточно прав для изменения маршрута", "INVALID_PARAMETER" => "Windows отклонила параметры маршрута", _ => "Windows не расшифровала ответ route.exe" }}.";
+            if (line.StartsWith("ERROR_ROUTE_DETAIL_", StringComparison.Ordinal))
+            {
+                try
+                {
+                    var encoded = line[19..].Replace('-', '+').Replace('_', '/');
+                    encoded = encoded.PadRight(encoded.Length + (4 - encoded.Length % 4) % 4, '=');
+                    var detail = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)).Trim();
+                    if (!string.IsNullOrWhiteSpace(detail)) error += $" Ответ route.exe: {detail}.";
+                }
+                catch (FormatException) { }
+            }
             switch (line)
             {
+                case "PROBE_WARNING": probeWarning = true; break;
                 case "STOPPED": rollbackConfirmed = true; break;
-                case "CONNECTED": Publish(VpnConnectionState.Connected, "Туннель активен. HTTPS-запрос через TUN выполнен."); ready.TrySetResult(); break;
+                case "CONNECTED": Publish(VpnConnectionState.Connected, probeWarning ? "Туннель активен. Автоматическая HTTPS-проверка не прошла." : "Туннель активен. HTTPS-запрос через TUN выполнен."); ready.TrySetResult(); break;
                 case "ERROR_DNS_POLICY": error = "Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их."; break;
-                case "ERROR_OTHER_VPN": error = "Сначала отключите другой VPN: маршрут к серверу проходит через виртуальный адаптер."; break;
+                case "ERROR_OTHER_VPN": error = "Сначала отключите другой VPN: он может конфликтовать с TUN-адаптером и маршрутами Di-Tunnel."; break;
                 case "ERROR_NETWORK_CHANGED": error = "Сетевой адаптер отключён. Подключитесь заново после восстановления сети."; break;
                 case "ERROR_CLEANUP": cleanupFailed = true; error = "Не удалось полностью восстановить сеть. Запустите scripts/Repair-DiTunnelNetwork.ps1 от администратора."; break;
                 case "ERROR_TUN": error ??= "Не удалось настроить TUN или проверить соединение с сервером."; break;

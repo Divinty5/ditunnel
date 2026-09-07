@@ -118,6 +118,8 @@ public sealed partial class MainViewModel : ViewModelBase
         _ => "VPN отключён"
     };
     public string PowerText => IsConnecting && ConnectionState != VpnConnectionState.Disconnecting ? "Отменить" : ConnectionState == VpnConnectionState.Connected ? "Отключить" : "Подключить";
+    public string CopyErrorText => "Копировать";
+    public bool HasConnectionError => ConnectionState == VpnConnectionState.Error && !string.IsNullOrWhiteSpace(Notice);
     public string ConnectionHint => ConnectionState == VpnConnectionState.Connected && engine?.Status.DelayMilliseconds is { } delay
         ? $"⌁  {delay:0} мс"
         : engine?.RequiresAdministrator == true
@@ -207,7 +209,7 @@ public sealed partial class MainViewModel : ViewModelBase
             mapLightsFadeCursor = 0;
             mapLightsTimer.Start();
         }
-        OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(PowerBorderBrush)); OnPropertyChanged(nameof(PowerGlowBrush)); OnPropertyChanged(nameof(ConnectionStateBrush)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
+        OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(PowerBorderBrush)); OnPropertyChanged(nameof(PowerGlowBrush)); OnPropertyChanged(nameof(ConnectionStateBrush)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
     }
     private void AdvanceMapLights()
     {
@@ -285,20 +287,39 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag));
         OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
-        if (value is not null && ConnectionState == VpnConnectionState.Connected && value != activeProfile) _ = ReconnectSelectedProfileAsync(value);
+        if (value is not null && value != activeProfile && (ConnectionState == VpnConnectionState.Connected || ConnectionState == VpnConnectionState.Error))
+        {
+            _ = ReconnectSelectedProfileSafelyAsync(value);
+        }
+    }
+
+    private async Task ReconnectSelectedProfileSafelyAsync(ServerItemViewModel target)
+    {
+        try
+        {
+            await ReconnectSelectedProfileAsync(target);
+        }
+        catch
+        {
+            ConnectionState = engine?.Status.State ?? VpnConnectionState.Error;
+            Notice = "Не удалось переключить сервер. VPN отключён; выберите профиль и подключитесь снова.";
+        }
     }
 
     private async Task ReconnectSelectedProfileAsync(ServerItemViewModel target)
     {
-        if (engine is null || IsConnecting || ConnectionState != VpnConnectionState.Connected || target == activeProfile) return;
+        if (engine is null || IsConnecting || (ConnectionState != VpnConnectionState.Connected && ConnectionState != VpnConnectionState.Error) || target == activeProfile) return;
         IsConnecting = true;
-        connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+        var cancellation = connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
         Notice = $"Переключаемся на сервер {target.Name}…";
         try
         {
-            await engine.DisconnectAsync(connectionCancellation.Token);
-            if (SelectedProfile != target || connectionCancellation.IsCancellationRequested) return;
-            await engine.ConnectAsync(target.Profile, connectionCancellation.Token);
+            if (ConnectionState == VpnConnectionState.Connected) await engine.DisconnectAsync(cancellation.Token);
+            if (SelectedProfile != target || cancellation.IsCancellationRequested)
+            {
+                return;
+            }
+            await engine.ConnectAsync(target.Profile, cancellation.Token);
             activeProfile = target;
         }
         catch (OperationCanceledException) { Notice = "Переключение сервера отменено."; }
@@ -308,8 +329,8 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             ConnectionState = engine.Status.State;
             IsConnecting = false;
-            connectionCancellation.Dispose();
-            connectionCancellation = null;
+            cancellation.Dispose();
+            if (ReferenceEquals(connectionCancellation, cancellation)) connectionCancellation = null;
         }
     }
     private void RebuildGroups(string? preferred = null)

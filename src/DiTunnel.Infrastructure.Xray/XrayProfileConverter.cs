@@ -6,7 +6,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public sealed record XrayProfileConfiguration(string ServerHost, JsonObject Outbound)
 {
-    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null)
+    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null)
     {
         var outbound = (JsonObject)Outbound.DeepClone();
         var settings = outbound["settings"]!.AsObject();
@@ -15,7 +15,7 @@ public sealed record XrayProfileConfiguration(string ServerHost, JsonObject Outb
         else settings["servers"]![0]!["address"] = serverAddress;
         splitTunnel ??= SplitTunnelPolicy.Default;
         var inbound = tun
-            ? new JsonObject { ["protocol"] = "tun", ["tag"] = "tun", ["port"] = 0, ["settings"] = new JsonObject { ["name"] = "DiTunnel", ["MTU"] = 1400, ["autoOutboundsInterface"] = "auto" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = new JsonArray("http", "tls", "quic"), ["routeOnly"] = true } }
+            ? new JsonObject { ["protocol"] = "tun", ["tag"] = "tun", ["port"] = 0, ["settings"] = new JsonObject { ["name"] = tunnelName ?? "DiTunnel", ["MTU"] = 1400, ["autoOutboundsInterface"] = "auto" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = new JsonArray("http", "tls", "quic"), ["routeOnly"] = true } }
             : new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = proxyPort, ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = true } };
         var outbounds = new JsonArray();
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(new JsonObject { ["tag"] = "direct", ["protocol"] = "freedom" });
@@ -29,7 +29,7 @@ public sealed record XrayProfileConfiguration(string ServerHost, JsonObject Outb
         if (processes.Length > 0) rules.Add(new JsonObject { ["process"] = new JsonArray(processes), ["outboundTag"] = selectedTag });
         return new JsonObject
         {
-            ["log"] = new JsonObject { ["loglevel"] = "none" },
+            ["log"] = new JsonObject { ["loglevel"] = tun ? "info" : "none" },
             ["inbounds"] = new JsonArray(inbound),
             ["outbounds"] = outbounds,
             ["routing"] = new JsonObject { ["domainStrategy"] = "AsIs", ["rules"] = rules }

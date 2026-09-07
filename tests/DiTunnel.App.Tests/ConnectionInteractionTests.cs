@@ -102,6 +102,16 @@ public sealed class ConnectionInteractionTests
         Assert.Equal(1, probe.Calls);
     }
 
+    [Fact] public void CopyErrorButtonIsVisibleOnlyForConnectionError()
+    {
+        var vm = new MainViewModel(new Engine(), new Store());
+        Assert.False(vm.HasConnectionError);
+        vm.Notice = "Сбой настройки Windows.";
+        vm.ConnectionState = VpnConnectionState.Error;
+        Assert.True(vm.HasConnectionError);
+        Assert.Equal("Копировать", vm.CopyErrorText);
+    }
+
     private sealed class SwitchingEngine : IProfileVpnEngine
     {
         public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
@@ -145,6 +155,19 @@ public sealed class ConnectionInteractionTests
 
         Assert.Equal(["A", "B"], engine.ConnectedProfiles);
         Assert.Equal(1, engine.Disconnects);
+        Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+    }
+
+    [Fact] public async Task SelectingProfileAfterFailedConnectionStartsItImmediately()
+    {
+        var engine = new SwitchingEngine();
+        var vm = new MainViewModel(engine, new TwoProfileStore()) { ConnectionState = VpnConnectionState.Error };
+
+        vm.SelectedProfile = vm.Profiles.Single(profile => profile.Name == "B");
+        await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(2)), WaitForAsync(() => engine.ConnectedProfiles.Count == 1));
+
+        Assert.Equal(["B"], engine.ConnectedProfiles);
+        Assert.Equal(0, engine.Disconnects);
         Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
     }
 

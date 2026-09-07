@@ -49,4 +49,19 @@ public partial class MainView : UserControl
         }
         catch { vm.ImportMessage = "Буфер обмена недоступен. Вставьте текст вручную."; }
     }
+
+    private async void CopyErrorClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || sender is not Button button) return;
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+        try
+        {
+            await clipboard.SetTextAsync(vm.Notice);
+            button.Content = L.T("Скопировано");
+            await Task.Delay(1500);
+            button.Content = L.T(vm.CopyErrorText);
+        }
+        catch { button.Content = L.T("Не удалось скопировать"); }
+    }
 }
