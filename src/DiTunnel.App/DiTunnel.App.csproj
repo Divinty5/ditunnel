@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Translations.json" />
+    <AvaloniaResource Include="Assets\Flags\*.png" />
+    <AvaloniaResource Include="Assets\world-map.svg" />
+    <AvaloniaResource Include="Assets\world-map-lights-*.svg" />
+    <AvaloniaResource Include="Assets\world-map-light-*.svg" />
     <AvaloniaResource Include="..\..\icon.png" Link="Assets\icon.png" />
   </ItemGroup>
 
@@ -12,11 +17,8 @@
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
-    <PackageReference Include="AvaloniaUI.DiagnosticsSupport">
-      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
-      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
-    </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Svg.Controls.Skia.Avalonia" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,8 +1,34 @@
-<Application xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="DiTunnel.App.App"
-             RequestedThemeVariant="Dark">
+<Application xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" x:Class="DiTunnel.App.App" RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="TextBrush">#EEEAF7</SolidColorBrush>
+          <SolidColorBrush x:Key="PageBrush">#100E16</SolidColorBrush>
+          <SolidColorBrush x:Key="CardBrush">#1B1724</SolidColorBrush>
+          <SolidColorBrush x:Key="LineBrush">#322A40</SolidColorBrush>
+          <SolidColorBrush x:Key="MutedBrush">#B7ABC8</SolidColorBrush>
+          <SolidColorBrush x:Key="NoticeBrush">#201A2C</SolidColorBrush>
+          <SolidColorBrush x:Key="AccentTextBrush">#C9B9FF</SolidColorBrush>
+          <SolidColorBrush x:Key="PowerBrush">#292039</SolidColorBrush>
+          <SolidColorBrush x:Key="HoverBrush">#3E3055</SolidColorBrush>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="TextBrush">#241B35</SolidColorBrush>
+          <SolidColorBrush x:Key="PageBrush">#F5F3FA</SolidColorBrush>
+          <SolidColorBrush x:Key="CardBrush">#FFFFFF</SolidColorBrush>
+          <SolidColorBrush x:Key="LineBrush">#DAD1E6</SolidColorBrush>
+          <SolidColorBrush x:Key="MutedBrush">#665477</SolidColorBrush>
+          <SolidColorBrush x:Key="NoticeBrush">#EBE4F6</SolidColorBrush>
+          <SolidColorBrush x:Key="AccentTextBrush">#644096</SolidColorBrush>
+          <SolidColorBrush x:Key="PowerBrush">#E9DFFA</SolidColorBrush>
+          <SolidColorBrush x:Key="HoverBrush">#DCC9F3</SolidColorBrush>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="Window"><Setter Property="Background" Value="{DynamicResource PageBrush}"/></Style>
   </Application.Styles>
 </Application>
