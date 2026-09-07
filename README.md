@@ -1,53 +1,78 @@
 # Di-Tunnel
 
-Di-Tunnel is a cross-platform VPN client built around Xray-core. The first target is Windows; Android and Linux will follow after the Windows connection lifecycle is stable.
-
-The project focuses on explicit control over TUN routing, DNS, reconnection, profiles and diagnostics. VPN protocols and cryptography are provided by Xray-core.
+Di-Tunnel — VPN-клиент для Windows на базе Xray-core и Avalonia. Он импортирует прокси-профили, подключает системный трафик через TUN и сохраняет диагностические данные без секретов.
 
 ![Di-Tunnel icon](icon.png)
 
-## Current status
+## Статус — 0.3.4
 
-The project is in the planning and network-prototyping stage. The first milestone is a Windows client that connects to one Hysteria 2 server, routes system traffic through TUN and reliably restores the original network state on disconnect or failure.
+Windows-версия готова к ручной проверке на другом компьютере. В неё входят самостоятельный установщик, TUN-подключение, подписки и профили, проверка задержки, системный трей, адаптивный интерфейс и раздельное туннелирование.
 
-- [Product idea](Di-Tunnel_idea.md)
-- [Development plan](docs/development-plan.md)
+- [Идея продукта](Di-Tunnel_idea.md)
+- [План разработки](docs/development-plan.md)
+- [Проверка Windows TUN](docs/windows-tun-validation.md)
+- [Решение о runtime Xray](docs/adr/0001-xray-runtime.md)
 
-## Planned technology
+В репозитории нельзя хранить реальные адреса серверов, ключи, подписки, пароли и сгенерированные конфигурации.
 
-- C# and .NET 10
-- Avalonia UI
-- Xray-core
-- Visual Studio 2026 as the primary development environment
+## Установка на Windows
 
-No real server addresses, credentials, subscription URLs, signing keys or generated runtime configurations may be committed. Example configuration must use fictitious values.
+Скачайте Di-Tunnel-0.3.4-Setup-x64.exe и файл .sha256 из релиза, сверьте контрольную сумму и запустите установщик. Пакет содержит .NET Runtime, Xray-core и Wintun, поэтому SDK не требуется.
 
-## Development
+Требуется Windows 10 версии 2004 или новее и подтверждение UAC. Запускайте приложение через меню «Пуск» или ярлык. Текущая реализация TUN также запрашивает права администратора при старте.
 
-Requirements:
+Перед удалением выйдите из приложения через трей. Профили и настройки в %LOCALAPPDATA%\DiTunnel остаются на компьютере и будут доступны после повторной установки. Установщик пока не подписан кодовой подписью, поэтому Windows может показать предупреждение об издателе.
 
-- Visual Studio 2026 with the .NET desktop development workload, or .NET SDK 10.0.302+
+## Профили и подключение
 
-Open `DiTunnel.sln` in Visual Studio and set `DiTunnel.Desktop` as the startup project, or run from a terminal:
+Поддерживаются HTTPS- и Base64-подписки, а также ссылки VLESS, VMess, Trojan, Shadowsocks SIP002, Hysteria 2 и Xray JSON. Профили текущего пользователя хранятся в %LOCALAPPDATA%\DiTunnel\profiles.dat и шифруются Windows DPAPI.
 
-```powershell
-dotnet restore
-dotnet build
-dotnet run --project src/DiTunnel.Desktop
-```
+Подписки и вручную добавленные записи объединяются в группы. Список серверов использует адаптивные плитки: их количество в строке зависит от ширины окна. После проверки успешные серверы сортируются по задержке, непроверенные — по алфавиту, а тайм-ауты помещаются в конец списка.
 
-The current application is a UI scaffold. Its Connect button remains disabled until the Xray lifecycle is implemented.
+При выборе другого сервера во время активного VPN приложение автоматически переподключается. Галочка Lowest сразу запускает проверку и выбирает доступный сервер с минимальной задержкой. То же происходит после «Проверить все», если Lowest включён.
 
-### Xray-core runtime
+Проверка сервера выполняет новый HTTPS-запрос через локальный Xray SOCKS. Это измерение полного времени проксирования, а не ICMP ping.
 
-Install the pinned Windows x64 runtime into the ignored `.tools` directory:
+## Раздельное туннелирование
 
-```powershell
-.\scripts\Install-Xray.ps1
-```
+В настройках доступны три режима:
 
-The script downloads the official release archive and verifies its SHA-256 before extraction. The pinned version and digest are stored in `eng/xray-version.json`; runtime binaries are never committed.
+- «Всё через VPN» — обычный режим.
+- «Обход выбранных» — указанные домены идут вне VPN.
+- «Только выбранные через VPN» — только указанные домены идут через VPN.
 
-## License
+Вводите по одному домену в строке. Допускаются URL и пути: ifconfig.me/ip автоматически преобразуется в ifconfig.me. Правила сохраняются при выходе из настроек.
 
-No license has been selected yet. The source is publicly visible, but no reuse rights are granted until a license is added.
+Во время активного подключения приложение разрешает указанные домены и примерно раз в 45 секунд обновляет принадлежащие ему IPv4/IPv6-маршруты. Это позволяет доменам менять адреса без переподключения VPN. Правило действует только на указанный хост; для YouTube и других крупных сервисов нужны все используемые домены и CDN. Правила приложений сохраняются в настройках, но пока не применяются сетевым host Windows.
+
+IPv6-адрес в режиме обхода выбранных нормален: это означает, что провайдер и сайт выбрали обычный IPv6-маршрут вместо VPN.
+
+## Диагностика и поведение окна
+
+- Русский — язык по умолчанию; переключение языка применяется сразу.
+- Тема может следовать за системой или быть фиксированной.
+- При закрытии можно спросить, скрыть окно в трей или завершить приложение. Скрытие сохраняет VPN, завершение отключает его.
+- Положение и размер окна сохраняются.
+- Настройки экспортируют обезличенные сетевые журналы в ZIP без подписок, ключей и runtime-конфигураций.
+- «Проверить обновления» открывает более свежий стабильный релиз GitHub; загрузка и установка остаются ручными.
+- Флаги серверов определяются локально по базе Xray GeoIP; геолокация приблизительна.
+
+При сообщении о незавершённой очистке дождитесь завершения сетевого host и запустите от администратора scripts\Repair-DiTunnelNetwork.ps1. Скрипт удаляет только устаревшее состояние Di-Tunnel и отказывается работать при активном туннеле.
+
+## Разработка
+
+Нужны Visual Studio 2026 с workload .NET desktop или .NET SDK 10.0.302+ и Windows 10 версии 2004 или новее для TUN-проверки.
+
+    dotnet restore
+    dotnet build
+    .\scripts\Start-DiTunnel.ps1
+
+Для сборки установщика установите Inno Setup 6 или 7, затем выполните:
+
+    .\scripts\Build-WindowsInstaller.ps1
+
+Результат: artifacts\installer\Di-Tunnel-0.3.4-Setup-x64.exe и файл SHA-256. Скрипт получает закреплённый Xray, проверяет его SHA-256, публикует самодостаточное win-x64-приложение, проверяет обязательные файлы и собирает установщик. В GitHub Releases он ничего не публикует.
+
+## Лицензия
+
+Лицензия проекта пока не выбрана. Xray-core распространяется по MPL-2.0; перед публичным выпуском нужно добавить требуемые этой лицензией уведомления и предложения исходного кода.
