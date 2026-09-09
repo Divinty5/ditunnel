@@ -37,6 +37,7 @@ diagnostics/
 *.har
 
 # Local VPN configuration and secrets
+AGENTS.md
 config.json
 config.local.json
 appsettings.Local.json

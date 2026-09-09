@@ -4,7 +4,7 @@
 
 Di-Tunnel is a client application that controls Xray-core, a TUN interface, DNS and operating-system routes. This policy covers the application, platform integrations, configuration import, update and packaging code, build scripts, and release artifacts in this repository.
 
-During the planning phase there are no supported releases. A supported-version table and response targets will be added before the first release.
+Security fixes are provided for the latest published `0.3.x` release. Older pre-release builds should be upgraded before reporting a problem that is already corrected in the current release.
 
 ## Threat model and trust boundaries
 
@@ -52,7 +52,13 @@ Dependency reports are actionable when they affect a reachable Di-Tunnel code pa
 
 ## Known limitations
 
-The project is pre-release. Xray process management exists, while TUN routing, privileged service isolation, secret storage, log redaction, update delivery and kill-switch guarantees are not yet implemented. Their absence must not be described as a working security control.
+- The Windows UI currently runs elevated; privilege separation into a dedicated authenticated service is not complete.
+- The installer is not code-signed and application updates are not installed automatically. Users must obtain releases from this repository and may verify the published SHA-256 checksum.
+- Split tunnelling by process is not implemented.
+- VMess and arbitrary Xray JSON may be stored but are not executed as VPN connections.
+- The tested kill-switch and DNS guarantees apply to the documented Windows 11 VM scenarios and cannot compensate for a compromised operating system or VPN server.
+
+Profiles are encrypted at rest with Windows DPAPI for the current user. Network diagnostics use an allowlist and do not persist raw Xray stderr, credentials or subscription URLs. TUN routing, IPv4/IPv6 WFP filtering, DNS routing and owned-state cleanup are implemented and covered by automated and VM tests.
 
 ## Reporting a vulnerability
 
