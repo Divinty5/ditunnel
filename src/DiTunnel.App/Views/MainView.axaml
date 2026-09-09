@@ -11,6 +11,12 @@
     <Style Selector="Button.primary"><Setter Property="Background" Value="#A58AFF"/><Setter Property="Foreground" Value="#181125"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
     <Style Selector="Button.power"><Setter Property="Width" Value="140"/><Setter Property="Height" Value="140"/><Setter Property="CornerRadius" Value="70"/><Setter Property="BorderBrush" Value="#A58AFF"/><Setter Property="BorderThickness" Value="2"/></Style>
     <Style Selector="Button.power:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource HoverBrush}"/></Style>
+    <Style Selector="Button.power:pressed /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource PressedBrush}"/></Style>
+    <Style Selector="Button.icon"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
+    <Style Selector="Button.icon /template/ ContentPresenter"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
+    <Style Selector="Button.icon:disabled /template/ ContentPresenter"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
+    <Style Selector="Button.icon:pressed /template/ ContentPresenter"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
   </UserControl.Styles>
   <Grid Background="{DynamicResource PageBrush}">
     <svg:Svg x:Name="BackgroundMap" Path="/Assets/world-map.svg" Stretch="UniformToFill" Opacity="0.12" IsHitTestVisible="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" EnableCache="True"/>
@@ -34,47 +40,46 @@
     <svg:Svg IsHitTestVisible="False" IsVisible="{Binding MapLightsVisible}" Path="/Assets/world-map-light-18.svg" Stretch="UniformToFill" Opacity="{Binding MapLights[17].Opacity}"/>
     <svg:Svg IsHitTestVisible="False" IsVisible="{Binding MapLightsVisible}" Path="/Assets/world-map-light-19.svg" Stretch="UniformToFill" Opacity="{Binding MapLights[18].Opacity}"/>
     <svg:Svg IsHitTestVisible="False" IsVisible="{Binding MapLightsVisible}" Path="/Assets/world-map-light-20.svg" Stretch="UniformToFill" Opacity="{Binding MapLights[19].Opacity}"/>
-    <Grid ColumnDefinitions="*,Auto,Auto" Margin="24,16,24,0" VerticalAlignment="Top" IsEnabled="{Binding !IsImportOpen}">
+    <Grid ColumnDefinitions="*,Auto,Auto" Margin="12,12,12,0" VerticalAlignment="Top" IsEnabled="{Binding !IsImportOpen}">
           <StackPanel Orientation="Horizontal" Spacing="12">
             <Image Source="/Assets/icon.png" Width="44" Height="44"/>
-            <StackPanel VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="Di-Tunnel" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="{Binding AppVersion}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/></StackPanel><TextBlock Text="{DynamicResource TextBD1C3C5CF4A2}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
+            <StackPanel VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="Di-Tunnel" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="{Binding AppVersion}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/></StackPanel><TextBlock Text="{Binding Tagline, Converter={StaticResource Translate}}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
           </StackPanel>
-          <Button Grid.Column="1" Content="⚙" FontSize="22" Padding="12,8" Click="SettingsClick" VerticalAlignment="Center" Margin="0,0,8,0"/>
-          <Button Grid.Column="2" Content="＋" FontSize="24" Padding="12,8" Click="AddClick" VerticalAlignment="Center"/>
+          <Button Classes="icon" Grid.Column="1" Width="44" Height="44" Padding="8" Foreground="{DynamicResource AccentTextBrush}" Click="SettingsClick" VerticalAlignment="Center" Margin="0,0,4,0" ToolTip.Tip="Настройки"><Path Data="M3,6 L21,6 M3,12 L21,12 M3,18 L21,18 M8,3 L8,9 M16,9 L16,15 M10,15 L10,21" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="2.2" StrokeLineCap="Round"/></Button>
+          <Button Classes="icon" Grid.Column="2" Width="44" Height="44" Padding="8" Foreground="{DynamicResource AccentTextBrush}" Click="AddClick" VerticalAlignment="Center" ToolTip.Tip="Добавить профиль"><TextBlock Text="+" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Button>
     </Grid>
-    <Grid x:Name="ContentGrid" Margin="24,82,24,16" RowDefinitions="Auto,*,Auto" MaxWidth="840" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsImportOpen}">
-        <Button Click="SubscriptionsClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="16,10" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
-          <Grid ColumnDefinitions="Auto,*,Auto"><Grid Width="42" Height="32" Margin="0,0,12,0" VerticalAlignment="Center"><Image Source="{Binding SelectedFlag}" IsVisible="{Binding HasSelectedFlag}" Stretch="Uniform"/><TextBlock Text="🌐" IsVisible="{Binding !HasSelectedFlag}" FontSize="28" HorizontalAlignment="Center"/></Grid><StackPanel Grid.Column="1" Spacing="5"><TextBlock Text="{DynamicResource TextBD79B40A8543}" FontSize="10" Foreground="{DynamicResource MutedBrush}" LetterSpacing="1.5"/><TextBlock Text="{Binding SelectedName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding SelectedSummary, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding SubscriptionLimits, Converter={StaticResource Translate}}" FontSize="12"/></StackPanel><Button Grid.Column="2" Click="RefreshProfileClick" Content="↻" FontSize="28" Padding="12,2" VerticalAlignment="Center" IsEnabled="{Binding CanImport}"/></Grid>
+    <Grid x:Name="ContentGrid" Margin="12,72,12,10" RowDefinitions="Auto,*,Auto" MaxWidth="840" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsImportOpen}">
+        <Button Click="SubscriptionsClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" MaxWidth="720" Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="14,8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
+          <Grid ColumnDefinitions="Auto,*"><Grid Width="54" Height="40" Margin="0,0,12,0" VerticalAlignment="Center"><Image Source="{Binding SelectedFlag}" IsVisible="{Binding HasSelectedFlag}" Stretch="Uniform"/><TextBlock Text="🌐" IsVisible="{Binding !HasSelectedFlag}" FontSize="32" HorizontalAlignment="Center"/></Grid><StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding SelectedSummary, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding SubscriptionLimits, Converter={StaticResource Translate}}" FontSize="12"/></StackPanel></Grid>
         </Button>
-        <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Margin="0,16">
-          <Grid Width="214" Height="214"><Border Width="166" Height="166" CornerRadius="83" Background="{Binding PowerGlowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"><Border.Effect><BlurEffect Radius="26"/></Border.Effect></Border><Button Classes="power" Background="{Binding PowerBrush}" BorderBrush="{Binding PowerBorderBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" AutomationProperties.Name="{Binding PowerText, Converter={StaticResource Translate}}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+        <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4" Margin="0,6">
+          <Grid Width="178" Height="178"><Border Width="166" Height="166" CornerRadius="83" Background="{Binding PowerGlowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"><Border.Effect><BlurEffect Radius="26"/></Border.Effect></Border><Button Classes="power" Background="{DynamicResource PowerBrush}" BorderBrush="{Binding PowerBorderBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" AutomationProperties.Name="{Binding PowerText, Converter={StaticResource Translate}}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
             <StackPanel Spacing="6"><Path Data="M11,3 L13,3 L13,13 L11,13 Z M7.76,5.76 C4.13,8.1 3.08,12.94 5.42,16.58 C7.76,20.21 12.6,21.26 16.24,18.92 C19.87,16.58 20.92,11.74 18.58,8.1 C17.98,7.17 17.18,6.39 16.24,5.79 L15.16,7.47 C17.66,9.08 18.38,12.41 16.77,14.9 C15.16,17.4 11.83,18.12 9.34,16.51 C6.84,14.9 6.12,11.57 7.73,9.08 C8.15,8.43 8.7,7.88 9.35,7.47 Z" Width="52" Height="52" Stretch="Uniform" Fill="{Binding ConnectionStateBrush}" HorizontalAlignment="Center"/><TextBlock Text="{Binding PowerText, Converter={StaticResource Translate}}" FontSize="14" HorizontalAlignment="Center" Foreground="{Binding ConnectionStateBrush}"/></StackPanel>
           </Button></Grid>
-          <TextBlock Text="{Binding StatusText, Converter={StaticResource Translate}}" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{Binding ConnectionStateBrush}"/>
+          <TextBlock Text="{Binding StatusText, Converter={StaticResource Translate}}" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{Binding ConnectionStateBrush}"/>
           <TextBlock Text="{Binding ConnectionHint, Converter={StaticResource Translate}}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="340" Foreground="{Binding ConnectionHintBrush}" FontSize="12" HorizontalAlignment="Center"/>
+          <TextBlock Text="{Binding KillSwitchText, Converter={StaticResource Translate}}" IsVisible="{Binding IsKillSwitchEnabled}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" Foreground="{DynamicResource AccentTextBrush}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
         </StackPanel>
         <Grid Grid.Row="2" ColumnDefinitions="Auto,*">
-          <Button IsVisible="{Binding HasConnectionError}" Content="{Binding CopyErrorText, Converter={StaticResource Translate}}" Click="CopyErrorClick" Margin="0,0,8,0" Padding="14,11,14,9" VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-          <Border Grid.Column="1" Background="{DynamicResource NoticeBrush}" CornerRadius="12" Padding="16,12"><TextBlock Text="{Binding Notice, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12"/></Border>
+          <Button IsVisible="{Binding HasConnectionError}" Content="{Binding CopyErrorText}" ToolTip.Tip="Копировать" Click="CopyErrorClick" Margin="0,0,8,0" Padding="12,8" FontSize="20" VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+          <Border Grid.Column="1" Background="{DynamicResource NoticeBrush}" CornerRadius="12" Padding="14,10"><TextBlock Text="{Binding Notice, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12"/></Border>
         </Grid>
     </Grid>
     <Border Background="#D9000000" IsVisible="{Binding IsImportOpen}">
-      <ScrollViewer VerticalAlignment="Center">
-        <Border Margin="16" MaxWidth="560" Padding="24" Background="{DynamicResource CardBrush}" CornerRadius="22" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" HorizontalAlignment="Stretch">
-          <StackPanel Spacing="16">
-            <TextBlock Text="{DynamicResource Text56E1BA97A28C}" FontSize="24" FontWeight="SemiBold"/>
+        <Border Margin="12" MaxWidth="520" Padding="16,12" Background="{DynamicResource CardBrush}" CornerRadius="20" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+          <StackPanel Spacing="8">
+            <TextBlock Text="{DynamicResource Text56E1BA97A28C}" FontSize="20" FontWeight="SemiBold"/>
             <TextBlock Text="{DynamicResource Text5D615B281B3A}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
             <Button Content="{DynamicResource TextEA16C39AEC08}" Click="PasteClick" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
             <TextBox Text="{Binding ImportName}" PlaceholderText="{DynamicResource Text1823C14B2604}" MaxLength="100" IsEnabled="{Binding CanImport}" />
-            <TextBox Text="{Binding ImportText}" PlaceholderText="{DynamicResource TextD058CCC6DADB}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="140" MaxHeight="220" IsEnabled="{Binding CanImport}" AutomationProperties.Name="{DynamicResource Text6BF8A742A026}"/>
-            <TextBlock Text="VLESS · VMess · Trojan · Shadowsocks · Hysteria 2" FontSize="11" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-            <TextBlock Text="{Binding ImportMessage, Converter={StaticResource Translate}}" TextWrapping="Wrap" Foreground="{DynamicResource AccentTextBrush}"/>
+            <TextBox Text="{Binding ImportText}" PlaceholderText="{DynamicResource TextD058CCC6DADB}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="82" MaxHeight="105" IsEnabled="{Binding CanImport}" AutomationProperties.Name="{DynamicResource Text6BF8A742A026}"/>
+            <TextBlock Text="VLESS · Trojan · Shadowsocks · Hysteria 2" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding ImportMessage, Converter={StaticResource Translate}}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource AccentTextBrush}"/>
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="3"/>
             <Grid ColumnDefinitions="*,*"><Button Content="{DynamicResource Text8FBE9B75CBDF}" Command="{Binding CloseImportCommand}" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,0,6,0"/><Button Grid.Column="1" Classes="primary" Content="{DynamicResource Text848ED368817D}" Command="{Binding ImportCommand}" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="6,0,0,0"/></Grid>
-            <TextBlock Text="{DynamicResource Text03910390F71E}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+            <TextBlock Text="{DynamicResource Text03910390F71E}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
           </StackPanel>
         </Border>
-      </ScrollViewer>
     </Border>
     <Border IsVisible="{Binding IsRefreshToastVisible}" Background="#D92EBE39" CornerRadius="12" Padding="18,12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,16,16,28">
       <TextBlock Text="{Binding RefreshToast, Converter={StaticResource Translate}}" FontWeight="SemiBold"/>

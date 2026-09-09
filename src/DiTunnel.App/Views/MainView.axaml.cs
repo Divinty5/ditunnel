@@ -20,7 +20,8 @@ public partial class MainView : UserControl
 
     private async void SettingsClick(object? sender, RoutedEventArgs e)
     {
-        if (TopLevel.GetTopLevel(this) is Window owner) await Dialogs.Settings(owner);
+        if (TopLevel.GetTopLevel(this) is Window owner && DataContext is MainViewModel vm)
+            await Dialogs.Settings(owner, vm.ApplyNetworkSettingsAsync);
     }
     private async void SubscriptionsClick(object? sender, RoutedEventArgs e)
     {
@@ -30,11 +31,6 @@ public partial class MainView : UserControl
     private void AddClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel vm) vm.OpenImportCommand.Execute(null);
-    }
-
-    private async void RefreshProfileClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel vm) await vm.RefreshSubscriptionsAsync();
     }
 
     private async void PasteClick(object? sender, RoutedEventArgs e)
@@ -58,10 +54,10 @@ public partial class MainView : UserControl
         try
         {
             await clipboard.SetTextAsync(vm.Notice);
-            button.Content = L.T("Скопировано");
+            button.Content = "✓";
             await Task.Delay(1500);
-            button.Content = L.T(vm.CopyErrorText);
+            button.Content = vm.CopyErrorText;
         }
-        catch { button.Content = L.T("Не удалось скопировать"); }
+        catch { button.Content = "!"; }
     }
 }

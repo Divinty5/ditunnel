@@ -1,10 +1,12 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using DiTunnel.Core.Connection;
 using DiTunnel.App.Controls;
 using DiTunnel.App.ViewModels;
@@ -19,12 +21,45 @@ public static class Dialogs
         button.Click += (_, _) => action();
         return button;
     }
+    private static Button AsyncButton(string text, Func<Task> action)
+    {
+        var button = new Button { Content = L.T(text), Padding = new Thickness(16, 10), CornerRadius = new CornerRadius(10) };
+        button.Click += async (_, _) =>
+        {
+            button.IsEnabled = false;
+            try { await action(); }
+            finally { button.IsEnabled = true; }
+        };
+        return button;
+    }
     private static TextBlock Label(string text) => new() { Text = L.T(text), TextWrapping = TextWrapping.Wrap };
     private static ScrollViewer Scroll(Control content)
     {
-        var scroll = new ScrollViewer { Content = content };
+        var scroll = new ScrollViewer { Content = content, HorizontalContentAlignment = HorizontalAlignment.Stretch };
         scroll.Bind(ScrollViewer.BackgroundProperty, scroll.GetResourceObservable("PageBrush"));
         return scroll;
+    }
+    private static Control Page(string title, Button back, Control content)
+    {
+        var heading = new TextBlock
+        {
+            Text = L.T(title), FontSize = 24, FontWeight = FontWeight.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(16, 0)
+        };
+        heading.Bind(TextBlock.ForegroundProperty, heading.GetResourceObservable("AccentTextBrush"));
+        var headerGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        headerGrid.Children.Add(back); headerGrid.Children.Add(heading); Grid.SetColumn(heading, 1);
+        var header = new Border { Padding = new Thickness(16, 9), Child = headerGrid };
+        header.Bind(Border.BackgroundProperty, header.GetResourceObservable("PageBrush"));
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        void UpdateCompactTitle() => heading.Text = title == "Подписки и профили" && root.Bounds.Width < 560
+            ? L.T("Подписки") : L.T(title);
+        root.SizeChanged += (_, _) => UpdateCompactTitle();
+        root.Bind(Grid.BackgroundProperty, root.GetResourceObservable("PageBrush"));
+        root.Children.Add(header);
+        var scroll = Scroll(content); root.Children.Add(scroll); Grid.SetRow(scroll, 1);
+        return root;
     }
     private static Window Window(Window owner, string title, double height = 560) => new()
     {
@@ -33,16 +68,25 @@ public static class Dialogs
         Icon = owner.Icon
     };
 
-    public static async Task Settings(Window owner)
+    public static async Task Settings(Window owner, Func<Task>? applyNetworkSettings = null)
     {
         var originalContent = owner.Content;
+        var originalNetworkSettings = NetworkSettingsFingerprint();
+        var networkSettingsChangedExplicitly = false;
         void Build()
         {
             owner.Title = $"Di-Tunnel · {L.T("Настройки")}";
-            var panel = new StackPanel { Margin = new Thickness(24), Spacing = 16, MaxWidth = 720, HorizontalAlignment = HorizontalAlignment.Left };
+            var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Center };
             Action? saveSplitRules = null;
-            panel.Children.Add(Button("← Назад", () => { saveSplitRules?.Invoke(); owner.Content = originalContent; owner.Title = "Di-Tunnel"; }));
-            panel.Children.Add(new TextBlock { Text = L.T("Настройки"), FontSize = 24 });
+            var back = AsyncButton("← Назад", async () =>
+            {
+                saveSplitRules?.Invoke();
+                var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != NetworkSettingsFingerprint();
+                owner.Content = originalContent;
+                owner.Title = "Di-Tunnel";
+                if (networkSettingsChanged && applyNetworkSettings is not null)
+                    await applyNetworkSettings();
+            });
             var status = Label("");
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
             panel.Children.Add(Button("Язык: Русский → English", () =>
@@ -57,21 +101,46 @@ public static class Dialogs
             var close = new ComboBox { ItemsSource = new[] { L.T("Спрашивать каждый раз"), L.T("Скрыть в трей"), L.T("Выйти") }, HorizontalAlignment = HorizontalAlignment.Stretch,
                 SelectedIndex = Array.IndexOf(new[] { "ask", "hide", "exit" }, UserSettings.Current.CloseAction) };
             close.SelectionChanged += (_, _) => { if (close.SelectedIndex < 0) return; UserSettings.Current.CloseAction = new[] { "ask", "hide", "exit" }[close.SelectedIndex]; Save(); };
-            var appearance = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 12 };
-            var themeField = new StackPanel { Spacing = 6 }; themeField.Children.Add(Label("Тема")); themeField.Children.Add(theme);
-            var closeField = new StackPanel { Spacing = 6 }; closeField.Children.Add(Label("Действие при закрытии")); closeField.Children.Add(close);
-            appearance.Children.Add(themeField); appearance.Children.Add(closeField); Grid.SetColumn(closeField, 1); panel.Children.Add(appearance);
+            var appearance = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), RowDefinitions = new RowDefinitions("Auto,Auto"), ColumnSpacing = 12, RowSpacing = 6 };
+            var themeLabel = Label("Тема");
+            var closeLabel = Label("Действие при закрытии");
+            appearance.Children.Add(themeLabel);
+            appearance.Children.Add(closeLabel); Grid.SetColumn(closeLabel, 1);
+            appearance.Children.Add(theme); Grid.SetRow(theme, 1);
+            appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1);
+            panel.Children.Add(appearance);
+            panel.Children.Add(Label("Защита соединения"));
+            var killSwitch = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled };
+            var allowLan = new CheckBox { Content = L.T("Разрешать локальную сеть при активном kill switch"), IsChecked = UserSettings.Current.AllowLocalNetwork, IsEnabled = UserSettings.Current.KillSwitchEnabled };
+            void SaveProtection()
+            {
+                networkSettingsChangedExplicitly = true;
+                UserSettings.Current.KillSwitchEnabled = killSwitch.IsChecked == true;
+                UserSettings.Current.AllowLocalNetwork = allowLan.IsChecked == true;
+                allowLan.IsEnabled = UserSettings.Current.KillSwitchEnabled;
+                Save();
+                (owner.DataContext as MainViewModel)?.RefreshConnectionPolicy();
+            }
+            killSwitch.IsCheckedChanged += (_, _) => SaveProtection();
+            allowLan.IsCheckedChanged += (_, _) => SaveProtection();
+            panel.Children.Add(killSwitch);
+            panel.Children.Add(allowLan);
+            panel.Children.Add(Label("Сетевые изменения применяются автоматически при возврате на главный экран. Kill switch использует отдельные правила Windows Filtering Platform."));
             panel.Children.Add(Label("Раздельное туннелирование"));
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = (int)UserSettings.Current.SplitTunnelMode };
-            var domains = new TextBox { Text = string.Join(Environment.NewLine, UserSettings.Current.SplitTunnelDomains), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены, по одному в строке") };
-            var processes = new TextBox { Text = string.Join(Environment.NewLine, UserSettings.Current.SplitTunnelProcesses), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Приложения: имя процесса или путь к .exe, по одному в строке") };
-            panel.Children.Add(splitMode); panel.Children.Add(domains); panel.Children.Add(processes);
+            var domains = new TextBox { Text = string.Join(Environment.NewLine, UserSettings.Current.SplitTunnelDomains), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
+            var splitRules = new StackPanel { Spacing = 12 };
+            splitRules.Children.Add(domains);
+            void UpdateSplitRulesVisibility() => splitRules.IsVisible = splitMode.SelectedIndex != (int)SplitTunnelMode.ProxyAll;
+            splitMode.SelectionChanged += (_, _) => UpdateSplitRulesVisibility();
+            UpdateSplitRulesVisibility();
+            panel.Children.Add(splitMode); panel.Children.Add(splitRules);
             saveSplitRules = () =>
             {
                 UserSettings.Current.SplitTunnelMode = (DiTunnel.Core.Connection.SplitTunnelMode)Math.Max(0, splitMode.SelectedIndex);
                 UserSettings.Current.SplitTunnelDomains = domains.Text?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => !string.IsNullOrWhiteSpace(domain)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
-                UserSettings.Current.SplitTunnelProcesses = processes.Text?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+                UserSettings.Current.SplitTunnelProcesses = [];
                 try { UserSettings.Current.Save(); status.Text = L.T("Правила будут применены при следующем подключении VPN."); } catch { status.Text = L.T("Не удалось сохранить настройки."); }
             };
             var serviceActions = new WrapPanel();
@@ -108,14 +177,30 @@ public static class Dialogs
                     panel.Children.Add(open);
                 }
             });
+            updates.Margin = new Thickness(0, 0, 8, 6);
             serviceActions.Children.Add(updates);
             panel.Children.Add(serviceActions);
-            panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             panel.Children.Add(status);
-            owner.Content = Scroll(panel);
+            panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
+            owner.Content = Page("Настройки", back, panel);
         }
         Build();
         await Task.CompletedTask;
+    }
+
+    private static string NetworkSettingsFingerprint()
+    {
+        static string Canonical(IEnumerable<string> values) => string.Join('\n', values
+            .Select(value => value.Trim().ToLowerInvariant())
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal));
+
+        var settings = UserSettings.Current;
+        return settings.SplitTunnelMode == SplitTunnelMode.ProxyAll
+            ? string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, (int)settings.SplitTunnelMode)
+            : string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork,
+                (int)settings.SplitTunnelMode, Canonical(settings.SplitTunnelDomains));
     }
 
     public static async Task<string?> AskClose(Window owner)
@@ -134,21 +219,20 @@ public static class Dialogs
     {
         var originalContent = owner.Content;
         owner.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
-        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14 };
-        panel.Children.Add(Button("← Назад", () => { owner.Content = originalContent; owner.Title = "Di-Tunnel"; }));
-        panel.Children.Add(new TextBlock { Text = L.T("Подписки и профили"), FontSize = 24 });
-        var groups = new ComboBox { Width = 360, HorizontalAlignment = HorizontalAlignment.Left };
+        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Center };
+        var back = Button("← Назад", () => { owner.Content = originalContent; owner.Title = "Di-Tunnel"; });
+        var groups = new ComboBox { MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Stretch };
         groups.Bind(ItemsControl.ItemsSourceProperty, new Binding("Groups"));
         groups.Bind(ComboBox.SelectedItemProperty, new Binding("SelectedGroup") { Mode = BindingMode.TwoWay });
         groups.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
         panel.Children.Add(groups);
         var list = new ListBox
         {
-            MinHeight = 180, MaxHeight = 480, Background = Brushes.Transparent,
-            ItemsPanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel()),
+            MinHeight = 140, MaxHeight = 420, Background = Brushes.Transparent,
+            ItemsPanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel { MinimumTileWidth = 200, MaximumTileWidth = 360, TileSpacing = 6 }),
             ItemTemplate = new FuncDataTemplate<ServerItemViewModel>((row, _) =>
             {
-                var flag = new Image { Width = 34, Height = 26, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
+                var flag = new Image { Width = 30, Height = 22, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
                 flag.Bind(Image.SourceProperty, new Binding(nameof(ServerItemViewModel.FlagImage)));
                 flag.Bind(Visual.IsVisibleProperty, new Binding(nameof(ServerItemViewModel.HasFlag)));
                 var globe = new TextBlock { Text = "🌐", FontSize = 23, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
@@ -157,16 +241,26 @@ public static class Dialogs
                 name.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Name)));
                 var summary = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.CharacterEllipsis };
                 summary.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Protocol)) { Converter = new TranslationConverter() });
-                var latency = new TextBlock { FontSize = 11, Foreground = Brushes.MediumPurple, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 155 };
+                var latency = new TextBlock { FontSize = 11, Foreground = Brushes.MediumPurple, TextTrimming = TextTrimming.CharacterEllipsis };
                 latency.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.ProbeText)) { Converter = new TranslationConverter() });
-                var details = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
-                details.Children.Add(name); details.Children.Add(summary); Grid.SetRow(summary, 1);
-                var rowPanel = new Grid { MinHeight = 58, Margin = new Thickness(10, 7), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-                rowPanel.Children.Add(flag); rowPanel.Children.Add(globe); rowPanel.Children.Add(details); rowPanel.Children.Add(latency);
-                Grid.SetColumn(details, 1); Grid.SetColumn(latency, 2);
+                var details = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto"), MinWidth = 130 };
+                details.Children.Add(name); details.Children.Add(summary); details.Children.Add(latency);
+                Grid.SetRow(summary, 1); Grid.SetRow(latency, 2);
+                var rowPanel = new Grid { MinHeight = 56, Margin = new Thickness(8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+                rowPanel.Children.Add(flag); rowPanel.Children.Add(globe); rowPanel.Children.Add(details);
+                Grid.SetColumn(details, 1);
                 return rowPanel;
             })
         };
+        list.Styles.Add(new Avalonia.Styling.Style(selector => selector.OfType<ListBoxItem>())
+        {
+            Setters =
+            {
+                new Avalonia.Styling.Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
+                new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
+                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 72d)
+            }
+        });
         list.Bind(ItemsControl.ItemsSourceProperty, new Binding("Profiles"));
         list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.TwoWay });
         list.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
@@ -183,26 +277,34 @@ public static class Dialogs
         lowest.IsCheckedChanged += (_, _) => vm.SetLowestMode(lowest.IsChecked == true);
         panel.Children.Add(lowest);
         panel.Children.Add(Label("Проверки: через 5, затем 10, затем каждые 15 минут. При смене сервера VPN переподключится."));
+        var confirmationText = Label("Удалить выбранную подписку и все её серверы?");
+        var confirmationActions = new WrapPanel();
+        var confirmationCard = new Border
+        {
+            Width = 300, MaxWidth = 300, Padding = new Thickness(18), CornerRadius = new CornerRadius(16),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Child = new StackPanel { Spacing = 12, Children = { confirmationText, confirmationActions } }
+        };
+        confirmationCard.Bind(Border.BackgroundProperty, confirmationCard.GetResourceObservable("CardBrush"));
+        var confirmation = new Border { IsVisible = false, Background = new SolidColorBrush(Color.FromArgb(190, 0, 0, 0)), Child = confirmationCard, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+        var confirmDelete = Button("Удалить", () => { confirmation.IsVisible = false; vm.RemoveGroupCommand.Execute(null); });
+        confirmDelete.Margin = new Thickness(0, 0, 8, 0); confirmationActions.Children.Add(confirmDelete);
+        confirmationActions.Children.Add(Button("Отмена", () => confirmation.IsVisible = false));
         var management = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
         var refresh = Button("Обновить подписки", async () => await vm.RefreshSubscriptionsAsync());
-        refresh.Margin = new Thickness(0, 0, 8, 6); refresh.Bind(Control.IsEnabledProperty, new Binding("CanImport")); management.Children.Add(refresh);
-        var remove = Button("Удалить всю подписку", async () =>
-        {
-            var confirmation = Window(owner, "Удалить профиль?", 240);
-            var stack = new StackPanel { Margin = new Thickness(24), Spacing = 16 };
-            stack.Children.Add(Label("Все серверы выбранного профиля будут удалены."));
-            stack.Children.Add(Button("Удалить", () => confirmation.Close(true)));
-            stack.Children.Add(Button("Отмена", () => confirmation.Close(false)));
-            confirmation.Content = stack;
-            if (await confirmation.ShowDialog<bool>(owner)) vm.RemoveGroupCommand.Execute(null);
-        });
-        remove.Margin = new Thickness(0, 0, 8, 6); remove.Bind(Control.IsEnabledProperty, new Binding("CanImport")); management.Children.Add(remove);
+        refresh.Margin = new Thickness(0, 0, 8, 6); refresh.Bind(Control.IsEnabledProperty, new Binding("CanRefreshSubscriptions")); management.Children.Add(refresh);
+        var remove = Button("Удалить всю подписку", () => confirmation.IsVisible = true);
+        remove.Margin = new Thickness(0, 0, 8, 6); remove.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(remove);
         var removeOne = Button("Удалить выбранный", () => vm.RemoveProfileCommand.Execute(null));
-        removeOne.Margin = new Thickness(0, 0, 8, 6); removeOne.Bind(Control.IsEnabledProperty, new Binding("CanImport")); management.Children.Add(removeOne);
+        removeOne.Margin = new Thickness(0, 0, 8, 6); removeOne.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(removeOne);
         panel.Children.Add(management);
         var status = Label(""); status.Bind(TextBlock.TextProperty, new Binding("SubscriptionStatus") { Converter = new TranslationConverter() }); panel.Children.Add(status);
         panel.Children.Add(Label("При выборе другого сервера активный VPN переподключится автоматически."));
-        owner.Content = Scroll(panel);
+        var page = Page("Подписки и профили", back, panel);
+        var root = new Grid();
+        root.Children.Add(page);
+        root.Children.Add(confirmation);
+        owner.Content = root;
         await Task.CompletedTask;
     }
 }

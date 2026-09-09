@@ -12,6 +12,11 @@
           <SolidColorBrush x:Key="AccentTextBrush">#C9B9FF</SolidColorBrush>
           <SolidColorBrush x:Key="PowerBrush">#292039</SolidColorBrush>
           <SolidColorBrush x:Key="HoverBrush">#3E3055</SolidColorBrush>
+          <SolidColorBrush x:Key="PressedBrush">#4A3866</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonBrush">#6D4A96</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonHoverBrush">#8660B1</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonPressedBrush">#5C3D82</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonTextBrush">#FFFFFF</SolidColorBrush>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="TextBrush">#241B35</SolidColorBrush>
@@ -23,12 +28,30 @@
           <SolidColorBrush x:Key="AccentTextBrush">#644096</SolidColorBrush>
           <SolidColorBrush x:Key="PowerBrush">#E9DFFA</SolidColorBrush>
           <SolidColorBrush x:Key="HoverBrush">#DCC9F3</SolidColorBrush>
+          <SolidColorBrush x:Key="PressedBrush">#CDB3EC</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonBrush">#DCCAF1</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonHoverBrush">#E9DBF8</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonPressedBrush">#CDB3E8</SolidColorBrush>
+          <SolidColorBrush x:Key="ButtonTextBrush">#352047</SolidColorBrush>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
+      <Color x:Key="SystemAccentColor">#8357C5</Color>
+      <Color x:Key="SystemAccentColorLight1">#956DD0</Color>
+      <Color x:Key="SystemAccentColorLight2">#A987DA</Color>
+      <Color x:Key="SystemAccentColorLight3">#C2A8E5</Color>
+      <Color x:Key="SystemAccentColorDark1">#7145B0</Color>
+      <Color x:Key="SystemAccentColorDark2">#603A98</Color>
+      <Color x:Key="SystemAccentColorDark3">#4E2D7E</Color>
+      <SolidColorBrush x:Key="AccentFillColorDefaultBrush">#8357C5</SolidColorBrush>
+      <SolidColorBrush x:Key="AccentFillColorSecondaryBrush">#7650B0</SolidColorBrush>
+      <SolidColorBrush x:Key="AccentFillColorTertiaryBrush">#68469C</SolidColorBrush>
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
     <Style Selector="Window"><Setter Property="Background" Value="{DynamicResource PageBrush}"/></Style>
+    <Style Selector="Button"><Setter Property="Background" Value="{DynamicResource ButtonBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/></Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource ButtonHoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/></Style>
+    <Style Selector="Button:pressed /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource ButtonPressedBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/></Style>
   </Application.Styles>
 </Application>
