@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DiTunnel.Core\DiTunnel.Core.csproj" />
+    <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" />
   </ItemGroup>
 
 <ItemGroup><ProjectReference Include="..\DiTunnel.Infrastructure.Xray\DiTunnel.Infrastructure.Xray.csproj" /><Content Include="Network\Run-Tunnel.ps1" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>

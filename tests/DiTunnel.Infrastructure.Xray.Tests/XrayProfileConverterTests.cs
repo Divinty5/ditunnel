@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using DiTunnel.Infrastructure.Xray;
 
@@ -52,4 +53,16 @@ public sealed class XrayProfileConverterTests
         Assert.Equal(expected, tls["serverName"]!.GetValue<string>());
         Assert.False(tls["allowInsecure"]!.GetValue<bool>());
         Assert.Equal(2, converted.Outbound["settings"]!["version"]!.GetValue<int>());
-    }}
+    }
+
+    [Fact] public void SplitTunnelSeparatesSuffixDomainsFromLiteralAddresses()
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "Hysteria 2", "hy2://pass@example.com:443"));
+        var policy = new SplitTunnelPolicy(SplitTunnelMode.BypassSelected, ["github.com", "192.0.2.40"], []);
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", true, splitTunnel: policy));
+        var rules = config.RootElement.GetProperty("routing").GetProperty("rules");
+
+        Assert.Contains(rules.EnumerateArray(), rule => rule.TryGetProperty("domain", out var domains) && domains[0].GetString() == "domain:github.com");
+        Assert.Contains(rules.EnumerateArray(), rule => rule.TryGetProperty("ip", out var addresses) && addresses[0].GetString() == "192.0.2.40");
+    }
+}

@@ -7,6 +7,12 @@ public interface IProfileVpnEngine : IAsyncDisposable
     VpnStatus Status { get; }
     event EventHandler<VpnStatus>? StatusChanged;
     bool RequiresAdministrator { get; }
+    bool IsNetworkProtectionActive => false;
     Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default);
     Task DisconnectAsync(CancellationToken cancellationToken = default);
+    async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+    {
+        await DisconnectAsync(cancellationToken);
+        await ConnectAsync(profile, cancellationToken);
+    }
 }

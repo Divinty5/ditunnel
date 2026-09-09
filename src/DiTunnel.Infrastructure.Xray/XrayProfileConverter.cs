@@ -1,10 +1,11 @@
+using System.Net;
 using System.Text.Json.Nodes;
 using DiTunnel.Core.Profiles;
 using DiTunnel.Core.Connection;
 
 namespace DiTunnel.Infrastructure.Xray;
 
-public sealed record XrayProfileConfiguration(string ServerHost, JsonObject Outbound)
+public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPort, KillSwitchTransportProtocol ServerTransport, JsonObject Outbound)
 {
     public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null)
     {
@@ -18,14 +19,20 @@ public sealed record XrayProfileConfiguration(string ServerHost, JsonObject Outb
             ? new JsonObject { ["protocol"] = "tun", ["tag"] = "tun", ["port"] = 0, ["settings"] = new JsonObject { ["name"] = tunnelName ?? "DiTunnel", ["MTU"] = 1400, ["autoOutboundsInterface"] = "auto" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = new JsonArray("http", "tls", "quic"), ["routeOnly"] = true } }
             : new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = proxyPort, ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = true } };
         var outbounds = new JsonArray();
-        if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(new JsonObject { ["tag"] = "direct", ["protocol"] = "freedom" });
+        JsonObject DirectOutbound() => new() { ["tag"] = "direct", ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = "UseIPv4" } };
+        if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(DirectOutbound());
         outbounds.Add(outbound);
-        if (splitTunnel.Mode == SplitTunnelMode.BypassSelected) outbounds.Add(new JsonObject { ["tag"] = "direct", ["protocol"] = "freedom" });
+        if (splitTunnel.Mode == SplitTunnelMode.BypassSelected) outbounds.Add(DirectOutbound());
         var rules = new JsonArray();
-        var domains = splitTunnel.Domains.Where(d => !string.IsNullOrWhiteSpace(d)).Select(SplitTunnelPolicy.NormalizeDomain).Where(d => d.Length > 0).Select(d => (JsonNode?)$"domain:{d}").ToArray();
+        if (splitTunnel.Mode == SplitTunnelMode.ProxySelected)
+            rules.Add(new JsonObject { ["ip"] = new JsonArray("1.1.1.1", "1.0.0.1"), ["outboundTag"] = "proxy" });
+        var destinations = splitTunnel.Domains.Where(d => !string.IsNullOrWhiteSpace(d)).Select(SplitTunnelPolicy.NormalizeDomain).Where(d => d.Length > 0).ToArray();
+        var domains = destinations.Where(d => !IPAddress.TryParse(d, out _)).Select(d => (JsonNode?)$"domain:{d}").ToArray();
+        var addresses = destinations.Where(d => IPAddress.TryParse(d, out _)).Select(d => (JsonNode?)d).ToArray();
         var processes = splitTunnel.Processes.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => (JsonNode?)p.Trim()).ToArray();
         var selectedTag = splitTunnel.Mode == SplitTunnelMode.BypassSelected ? "direct" : "proxy";
         if (domains.Length > 0) rules.Add(new JsonObject { ["domain"] = new JsonArray(domains), ["outboundTag"] = selectedTag });
+        if (addresses.Length > 0) rules.Add(new JsonObject { ["ip"] = new JsonArray(addresses), ["outboundTag"] = selectedTag });
         if (processes.Length > 0) rules.Add(new JsonObject { ["process"] = new JsonArray(processes), ["outboundTag"] = selectedTag });
         return new JsonObject
         {
@@ -57,6 +64,7 @@ public static class XrayProfileConverter
             throw new NotSupportedException("Obfs, смена портов и плагины пока не поддерживаются.");
         var scheme = uri.Scheme;
         var hy2 = scheme is "hy2" or "hysteria2";
+        if (uri.Port is <= 0 or > ushort.MaxValue) throw new FormatException("В профиле должен быть указан корректный порт сервера.");
         var stream = new JsonObject();
         var outbound = new JsonObject { ["tag"] = "proxy", ["protocol"] = hy2 ? "hysteria" : scheme == "ss" ? "shadowsocks" : scheme };
         var credential = Uri.UnescapeDataString(uri.UserInfo);
@@ -110,6 +118,6 @@ public static class XrayProfileConverter
             if (transport is "ws" or "httpupgrade") stream[transport == "ws" ? "wsSettings" : "httpupgradeSettings"] = new JsonObject { ["path"] = Get("path", "/"), ["host"] = Get("host") };
         }
         outbound["streamSettings"] = stream;
-        return new(uri.Host, outbound);
+        return new(uri.Host, checked((ushort)uri.Port), hy2 ? KillSwitchTransportProtocol.Udp : scheme == "ss" ? KillSwitchTransportProtocol.TcpAndUdp : KillSwitchTransportProtocol.Tcp, outbound);
     }
 }

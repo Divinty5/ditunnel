@@ -1,4 +1,5 @@
 using Avalonia;
+using System.Text.Json;
 
 namespace DiTunnel.Desktop;
 
@@ -6,6 +7,33 @@ internal static class Program
 {
     [STAThread]
     public static void Main(string[] args)
+    {
+        if (args.Contains("--wfp-self-test", StringComparer.OrdinalIgnoreCase))
+        {
+            Environment.ExitCode = RunWfpSelfTest();
+            return;
+        }
+        if (args.Contains("--cleanup-wfp", StringComparer.OrdinalIgnoreCase))
+        {
+            try { Platform.Windows.WindowsKillSwitchController.CleanupStaleFilters(); }
+            catch { Environment.ExitCode = 3; }
+            return;
+        }
+        try { RunApplication(args); }
+        catch (Exception error)
+        {
+            Environment.ExitCode = 1;
+            try
+            {
+                File.WriteAllText(Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+                    "Di-Tunnel-Startup-Error.txt"), error.ToString());
+            }
+            catch { }
+        }
+    }
+
+    private static void RunApplication(string[] args)
     {
         using var instance = new Mutex(true, "DiTunnel.Desktop", out var firstInstance);
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset, "DiTunnel.ShowWindow");
@@ -21,10 +49,42 @@ internal static class Program
             }
         };
         timer.Start();
-        App.App.CreateMainViewModel = () => new App.ViewModels.MainViewModel(new Platform.Windows.WindowsVpnEngine(() => App.UserSettings.Current.GetSplitTunnelPolicy()), probe: new Platform.Windows.WindowsServerProbe(), countryResolver: new Platform.Windows.WindowsServerCountryResolver());
+        App.App.CreateMainViewModel = () =>
+        {
+            var killSwitch = new Platform.Windows.WindowsKillSwitchController();
+            return new App.ViewModels.MainViewModel(new Platform.Windows.WindowsVpnEngine(
+                () => App.UserSettings.Current.GetSplitTunnelPolicy(),
+                () => App.UserSettings.Current.GetConnectionPolicy(), killSwitch),
+                probe: new Platform.Windows.WindowsServerProbe(killSwitch), countryResolver: new Platform.Windows.WindowsServerCountryResolver());
+        };
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         timer.Stop();
         instance.ReleaseMutex();
+    }
+
+    private static int RunWfpSelfTest()
+    {
+        var reportPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+            "Di-Tunnel-Wfp-Self-Test.json");
+        using var output = new StringWriter();
+        int exitCode;
+        try
+        {
+            exitCode = Platform.Windows.WindowsKillSwitchSelfTest.RunAsync(output).GetAwaiter().GetResult();
+        }
+        catch (Exception error)
+        {
+            exitCode = 1;
+            output.WriteLine(JsonSerializer.Serialize(new
+            {
+                passed = false,
+                error = error.ToString()
+            }));
+        }
+
+        File.WriteAllText(reportPath, output.ToString());
+        return exitCode;
     }
 
     public static AppBuilder BuildAvaloniaApp()

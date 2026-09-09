@@ -1,7 +1,12 @@
 # Run elevated only if the app reports incomplete network cleanup.
 # Refuses to interfere while a DiTunnel TUN adapter is active.
 $ErrorActionPreference = 'Stop'
-if (Get-NetAdapter -Name DiTunnel -ErrorAction SilentlyContinue) { throw 'DiTunnel is active. Disconnect it before repair.' }
+if (Get-NetAdapter -Name 'DiTunnel*' -ErrorAction SilentlyContinue) { throw 'DiTunnel is active. Disconnect it before repair.' }
+$client = Join-Path $PSScriptRoot 'Di-Tunnel.exe'
+if (Test-Path -LiteralPath $client) {
+    & $client --cleanup-wfp
+    if ($LASTEXITCODE -ne 0) { throw 'Di-Tunnel WFP cleanup failed.' }
+}
 $networkMutex = [Threading.Mutex]::new($false, 'Global\DiTunnel.NetworkHost.v1')
 $locked = $false
 try {

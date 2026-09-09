@@ -6,7 +6,9 @@ param(
     [Parameter(Mandatory=$true)][string]$TunnelName,
     [ValidateSet('ProxyAll','BypassSelected','ProxySelected')][string]$SplitTunnelMode = 'ProxyAll',
     [string]$SplitAddresses = '',
-    [string]$SplitDomains = ''
+    [string]$SplitDomains = '',
+    [string]$KillSwitchReadyPath = '',
+    [string]$CleanupExecutablePath = ''
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -28,6 +30,7 @@ $netshRunner = {
     return $LASTEXITCODE
 }
 $stopPath = $ConfigurationPath + '.stop'
+$preserveKillSwitchPath = Join-Path ([IO.Path]::GetDirectoryName($ConfigurationPath)) 'preserve-kill-switch'
 $stage = 'PRECHECK'
 function Test-StopRequested { return (Test-Path -LiteralPath $stopPath) -or $owner.HasExited }
 function Enter-Stage([string]$name) {
@@ -160,18 +163,38 @@ function Update-SplitRoutes([string[]]$addresses) {
             Add-OwnedRoute "$address/32" $index '0.0.0.0'
         }
         $splitRoutes[$address] = $ownedRoutes[$ownedRoutes.Count - 1]
+        Emit ('SPLIT_ADDRESS_' + $address)
     }
 }
 function Refresh-SplitRoutesIfDue {
     if ($SplitTunnelMode -eq 'ProxyAll' -or [DateTime]::UtcNow -lt $nextSplitRefresh) { return }
-    $script:nextSplitRefresh = [DateTime]::UtcNow.AddSeconds(45)
+    # A parent-domain rule also covers names learned later (for example,
+    # helpdesk.example.com for an example.com rule). DNS cannot enumerate a zone,
+    # so observe the Windows cache and add routes as matching names are used.
+    $script:nextSplitRefresh = [DateTime]::UtcNow.AddSeconds(1)
     $addresses = [System.Collections.Generic.List[string]]::new()
     foreach ($domain in ($SplitDomains -split ';' | Where-Object { $_ })) {
-        try {
-            [Net.Dns]::GetHostAddresses($domain) |
-                Where-Object { $_.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork } |
-                ForEach-Object { $addresses.Add($_.ToString()) }
-        } catch { }
+        $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        [void]$names.Add($domain)
+        if ($domain -notmatch '^\d{1,3}(?:\.\d{1,3}){3}$') {
+            Get-DnsClientCache -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    foreach ($candidate in @($_.Entry, $_.Name, $_.RecordName)) {
+                        if (-not $candidate) { continue }
+                        $cachedName = $candidate.ToString().TrimEnd('.')
+                        if ($cachedName -ieq $domain -or $cachedName.EndsWith('.' + $domain, [StringComparison]::OrdinalIgnoreCase)) {
+                            [void]$names.Add($cachedName)
+                        }
+                    }
+                }
+        }
+        foreach ($name in $names) {
+            try {
+                [Net.Dns]::GetHostAddresses($name) |
+                    Where-Object { $_.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork } |
+                    ForEach-Object { $addresses.Add($_.ToString()) }
+            } catch { }
+        }
     }
     if ($addresses.Count -gt 0) { Update-SplitRoutes @($addresses | Sort-Object -Unique) }
 }
@@ -226,6 +249,19 @@ try {
     Enter-Stage 'ADDRESSES'
     Add-TunnelAddress '172.31.255.1' 30 'IPv4'
     Add-TunnelAddress 'fd52:d17::1' 64 'IPv6'
+    # The interface exists and has both address families before default routes are changed.
+    # This is the only safe hand-off point for a kill-switch controller: it can permit the
+    # TUN interface first, then install a physical-interface block without a leak window.
+    Emit ('TUNNEL_INTERFACE_' + $index)
+    if ($KillSwitchReadyPath) {
+        $killSwitchDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $KillSwitchReadyPath)) {
+            if (Test-StopRequested) { throw [OperationCanceledException]::new() }
+            if ([DateTime]::UtcNow -ge $killSwitchDeadline) { throw 'Kill switch activation timed out' }
+            Start-Sleep -Milliseconds 100
+        }
+        if ((Get-Content -LiteralPath $KillSwitchReadyPath -Raw) -ne 'READY') { throw 'Kill switch activation failed' }
+    }
     Enter-Stage 'ROUTES'
     $splitIps = @($SplitAddresses -split ',' | Where-Object { $_ -and $_ -ne $ServerAddress } | Sort-Object -Unique)
     if ($SplitTunnelMode -eq 'ProxySelected' -and $splitIps.Count -eq 0) { throw 'No selected domain addresses' }
@@ -234,54 +270,75 @@ try {
         Add-OwnedRoute '128.0.0.0/1' $index '0.0.0.0'
         Add-OwnedRoute '::/1' $index '::'
         Add-OwnedRoute '8000::/1' $index '::'
+    } else {
+        # Keep DNS resolution available without leaking it to the physical adapter. Xray has
+        # matching IP rules that force these two resolver destinations through the VPN outbound.
+        Add-OwnedRoute '1.1.1.1/32' $index '0.0.0.0'
+        Add-OwnedRoute '1.0.0.1/32' $index '0.0.0.0'
     }
     Update-SplitRoutes $splitIps
-    if ($SplitTunnelMode -ne 'ProxySelected') {
-        Enter-Stage 'DNS_RULE'
-        $dnsRule = Add-DnsClientNrptRule -Namespace '.' -NameServers '1.1.1.1','1.0.0.1' -Comment $dnsComment -PassThru
-        Enter-Stage 'DNS_CACHE'
-        Clear-DnsClientCache
-    }
+    Enter-Stage 'DNS_RULE'
+    $dnsRule = Add-DnsClientNrptRule -Namespace '.' -NameServers '1.1.1.1','1.0.0.1' -Comment $dnsComment -PassThru
+    Enter-Stage 'DNS_CACHE'
+    Clear-DnsClientCache
     if ($SplitTunnelMode -eq 'ProxySelected') {
+        Enter-Stage 'DNS_VERIFY'
+        $selectedDomains = @($SplitDomains -split ';' | Where-Object { $_ -and $_ -notmatch '^\d{1,3}(?:\.\d{1,3}){3}$' })
+        if ($selectedDomains.Count -gt 0) {
+            $dnsDeadline = [DateTime]::UtcNow.AddSeconds(10)
+            do {
+                if (Test-StopRequested) { throw [OperationCanceledException]::new() }
+                try {
+                    $resolvedSelected = [Net.Dns]::GetHostAddresses($selectedDomains[0]) | Where-Object { $_.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork } | Select-Object -First 1
+                } catch { $resolvedSelected = $null }
+                if ($resolvedSelected) { break }
+                Start-Sleep -Milliseconds 250
+            } while ([DateTime]::UtcNow -lt $dnsDeadline)
+            if (-not $resolvedSelected) { throw 'Selected-domain DNS did not become ready' }
+        }
         Emit 'CONNECTED'
         while (-not (Test-StopRequested)) {
             $owner.Refresh(); $xrayProcess.Refresh()
             if ($owner.HasExited -or $owner.StartTime -ne $ownerStart) { break }
             if ($xrayProcess.HasExited) { Emit ('ERROR_XRAY_EXIT_' + $xrayProcess.ExitCode); break }
-            if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') { Emit 'ERROR_NETWORK_CHANGED'; break }
+            if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') {
+                Emit 'ERROR_NETWORK_CHANGED'
+                if ($KillSwitchReadyPath) { Set-Content -LiteralPath $preserveKillSwitchPath -Value 'READY' -NoNewline }
+                break
+            }
             Refresh-SplitRoutesIfDue
             Start-Sleep -Milliseconds 500
         }
         return
     }
     Enter-Stage 'PROBE'
-    Add-Type -AssemblyName System.Net.Http
-    $handler = [Net.Http.HttpClientHandler]::new()
-    $handler.UseProxy = $false
-    $client = [Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds(15)
+    $probeClient = [Net.Sockets.TcpClient]::new()
     try {
-        $probeCancellation = [Threading.CancellationTokenSource]::new()
-        $probeTask = $client.GetAsync('https://www.cloudflare.com/cdn-cgi/trace', $probeCancellation.Token)
+        $probeRoute = Find-NetRoute -RemoteIPAddress '1.1.1.1' | Where-Object { $_.PSObject.Properties.Name -contains 'InterfaceIndex' } | Select-Object -First 1
+        if (-not $probeRoute -or $probeRoute.InterfaceIndex -ne $index) { throw 'Probe route does not use Di-Tunnel' }
+        $probeTask = $probeClient.ConnectAsync('1.1.1.1', 443)
+        $probeDeadline = [DateTime]::UtcNow.AddSeconds(15)
         while (-not $probeTask.IsCompleted) {
-            if (Test-StopRequested) { $probeCancellation.Cancel(); throw [OperationCanceledException]::new() }
+            if (Test-StopRequested) { throw [OperationCanceledException]::new() }
+            if ([DateTime]::UtcNow -ge $probeDeadline) { throw 'Probe timed out' }
             Start-Sleep -Milliseconds 100
         }
-        $probe = $probeTask.GetAwaiter().GetResult()
-        $probe.EnsureSuccessStatusCode() | Out-Null
-        $body = $probe.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-        if ($body -notmatch '(?m)^ip=') { throw 'Probe response invalid' }
-        $probe.Dispose()
+        $probeTask.GetAwaiter().GetResult()
+        if (-not $probeClient.Connected) { throw 'Probe did not connect' }
     } catch {
-        # Routing is already installed. A failed optional HTTPS probe must not tear down a working tunnel.
+        # Routing is already installed. A failed optional reachability probe must not tear down a working tunnel.
         Emit 'PROBE_WARNING'
-    } finally { $client.Dispose(); $handler.Dispose(); if ($probeCancellation) { $probeCancellation.Dispose() } }
+    } finally { $probeClient.Dispose() }
     Emit 'CONNECTED'
     while (-not (Test-StopRequested)) {
         $owner.Refresh(); $xrayProcess.Refresh()
         if ($owner.HasExited -or $owner.StartTime -ne $ownerStart) { break }
         if ($xrayProcess.HasExited) { Emit ('ERROR_XRAY_EXIT_' + $xrayProcess.ExitCode); break }
-        if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') { Emit 'ERROR_NETWORK_CHANGED'; break }
+        if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') {
+            Emit 'ERROR_NETWORK_CHANGED'
+            if ($KillSwitchReadyPath) { Set-Content -LiteralPath $preserveKillSwitchPath -Value 'READY' -NoNewline }
+            break
+        }
         Refresh-SplitRoutesIfDue
         Start-Sleep -Milliseconds 500
     }
@@ -321,7 +378,14 @@ finally {
         try { Save-XrayDiagnostics (($discardOutput.GetAwaiter().GetResult()) + "`n" + ($discardError.GetAwaiter().GetResult())) } catch { }
         if ($xrayProcess) { $xrayProcess.Dispose() }
         try { Remove-Item -LiteralPath $ConfigurationPath -Force -ErrorAction Stop } catch { $cleanupFailed = $true }
+        if ($KillSwitchReadyPath -and $CleanupExecutablePath -and -not (Test-Path -LiteralPath $preserveKillSwitchPath)) {
+            try {
+                $cleanupProcess = Start-Process -FilePath $CleanupExecutablePath -ArgumentList '--cleanup-wfp' -WindowStyle Hidden -Wait -PassThru
+                if ($cleanupProcess.ExitCode -ne 0) { $cleanupFailed = $true }
+            } catch { $cleanupFailed = $true }
+        }
         Remove-Item -LiteralPath $stopPath -Force -ErrorAction SilentlyContinue
+        if ($KillSwitchReadyPath) { Remove-Item -LiteralPath $KillSwitchReadyPath -Force -ErrorAction SilentlyContinue }
         $mutex.ReleaseMutex()
     }
     $mutex.Dispose()
