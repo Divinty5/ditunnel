@@ -130,8 +130,8 @@ public sealed partial class MainViewModel : ViewModelBase
         ? $"≈  {delay:0} мс"
         : engine?.RequiresAdministrator == true
             ? "Для TUN запустите приложение от администратора"
-            : "Windows TUN · Xray-core";
-    public bool IsKillSwitchEnabled => UserSettings.Current.KillSwitchEnabled;
+            : OperatingSystem.IsAndroid() ? "Android VPN · Xray-core" : "Windows TUN · Xray-core";
+    public bool IsKillSwitchEnabled => !OperatingSystem.IsAndroid() && UserSettings.Current.KillSwitchEnabled;
     public string KillSwitchText => ConnectionState == VpnConnectionState.Connected && IsKillSwitchEnabled && engine?.IsNetworkProtectionActive == true
         ? "Kill switch активен"
         : ConnectionState == VpnConnectionState.Connected && IsKillSwitchEnabled
@@ -171,6 +171,9 @@ public sealed partial class MainViewModel : ViewModelBase
     public string SelectedName => SelectedProfile?.Name ?? L.T("Сервер не выбран");
     public string SelectedSummary => SelectedProfile?.Summary.Replace(" · конфигурация сервера", "", StringComparison.OrdinalIgnoreCase) ?? "Импортируйте свою первую подписку";
     public string Tagline => "Ваш VPN. Ваш выбор.";
+    public string ImportStorageDescription => OperatingSystem.IsAndroid()
+        ? "Профили сохраняются только на этом устройстве и защищены Android Keystore."
+        : "Профили сохраняются на этом компьютере и защищены вашей учётной записью Windows.";
     public string SubscriptionLimits
     {
         get

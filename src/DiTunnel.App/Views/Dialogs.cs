@@ -123,9 +123,16 @@ public static class Dialogs
             }
             killSwitch.IsCheckedChanged += (_, _) => SaveProtection();
             allowLan.IsCheckedChanged += (_, _) => SaveProtection();
-            panel.Children.Add(killSwitch);
-            panel.Children.Add(allowLan);
-            panel.Children.Add(Label("Сетевые изменения применяются автоматически при возврате на главный экран. Kill switch использует отдельные правила Windows Filtering Platform."));
+            if (OperatingSystem.IsAndroid())
+            {
+                panel.Children.Add(Label("Для полной блокировки трафика вне VPN используйте системные настройки Android: постоянный VPN и блокировку подключений без VPN. Встроенный kill switch Windows на Android недоступен."));
+            }
+            else
+            {
+                panel.Children.Add(killSwitch);
+                panel.Children.Add(allowLan);
+                panel.Children.Add(Label("Сетевые изменения применяются автоматически при возврате на главный экран. Kill switch использует отдельные правила Windows Filtering Platform."));
+            }
             panel.Children.Add(Label("Раздельное туннелирование"));
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = (int)UserSettings.Current.SplitTunnelMode };
             var domains = new TextBox { Text = string.Join(Environment.NewLine, UserSettings.Current.SplitTunnelDomains), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
