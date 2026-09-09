@@ -6,7 +6,7 @@
     <Deterministic>true</Deterministic>
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
-    <Version>0.3.30</Version>
+    <Version>0.4.2</Version>
     <Company>Di Vinty Interactive</Company>
     <Authors>Di Vinty Interactive</Authors>
     <RepositoryUrl>https://github.com/Divinty5/ditunnel</RepositoryUrl>
