@@ -37,4 +37,11 @@ public sealed class ProfileImporterTests
     [InlineData("trojan://password@example.com:443#Trojan", "TROJAN")]
     [InlineData("ss://YWVzLTEyOC1nY206cGFzcw@example.com:8388#SS", "SS")]
     public void AcceptsOtherProtocols(string input, string kind) => Assert.Equal(kind, Assert.Single(ProfileParser.Parse(input)).Kind);
+
+    [Fact]
+    public void RemovesSubscriptionQuotaDecorationFromServerName()
+    {
+        var profile = Assert.Single(ProfileParser.Parse("vless://00000000-0000-0000-0000-000000000001@example.com:443?security=tls#WS-8080-TestDiTunnel%7C%F0%9F%93%8A99.78GB"));
+        Assert.Equal("WS-8080-TestDiTunnel", profile.Name);
+    }
 }

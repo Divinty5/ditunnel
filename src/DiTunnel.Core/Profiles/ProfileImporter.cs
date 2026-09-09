@@ -64,11 +64,20 @@ public static class ProfileParser
                 if (kind == "vless" && !Guid.TryParse(uri.UserInfo, out _)) throw new FormatException("Некорректный UUID VLESS.");
                 name = string.IsNullOrEmpty(uri.Fragment) ? kind.ToUpperInvariant() : Uri.UnescapeDataString(uri.Fragment[1..]);
             }
-            name = new string(name.Where(c => !char.IsControl(c)).Take(120).ToArray());
+            name = NormalizeProfileName(name);
             result.Add(new(string.IsNullOrWhiteSpace(name) ? kind.ToUpperInvariant() : name, kind is "hy2" or "hysteria2" ? "Hysteria 2" : kind.ToUpperInvariant(), line));
         }
         if (result.Count == 0) throw new FormatException("В подписке нет серверов.");
         return result;
+    }
+
+    private static string NormalizeProfileName(string name)
+    {
+        name = new string(name.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        // Some subscription generators append traffic quota decorations to every URI fragment.
+        // Usage belongs to subscription metadata, not to the server's display name.
+        name = System.Text.RegularExpressions.Regex.Replace(name, @"\s*[|｜]\s*(?:(?:📊|📈)\s*)?\d+(?:[.,]\d+)?\s*(?:GB|ГБ)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return new string(name.Take(120).ToArray()).Trim();
     }
 
     private static string PadBase64(string text)
