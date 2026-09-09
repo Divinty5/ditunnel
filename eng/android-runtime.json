@@ -1,0 +1,15 @@
+{
+  "libXray": {
+    "version": "v26.7.28",
+    "commit": "80263da83e96b2972455b0a94b13ee1a10e51391",
+    "asset": "libxray-android.zip",
+    "url": "https://github.com/XTLS/libXray/releases/download/v26.7.28/libxray-android.zip",
+    "sha256": "28b7dc9d6cc8455fcca5cbd56e387003a7bfb558128651a64899dc3a8ccff666",
+    "aar": "libxray-android/libXray.aar",
+    "abis": [
+      "arm64-v8a",
+      "x86_64"
+    ]
+  },
+  "go": "1.26.3"
+}

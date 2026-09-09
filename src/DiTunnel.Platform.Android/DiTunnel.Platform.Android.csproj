@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <SupportedOSPlatformVersion>31.0</SupportedOSPlatformVersion>
+    <LibXrayAarPath Condition="'$(LibXrayAarPath)' == '' and '$(DITUNNEL_LIBXRAY_AAR)' != ''">$(DITUNNEL_LIBXRAY_AAR)</LibXrayAarPath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(LibXrayAarPath)')">
+    <AndroidLibrary Include="$(LibXrayAarPath)" Bind="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiTunnel.Core\DiTunnel.Core.csproj" />
+    <ProjectReference Include="..\DiTunnel.Infrastructure.Xray\DiTunnel.Infrastructure.Xray.csproj" />
+  </ItemGroup>
+
+  <Target Name="ValidateLibXrayAar" BeforeTargets="ResolveAndroidTooling">
+    <Error
+        Condition="!Exists('$(LibXrayAarPath)')"
+        Text="libXray.aar v26.7.28 не найден. Задайте LibXrayAarPath или DITUNNEL_LIBXRAY_AAR; ожидаемый SHA-256 указан в eng/android-runtime.json." />
+  </Target>
+
+</Project>
