@@ -27,14 +27,23 @@ public partial class App : Application
                 DataContext = CreateMainViewModel()
             };
         }
+        else if (ApplicationLifetime is IActivityApplicationLifetime activity)
+        {
+            activity.MainViewFactory = CreateMainView;
+        }
         else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
-            singleView.MainView = new MainView
-            {
-                DataContext = CreateMainViewModel()
-            };
+            singleView.MainView = CreateMainView();
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static MainView CreateMainView()
+    {
+        return new MainView
+        {
+            DataContext = CreateMainViewModel()
+        };
     }
 }

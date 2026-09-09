@@ -11,4 +11,9 @@
     <Authors>Di Vinty Interactive</Authors>
     <RepositoryUrl>https://github.com/Divinty5/ditunnel</RepositoryUrl>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(DITUNNEL_BUILD_ROOT)' != ''">
+    <BaseIntermediateOutputPath>$(DITUNNEL_BUILD_ROOT)\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(DITUNNEL_BUILD_ROOT)\$(MSBuildProjectName)\bin\</BaseOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\obj\**;$(MSBuildProjectDirectory)\bin\**</DefaultItemExcludes>
+  </PropertyGroup>
 </Project>

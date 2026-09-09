@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <SupportedOSPlatformVersion>31.0</SupportedOSPlatformVersion>
+    <ApplicationId>com.divintyinteractive.ditunnel</ApplicationId>
+    <ApplicationTitle>Di-Tunnel</ApplicationTitle>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <AndroidStoreUncompressedFileExtensions>.so</AndroidStoreUncompressedFileExtensions>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Android" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DiTunnel.App\DiTunnel.App.csproj" />
+    <ProjectReference Include="..\DiTunnel.Platform.Android\DiTunnel.Platform.Android.csproj" />
+  </ItemGroup>
+
+</Project>
