@@ -1,6 +1,9 @@
 {
   "Настройки": "Settings",
+  "Подписки": "Subscriptions",
+  "Удалить выбранную подписку и все её серверы?": "Delete the selected subscription and all its servers?",
   "Ваше пространство. Ваша сеть.": "Your space. Your network.",
+  "Ваш VPN. Ваш выбор.": "Your VPN. Your choice.",
   "АКТИВНЫЙ ПРОФИЛЬ": "ACTIVE PROFILE",
   "Мои серверы": "My servers",
   "Проверить сервер": "Test server",
@@ -191,5 +194,8 @@
   "Таймаут": "Timeout",
   "Ошибка сети": "Network error",
   "Не удалось определить адрес": "Could not resolve the address",
-  "Нажмите для подключения": "Click to connect"
+  "Нажмите для подключения": "Click to connect",
+  "Туннель активен. Контрольное соединение через TUN выполнено.": "Tunnel active. The control connection through TUN succeeded.",
+  "Туннель активен. Автоматическая проверка маршрута не прошла.": "Tunnel active. The automatic route check did not succeed.",
+  "Туннель активен. Сервер доступен, но контрольный запрос через TUN не выполнен.": "Tunnel active. The server is reachable, but the verification request through TUN did not complete."
 }

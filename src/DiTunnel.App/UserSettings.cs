@@ -18,7 +18,15 @@ public sealed class UserSettings
     public SplitTunnelMode SplitTunnelMode { get; set; } = SplitTunnelMode.ProxyAll;
     public List<string> SplitTunnelDomains { get; set; } = [];
     public List<string> SplitTunnelProcesses { get; set; } = [];
-    public SplitTunnelPolicy GetSplitTunnelPolicy() => new(SplitTunnelMode, SplitTunnelDomains, SplitTunnelProcesses);
+    // Process-aware routing needs a Windows filtering/redirect layer that is not implemented yet.
+    // Keep the serialized property for forward-compatible settings migration, but never advertise
+    // or pass it to Xray as if it were effective.
+    public SplitTunnelPolicy GetSplitTunnelPolicy() => new(SplitTunnelMode, SplitTunnelDomains, []);
+    public bool KillSwitchEnabled { get; set; }
+    public bool AllowLocalNetwork { get; set; }
+    public bool StartWithWindows { get; set; }
+    public bool AutoConnect { get; set; }
+    public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect).Normalize();
     public WindowPlacement? Window { get; set; }
     public static string Version => typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.3.5";
 
@@ -67,8 +75,8 @@ public static class WindowLayout
         var height = saved?.Height ?? maxHeight;
         if (!double.IsFinite(width)) width = maxWidth / 2;
         if (!double.IsFinite(height)) height = maxHeight;
-        width = Math.Clamp(width, Math.Min(400, maxWidth), maxWidth);
-        height = Math.Clamp(height, Math.Min(520, maxHeight), maxHeight);
+        width = Math.Clamp(width, Math.Min(360, maxWidth), maxWidth);
+        height = Math.Clamp(height, Math.Min(500, maxHeight), maxHeight);
         var x = saved?.X ?? area.Right - (int)(width * scaling);
         var y = saved?.Y ?? area.Y;
         x = Math.Clamp(x, area.X, Math.Max(area.X, area.Right - (int)(width * scaling)));

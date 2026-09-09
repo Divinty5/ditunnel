@@ -24,7 +24,7 @@ public partial class MainWindow : Window
             if (screen is not null)
             {
                 normal = WindowLayout.Fit(saved, screen.WorkingArea, screen.Scaling);
-                MinWidth = Math.Min(400, normal.Width); MinHeight = Math.Min(520, normal.Height);
+                MinWidth = Math.Min(360, normal.Width); MinHeight = Math.Min(500, normal.Height);
                 Width = normal.Width; Height = normal.Height; Position = new PixelPoint(normal.X, normal.Y);
                 if (normal.Maximized) WindowState = WindowState.Maximized;
             }

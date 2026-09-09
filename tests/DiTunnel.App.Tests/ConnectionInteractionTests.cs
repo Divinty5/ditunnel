@@ -16,6 +16,7 @@ public sealed class ConnectionInteractionTests
         public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
         public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
         public bool RequiresAdministrator => false;
+        public bool IsNetworkProtectionActive => Status.State == VpnConnectionState.Connected;
         public bool FailCleanup;
         public bool HangCleanup;
         public bool Cancelled;
@@ -64,6 +65,8 @@ public sealed class ConnectionInteractionTests
         Assert.Equal("HTTPS · 42 мс", vm.Profiles[0].ProbeText);
         Assert.False(vm.IsProbing);
         Assert.True(vm.CanImport);
+        vm.ConnectionState = VpnConnectionState.Connected;
+        Assert.Equal("≈  42 мс", vm.ConnectionHint);
     }
     private sealed class SortingProbe : IServerProbe
     {
@@ -97,7 +100,7 @@ public sealed class ConnectionInteractionTests
         var vm = new MainViewModel(new Engine(), new Store(), probe) { ConnectionState = VpnConnectionState.Connected };
         Assert.True(vm.CanProbe);
         Assert.True(vm.CanProbeAll);
-        Assert.False(vm.CanImport);
+        Assert.True(vm.CanImport);
         await vm.ProbeAllCommand.ExecuteAsync(null);
         Assert.Equal(1, probe.Calls);
     }
@@ -109,7 +112,7 @@ public sealed class ConnectionInteractionTests
         vm.Notice = "Сбой настройки Windows.";
         vm.ConnectionState = VpnConnectionState.Error;
         Assert.True(vm.HasConnectionError);
-        Assert.Equal("Копировать", vm.CopyErrorText);
+        Assert.Equal("⧉", vm.CopyErrorText);
     }
 
     private sealed class SwitchingEngine : IProfileVpnEngine
@@ -117,6 +120,7 @@ public sealed class ConnectionInteractionTests
         public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
         public event EventHandler<VpnStatus>? StatusChanged;
         public bool RequiresAdministrator => false;
+        public bool IsNetworkProtectionActive => Status.State == VpnConnectionState.Connected;
         public List<string> ConnectedProfiles { get; } = [];
         public int Disconnects { get; private set; }
         public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
@@ -156,6 +160,31 @@ public sealed class ConnectionInteractionTests
         Assert.Equal(["A", "B"], engine.ConnectedProfiles);
         Assert.Equal(1, engine.Disconnects);
         Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+    }
+
+    [Fact] public async Task ApplyingNetworkSettingsReconnectsActiveVpn()
+    {
+        var engine = new SwitchingEngine();
+        var vm = new MainViewModel(engine, new Store());
+        await vm.ConnectCommand.ExecuteAsync(null);
+
+        await vm.ApplyNetworkSettingsAsync();
+
+        Assert.Equal(["HY2", "HY2"], engine.ConnectedProfiles);
+        Assert.Equal(1, engine.Disconnects);
+        Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+    }
+
+    [Theory]
+    [InlineData(VpnConnectionState.Error)]
+    [InlineData(VpnConnectionState.Reconnecting)]
+    [InlineData(VpnConnectionState.Connecting)]
+    public void ImportCanBeOpenedWhileConnectionNeedsAttention(VpnConnectionState state)
+    {
+        var vm = new MainViewModel(new Engine(), new Store()) { ConnectionState = state };
+        Assert.True(vm.CanImport);
+        vm.OpenImportCommand.Execute(null);
+        Assert.True(vm.IsImportOpen);
     }
 
     [Fact] public async Task SelectingProfileAfterFailedConnectionStartsItImmediately()

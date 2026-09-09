@@ -45,6 +45,9 @@ public sealed class SettingsAndRefreshTests
         Assert.Equal(80, moved.X); Assert.Equal(0, moved.Y);
         Assert.True(moved.Height * 1.25 + 50 <= work.Height);
         Assert.True(moved.Maximized);
+        var compact = WindowLayout.Fit(new(100, 100, 100, 100, false), new PixelRect(0, 0, 1920, 1080), 1);
+        Assert.Equal(360, compact.Width);
+        Assert.Equal(500, compact.Height);
     }
     [Fact] public void SettingsRoundTripAndInvalidValuesFallBack()
     {
@@ -52,8 +55,8 @@ public sealed class SettingsAndRefreshTests
         try
         {
             var path = Path.Combine(dir, "settings.json");
-            new UserSettings { Theme = "light", Language = "en", CloseAction = "hide", Window = new(10, 20, 600, 700, true) }.Save(path);
-            var loaded = UserSettings.Load(path); Assert.Equal("en", loaded.Language); Assert.Equal("light", loaded.Theme); Assert.True(loaded.Window!.Maximized);
+            new UserSettings { Theme = "light", Language = "en", CloseAction = "hide", KillSwitchEnabled = true, AllowLocalNetwork = true, StartWithWindows = true, AutoConnect = true, Window = new(10, 20, 600, 700, true) }.Save(path);
+            var loaded = UserSettings.Load(path); Assert.Equal("en", loaded.Language); Assert.Equal("light", loaded.Theme); Assert.True(loaded.Window!.Maximized); Assert.True(loaded.GetConnectionPolicy().KillSwitchEnabled); Assert.True(loaded.GetConnectionPolicy().AutoConnect);
             File.WriteAllText(path, "{\"Language\":\"bad\",\"Theme\":\"bad\"}");
             Assert.Equal("ru", UserSettings.Load(path).Language); Assert.Equal("system", UserSettings.Load(path).Theme);
             File.WriteAllText(path, "broken"); Assert.Equal("ask", UserSettings.Load(path).CloseAction);

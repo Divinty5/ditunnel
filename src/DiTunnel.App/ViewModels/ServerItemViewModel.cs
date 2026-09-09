@@ -8,7 +8,7 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     public ImportedProfile Profile { get; } = profile;
     public string Name => Profile.Name;
     public string Summary => Profile.Summary;
-    public string Protocol => Profile.Kind;
+    public string Protocol => Profile.Kind.Equals("SS", StringComparison.OrdinalIgnoreCase) ? "Shadowsocks" : Profile.Kind;
     [ObservableProperty] private string probeText = "Не проверен";
     [ObservableProperty] private double? probeMilliseconds;
     [ObservableProperty] private bool probeTimedOut;
