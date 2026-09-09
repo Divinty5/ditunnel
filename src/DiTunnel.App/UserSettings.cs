@@ -15,13 +15,14 @@ public sealed class UserSettings
     public string Theme { get; set; } = "system";
     public string CloseAction { get; set; } = "ask";
     public bool LowestMode { get; set; }
+    public string? SelectedSourceId { get; set; }
     public SplitTunnelMode SplitTunnelMode { get; set; } = SplitTunnelMode.ProxyAll;
     public List<string> SplitTunnelDomains { get; set; } = [];
     public List<string> SplitTunnelProcesses { get; set; } = [];
-    // Process-aware routing needs a Windows filtering/redirect layer that is not implemented yet.
-    // Keep the serialized property for forward-compatible settings migration, but never advertise
-    // or pass it to Xray as if it were effective.
-    public SplitTunnelPolicy GetSplitTunnelPolicy() => new(SplitTunnelMode, SplitTunnelDomains, []);
+    // On Android these values are package names. Windows keeps them serialized for a future
+    // process-aware routing implementation, but does not apply them yet.
+    public SplitTunnelPolicy GetSplitTunnelPolicy() => new(
+        SplitTunnelMode, SplitTunnelDomains, OperatingSystem.IsAndroid() ? SplitTunnelProcesses : []);
     public bool KillSwitchEnabled { get; set; }
     public bool AllowLocalNetwork { get; set; }
     public bool StartWithWindows { get; set; }

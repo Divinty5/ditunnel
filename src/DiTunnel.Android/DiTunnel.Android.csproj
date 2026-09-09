@@ -6,6 +6,8 @@
     <SupportedOSPlatformVersion>31.0</SupportedOSPlatformVersion>
     <ApplicationId>com.divintyinteractive.ditunnel</ApplicationId>
     <ApplicationTitle>Di-Tunnel</ApplicationTitle>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <ApplicationVersion>40002</ApplicationVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <AndroidStoreUncompressedFileExtensions>.so</AndroidStoreUncompressedFileExtensions>
@@ -13,6 +15,10 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Android" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AndroidAsset Include="..\..\.tools\xray\26.3.27\windows-x64\geoip.dat" Link="geoip.dat" />
   </ItemGroup>
 
   <ItemGroup>

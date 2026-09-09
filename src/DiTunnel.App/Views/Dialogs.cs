@@ -68,14 +68,17 @@ public static class Dialogs
         Icon = owner.Icon
     };
 
-    public static async Task Settings(Window owner, Func<Task>? applyNetworkSettings = null)
+    public static async Task Settings(ContentControl owner, MainViewModel vm)
     {
         var originalContent = owner.Content;
+        var installedApplications = OperatingSystem.IsAndroid()
+            ? await vm.GetInstalledApplicationsAsync()
+            : [];
         var originalNetworkSettings = NetworkSettingsFingerprint();
         var networkSettingsChangedExplicitly = false;
         void Build()
         {
-            owner.Title = $"Di-Tunnel · {L.T("Настройки")}";
+            if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
             var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Center };
             Action? saveSplitRules = null;
             var back = AsyncButton("← Назад", async () =>
@@ -83,9 +86,9 @@ public static class Dialogs
                 saveSplitRules?.Invoke();
                 var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != NetworkSettingsFingerprint();
                 owner.Content = originalContent;
-                owner.Title = "Di-Tunnel";
-                if (networkSettingsChanged && applyNetworkSettings is not null)
-                    await applyNetworkSettings();
+                if (owner is Window window) window.Title = "Di-Tunnel";
+                if (networkSettingsChanged)
+                    await vm.ApplyNetworkSettingsAsync();
             });
             var status = Label("");
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
@@ -101,13 +104,13 @@ public static class Dialogs
             var close = new ComboBox { ItemsSource = new[] { L.T("Спрашивать каждый раз"), L.T("Скрыть в трей"), L.T("Выйти") }, HorizontalAlignment = HorizontalAlignment.Stretch,
                 SelectedIndex = Array.IndexOf(new[] { "ask", "hide", "exit" }, UserSettings.Current.CloseAction) };
             close.SelectionChanged += (_, _) => { if (close.SelectedIndex < 0) return; UserSettings.Current.CloseAction = new[] { "ask", "hide", "exit" }[close.SelectedIndex]; Save(); };
-            var appearance = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), RowDefinitions = new RowDefinitions("Auto,Auto"), ColumnSpacing = 12, RowSpacing = 6 };
+            var appearance = new Grid { ColumnDefinitions = new ColumnDefinitions(OperatingSystem.IsAndroid() ? "*" : "*,*"), RowDefinitions = new RowDefinitions("Auto,Auto"), ColumnSpacing = 12, RowSpacing = 6 };
             var themeLabel = Label("Тема");
             var closeLabel = Label("Действие при закрытии");
             appearance.Children.Add(themeLabel);
-            appearance.Children.Add(closeLabel); Grid.SetColumn(closeLabel, 1);
+            if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(closeLabel); Grid.SetColumn(closeLabel, 1); }
             appearance.Children.Add(theme); Grid.SetRow(theme, 1);
-            appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1);
+            if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1); }
             panel.Children.Add(appearance);
             panel.Children.Add(Label("Защита соединения"));
             var killSwitch = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled };
@@ -119,7 +122,7 @@ public static class Dialogs
                 UserSettings.Current.AllowLocalNetwork = allowLan.IsChecked == true;
                 allowLan.IsEnabled = UserSettings.Current.KillSwitchEnabled;
                 Save();
-                (owner.DataContext as MainViewModel)?.RefreshConnectionPolicy();
+                vm.RefreshConnectionPolicy();
             }
             killSwitch.IsCheckedChanged += (_, _) => SaveProtection();
             allowLan.IsCheckedChanged += (_, _) => SaveProtection();
@@ -137,6 +140,29 @@ public static class Dialogs
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = (int)UserSettings.Current.SplitTunnelMode };
             var domains = new TextBox { Text = string.Join(Environment.NewLine, UserSettings.Current.SplitTunnelDomains), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
             var splitRules = new StackPanel { Spacing = 12 };
+            var selectedApplications = UserSettings.Current.SplitTunnelProcesses.ToHashSet(StringComparer.Ordinal);
+            if (OperatingSystem.IsAndroid())
+            {
+                splitRules.Children.Add(Label("Приложения Android (можно выбрать несколько)"));
+                var applicationRows = new StackPanel { Spacing = 2 };
+                foreach (var application in installedApplications)
+                {
+                    var check = new CheckBox
+                    {
+                        Content = $"{application.Name}\n{application.Id}",
+                        IsChecked = selectedApplications.Contains(application.Id),
+                        Padding = new Thickness(8, 6)
+                    };
+                    check.IsCheckedChanged += (_, _) =>
+                    {
+                        if (check.IsChecked == true) selectedApplications.Add(application.Id);
+                        else selectedApplications.Remove(application.Id);
+                    };
+                    applicationRows.Children.Add(check);
+                }
+                splitRules.Children.Add(new ScrollViewer { Content = applicationRows, MinHeight = 140, MaxHeight = 320 });
+            }
+            splitRules.Children.Add(Label("Домены и IP-адреса"));
             splitRules.Children.Add(domains);
             void UpdateSplitRulesVisibility() => splitRules.IsVisible = splitMode.SelectedIndex != (int)SplitTunnelMode.ProxyAll;
             splitMode.SelectionChanged += (_, _) => UpdateSplitRulesVisibility();
@@ -147,15 +173,16 @@ public static class Dialogs
                 UserSettings.Current.SplitTunnelMode = (DiTunnel.Core.Connection.SplitTunnelMode)Math.Max(0, splitMode.SelectedIndex);
                 UserSettings.Current.SplitTunnelDomains = domains.Text?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => !string.IsNullOrWhiteSpace(domain)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
-                UserSettings.Current.SplitTunnelProcesses = [];
+                if (OperatingSystem.IsAndroid())
+                    UserSettings.Current.SplitTunnelProcesses = selectedApplications.OrderBy(value => value, StringComparer.Ordinal).ToList();
                 try { UserSettings.Current.Save(); status.Text = L.T("Правила будут применены при следующем подключении VPN."); } catch { status.Text = L.T("Не удалось сохранить настройки."); }
             };
-            var serviceActions = new WrapPanel();
+            var serviceActions = new WrapPanel { IsVisible = !OperatingSystem.IsAndroid() };
             var export = Button("Выгрузить журналы…", async () =>
             {
                 try
                 {
-                    var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = L.T("Выгрузить журналы…"), SuggestedFileName = $"DiTunnel-logs-{DateTime.Now:yyyyMMdd-HHmmss}.zip", DefaultExtension = "zip" });
+                    var file = await TopLevel.GetTopLevel(owner)!.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { Title = L.T("Выгрузить журналы…"), SuggestedFileName = $"DiTunnel-logs-{DateTime.Now:yyyyMMdd-HHmmss}.zip", DefaultExtension = "zip" });
                     if (file?.TryGetLocalPath() is not { } path) return;
                     // Build separately so overwriting an existing export is atomic and never appends to it.
                     var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -166,7 +193,7 @@ public static class Dialogs
                 catch { status.Text = L.T("Не удалось выгрузить журналы."); }
             });
             export.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(export);
-            panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
+            if (!OperatingSystem.IsAndroid()) panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
             var openLogs = Button("Открыть папку журналов", () =>
             {
                 try { Directory.CreateDirectory(UserSettings.DataDirectory); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UserSettings.DataDirectory) { UseShellExecute = true }); }
@@ -207,7 +234,7 @@ public static class Dialogs
         return settings.SplitTunnelMode == SplitTunnelMode.ProxyAll
             ? string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, (int)settings.SplitTunnelMode)
             : string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork,
-                (int)settings.SplitTunnelMode, Canonical(settings.SplitTunnelDomains));
+                (int)settings.SplitTunnelMode, Canonical(settings.SplitTunnelDomains), Canonical(settings.SplitTunnelProcesses));
     }
 
     public static async Task<string?> AskClose(Window owner)
@@ -222,12 +249,12 @@ public static class Dialogs
         return await dialog.ShowDialog<string?>(owner);
     }
 
-    public static async Task Subscriptions(Window owner, MainViewModel vm)
+    public static async Task Subscriptions(ContentControl owner, MainViewModel vm)
     {
         var originalContent = owner.Content;
-        owner.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
+        if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
         var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Center };
-        var back = Button("← Назад", () => { owner.Content = originalContent; owner.Title = "Di-Tunnel"; });
+        var back = Button("← Назад", () => { owner.Content = originalContent; if (owner is Window window) window.Title = "Di-Tunnel"; });
         var groups = new ComboBox { MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Stretch };
         groups.Bind(ItemsControl.ItemsSourceProperty, new Binding("Groups"));
         groups.Bind(ComboBox.SelectedItemProperty, new Binding("SelectedGroup") { Mode = BindingMode.TwoWay });

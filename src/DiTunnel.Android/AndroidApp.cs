@@ -19,7 +19,10 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
             () => App.UserSettings.Current.GetSplitTunnelPolicy());
         App.App.CreateMainViewModel = () => new MainViewModel(
             engine,
-            store: new AndroidProfileStore(this));
+            store: new AndroidProfileStore(this),
+            probe: new AndroidServerProbe(this),
+            countryResolver: new AndroidServerCountryResolver(this),
+            installedApplicationProvider: new AndroidInstalledApplicationProvider(this));
     }
 
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)

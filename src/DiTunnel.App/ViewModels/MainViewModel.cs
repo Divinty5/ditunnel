@@ -29,6 +29,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private bool storageAvailable = true;
     private readonly IServerProbe? probe;
     private readonly IServerCountryResolver? countryResolver;
+    private readonly IInstalledApplicationProvider? installedApplicationProvider;
     private ServerItemViewModel? activeProfile;
     private CancellationTokenSource? connectionCancellation;
     private CancellationTokenSource? probeCancellation;
@@ -212,11 +213,13 @@ public sealed partial class MainViewModel : ViewModelBase
     public bool IsLowestMode => UserSettings.Current.LowestMode;
 
     public MainViewModel() : this(null) { }
-    public MainViewModel(IProfileVpnEngine? engine, IProfileStore? store = null, IServerProbe? probe = null, IServerCountryResolver? countryResolver = null)
+    public MainViewModel(IProfileVpnEngine? engine, IProfileStore? store = null, IServerProbe? probe = null, IServerCountryResolver? countryResolver = null,
+        IInstalledApplicationProvider? installedApplicationProvider = null)
     {
         this.engine = engine;
         this.probe = probe;
         this.countryResolver = countryResolver;
+        this.installedApplicationProvider = installedApplicationProvider;
         profileStore = store ?? new ProfileStorage();
         if (engine is not null) engine.StatusChanged += EngineStatusChanged;
         mapLightsTimer.Tick += (_, _) => AdvanceMapLights();
@@ -317,6 +320,11 @@ public sealed partial class MainViewModel : ViewModelBase
     partial void OnIsConnectingChanged(bool value) { OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); OnPropertyChanged(nameof(CanConnect)); }
     partial void OnSelectedGroupChanged(ProfileGroup? value)
     {
+        if (value is not null && UserSettings.Current.SelectedSourceId != value.Id)
+        {
+            UserSettings.Current.SelectedSourceId = value.Id;
+            try { UserSettings.Current.Save(); } catch { }
+        }
         Profiles.Clear();
         foreach (var profile in allProfiles.Where(p => p.SourceId == value?.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)) Profiles.Add(new ServerItemViewModel(profile));
         SelectedProfile = Profiles.FirstOrDefault();
@@ -397,7 +405,7 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     private void RebuildGroups(string? preferred = null)
     {
-        preferred ??= SelectedGroup?.Id;
+        preferred ??= SelectedGroup?.Id ?? UserSettings.Current.SelectedSourceId;
         Groups.Clear();
         foreach (var group in allProfiles.GroupBy(p => p.SourceId)) Groups.Add(new(group.Key, group.First().SourceName));
         SelectedGroup = Groups.FirstOrDefault(g => g.Id == preferred) ?? Groups.FirstOrDefault();
@@ -439,6 +447,10 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         RemoveWhere(p => p == SelectedProfile.Profile, "Сервер удалён.");
     }
+
+    public Task<IReadOnlyList<InstalledApplication>> GetInstalledApplicationsAsync(CancellationToken cancellationToken = default) =>
+        installedApplicationProvider?.GetInstalledApplicationsAsync(cancellationToken)
+        ?? Task.FromResult<IReadOnlyList<InstalledApplication>>([]);
     [RelayCommand] private void RemoveGroup()
     {
         if (SelectedGroup is null || !CanManageProfiles) return;
@@ -622,7 +634,9 @@ public sealed partial class MainViewModel : ViewModelBase
             }
             SortProfilesByProbe();
             var changed = all && IsLowestMode && SelectLowestProfile();
-            if (!changed) Notice = "Проверка завершена. Показано время HTTPS-запроса через сервер; это не ICMP-пинг. Маршруты Windows не менялись.";
+            if (!changed) Notice = OperatingSystem.IsAndroid()
+                ? "Проверка завершена. Показано время TCP-подключения к VPN-серверу через физическую сеть."
+                : "Проверка завершена. Показано время HTTPS-запроса через сервер; это не ICMP-пинг. Маршруты Windows не менялись.";
         }
         catch (OperationCanceledException) { Notice = "Проверка отменена."; }
         catch { Notice = "Не удалось выполнить проверку сервера."; }

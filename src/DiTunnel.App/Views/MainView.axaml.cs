@@ -20,13 +20,13 @@ public partial class MainView : UserControl
 
     private async void SettingsClick(object? sender, RoutedEventArgs e)
     {
-        if (TopLevel.GetTopLevel(this) is Window owner && DataContext is MainViewModel vm)
-            await Dialogs.Settings(owner, vm.ApplyNetworkSettingsAsync);
+        if (DataContext is MainViewModel vm)
+            await Dialogs.Settings(TopLevel.GetTopLevel(this) is Window window ? window : this, vm);
     }
     private async void SubscriptionsClick(object? sender, RoutedEventArgs e)
     {
-        if (TopLevel.GetTopLevel(this) is Window owner && DataContext is MainViewModel vm)
-            await Dialogs.Subscriptions(owner, vm);
+        if (DataContext is MainViewModel vm)
+            await Dialogs.Subscriptions(TopLevel.GetTopLevel(this) is Window window ? window : this, vm);
     }
     private void AddClick(object? sender, RoutedEventArgs e)
     {
