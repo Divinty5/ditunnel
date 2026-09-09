@@ -16,6 +16,7 @@ namespace DiTunnel.Platform.Android;
 [Service(
     Name = ServiceClassName,
     Exported = false,
+    Process = ":vpn",
     Permission = global::Android.Manifest.Permission.BindVpnService,
     ForegroundServiceType = ForegroundService.TypeSpecialUse)]
 [IntentFilter([global::Android.Net.VpnService.ServiceInterface])]
@@ -32,6 +33,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
     private ParcelFileDescriptor? tunnel;
     private XrayDialerController? dialerController;
     private bool xrayRunning;
+    private Intent? startIntent;
 
     public override void OnCreate()
     {
@@ -49,7 +51,10 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         }
 
         if (intent?.Action == ActionStart)
+        {
+            startIntent = intent;
             _ = StartTunnelAsync();
+        }
         return StartCommandResult.NotSticky;
     }
 
@@ -61,7 +66,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
 
     public override void OnDestroy()
     {
-        CleanupXrayAndTun();
+        CloseTunnel();
         StopForeground(StopForegroundFlags.Remove);
         base.OnDestroy();
     }
@@ -72,7 +77,9 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         try
         {
             if (xrayRunning) return;
-            var request = AndroidVpnServiceBridge.TakePendingRequest()
+            var pendingRequest = startIntent is null ? null : AndroidVpnServiceBridge.ReadRequest(startIntent);
+            startIntent = null;
+            var request = pendingRequest
                 ?? throw new InvalidOperationException("Профиль VPN не был передан сервису.");
             var profileConfiguration = XrayProfileConverter.Convert(request.Profile);
             var addresses = await Dns.GetHostAddressesAsync(profileConfiguration.ServerHost);
@@ -91,6 +98,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
                 .AddDnsServer("1.1.1.1")
                 .AddDnsServer("2606:4700:4700::1111")
                 .SetBlocking(true);
+            ApplyApplicationRules(builder, request.SplitTunnelPolicy, PackageName);
             tunnel = builder.Establish()
                 ?? throw new InvalidOperationException("Android не создал TUN-интерфейс.");
 
@@ -106,20 +114,42 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             if (!response.Success) throw new InvalidOperationException(SanitizeError(response.Error));
             xrayRunning = true;
             UpdateNotification("VPN подключён");
-            AndroidVpnServiceBridge.Started();
+            AndroidVpnServiceBridge.PublishStarted(this);
         }
         catch (Exception error)
         {
-            CleanupXrayAndTun();
+            CloseTunnel();
             StopForeground(StopForegroundFlags.Remove);
-            StopSelf();
-            AndroidVpnServiceBridge.StartFailed(error is InvalidOperationException or NotSupportedException or FormatException
+            AndroidVpnServiceBridge.PublishStartFailed(this, error is InvalidOperationException or NotSupportedException or FormatException
                 ? error.Message
                 : "Не удалось запустить Android VPN.");
+            TerminateVpnProcess();
         }
         finally
         {
             lifecycle.Release();
+        }
+    }
+
+    private static void ApplyApplicationRules(Builder builder, DiTunnel.Core.Connection.SplitTunnelPolicy policy, string? ownPackageName)
+    {
+        if (policy.Mode == DiTunnel.Core.Connection.SplitTunnelMode.ProxyAll) return;
+        var packageNames = policy.Processes.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToList();
+        // With an allow-list Android otherwise routes Di-Tunnel itself outside the VPN. libXray
+        // still calls ProtectFd for its outbound sockets and treats Android's `false` as fatal.
+        // Include the service package so ProtectFd can explicitly move those sockets outside TUN.
+        if (policy.Mode == DiTunnel.Core.Connection.SplitTunnelMode.ProxySelected && !string.IsNullOrWhiteSpace(ownPackageName))
+            packageNames.Add(ownPackageName);
+        foreach (var packageName in packageNames.Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                if (policy.Mode == DiTunnel.Core.Connection.SplitTunnelMode.BypassSelected)
+                    builder.AddDisallowedApplication(packageName);
+                else
+                    builder.AddAllowedApplication(packageName);
+            }
+            catch (PackageManager.NameNotFoundException) { }
         }
     }
 
@@ -128,10 +158,13 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         await lifecycle.WaitAsync();
         try
         {
-            CleanupXrayAndTun();
+            // libXray does not reliably support a second runXrayFromJson after stopXray in the
+            // same Android process. Notify the UI first, then terminate the isolated :vpn process;
+            // Android will create a clean Go runtime for the next connection.
+            AndroidVpnServiceBridge.PublishStopped(this);
             StopForeground(StopForegroundFlags.Remove);
-            AndroidVpnServiceBridge.Stopped();
-            if (stopService) StopSelf();
+            CloseTunnel();
+            if (stopService) TerminateVpnProcess();
         }
         finally
         {
@@ -183,21 +216,22 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         manager?.Notify(NotificationId, BuildNotification(text));
     }
 
-    private void CleanupXrayAndTun()
+    private void CloseTunnel()
     {
-        if (xrayRunning)
-        {
-            try { Invoke("stopXray", new JsonObject()); } catch { }
-            xrayRunning = false;
-        }
-        try { global::LibXray.LibXray.ResetDNS(); } catch { }
-        try { global::LibXray.LibXray.RegisterDialerController(null); } catch { }
-        try { global::LibXray.LibXray.RegisterListenerController(null); } catch { }
-        dialerController?.Dispose();
+        xrayRunning = false;
         dialerController = null;
         tunnel?.Close();
         tunnel?.Dispose();
         tunnel = null;
+    }
+
+    private static void TerminateVpnProcess()
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(200);
+            global::Android.OS.Process.KillProcess(global::Android.OS.Process.MyPid());
+        });
     }
 
     private static string CreateAndroidConfiguration(string source, int tunFileDescriptor)

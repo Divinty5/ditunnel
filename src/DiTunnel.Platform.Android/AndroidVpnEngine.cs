@@ -13,6 +13,7 @@ public sealed class AndroidVpnEngine(
         ?? throw new InvalidOperationException("Android ApplicationContext недоступен.");
     private VpnStatus status = VpnStatus.Disconnected;
     private readonly Func<SplitTunnelPolicy> splitTunnelPolicy = splitTunnelPolicy ?? (() => SplitTunnelPolicy.Default);
+    private readonly bool receiverRegistered = AndroidVpnServiceBridge.Register(context.ApplicationContext ?? context);
 
     public VpnStatus Status => status;
     public bool RequiresAdministrator => false;
@@ -33,8 +34,7 @@ public sealed class AndroidVpnEngine(
         }
 
         var completion = AndroidVpnServiceBridge.ExpectStart();
-        AndroidVpnServiceBridge.SetPendingProfile(profile, splitTunnelPolicy());
-        var intent = new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionStart);
+        var intent = AndroidVpnServiceBridge.CreateStartIntent(context, profile, splitTunnelPolicy());
         context.StartForegroundService(intent);
         try
         {
@@ -55,6 +55,12 @@ public sealed class AndroidVpnEngine(
         var intent = new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionStop);
         context.StartService(intent);
         SetStatus(await completion.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken));
+    }
+
+    public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+    {
+        await DisconnectAsync(cancellationToken);
+        await ConnectAsync(profile, cancellationToken);
     }
 
     public async ValueTask DisposeAsync()
