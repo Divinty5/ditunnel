@@ -3,18 +3,20 @@
   <PropertyGroup>
     <TargetFramework>net10.0-android36.0</TargetFramework>
     <OutputType>Exe</OutputType>
-    <SupportedOSPlatformVersion>31.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion>29.0</SupportedOSPlatformVersion>
     <ApplicationId>com.divintyinteractive.ditunnel</ApplicationId>
     <ApplicationTitle>Di-Tunnel</ApplicationTitle>
     <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
-    <ApplicationVersion>40002</ApplicationVersion>
+    <ApplicationVersion>40024</ApplicationVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <AndroidStripNativeLibraries>true</AndroidStripNativeLibraries>
     <AndroidStoreUncompressedFileExtensions>.so</AndroidStoreUncompressedFileExtensions>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Android" />
+    <PackageReference Include="ZXing.Net" />
   </ItemGroup>
 
   <ItemGroup>

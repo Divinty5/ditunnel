@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Translations.json" />
+    <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
     <AvaloniaResource Include="Assets\Flags\*.png" />
     <AvaloniaResource Include="Assets\world-map.svg" />
     <AvaloniaResource Include="Assets\world-map-lights-*.svg" />
@@ -18,6 +19,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="QRCoder" />
     <PackageReference Include="Svg.Controls.Skia.Avalonia" />
   </ItemGroup>
 

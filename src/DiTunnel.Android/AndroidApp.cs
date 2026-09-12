@@ -13,6 +13,8 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
     public AndroidApp(nint javaReference, JniHandleOwnership transfer)
         : base(javaReference, transfer)
     {
+        AndroidLocaleCoordinator.Initialize(this);
+        App.QrScanner.ScanAsync = QrScannerCoordinator.Instance.ScanAsync;
         var engine = new AndroidVpnEngine(
             this,
             VpnPermissionCoordinator.Instance,
