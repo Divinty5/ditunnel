@@ -6,9 +6,11 @@
     <Deterministic>true</Deterministic>
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
-    <Version>0.4.2</Version>
+    <Version>0.4.24</Version>
     <Company>Di Vinty Interactive</Company>
     <Authors>Di Vinty Interactive</Authors>
+    <Copyright>Copyright © 2026 Di Vinty Interactive</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Divinty5/ditunnel</RepositoryUrl>
   </PropertyGroup>
   <PropertyGroup Condition="'$(DITUNNEL_BUILD_ROOT)' != ''">

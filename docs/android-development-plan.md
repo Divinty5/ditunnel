@@ -1,14 +1,14 @@
 # Di-Tunnel — план поддержки Android
 
-Дата: 9 сентября 2026 года.
+Дата: 9 сентября 2026 года. Актуализировано 13 сентября 2026 года.
 
-Статус: принят как рабочая основа, реализация начата. Завершён A0: создан Android host, добавлен lifecycle Avalonia 12 и получен debug APK. Начат A1: выделен `DiTunnel.Platform.Android`, профили подключены к Android Keystore и внутреннему каталогу без резервного копирования. Windows 0.3.30 остаётся эталоном поведения; каждый общий рефакторинг должен сохранять её работоспособность.
+Статус: этапы A0–A6 реализованы, версия 0.4.24 подготовлена к Android ARM64-релизу. Установка и адаптивный UI проверены на телефоне и Huawei MatePad Pro с HarmonyOS 2; финальный release gate зафиксирован в `android-release-validation.md`. Windows остаётся обязательной регрессионной платформой общего кода.
 
 ## 1. Цель и границы
 
 Цель — выпустить rootless VPN-клиент для Android с максимально возможным паритетом с Windows: импорт профилей и подписок, подключение через Xray, переключение серверов, Lowest, доменные/IP-правила, маршрутизация по приложениям, восстановление после смены сети, безопасное хранилище и обезличенная диагностика.
 
-Первая поддерживаемая версия — Android 12 (API 31). Сборка компилируется и публикуется с target API 36. Релизные ABI — `arm64-v8a`; `x86_64` используется для эмулятора. ARM32 можно добавить отдельным решением после проверки спроса, размера и производительности.
+Первая поддерживаемая версия — Android 10 (API 29). Сборка компилируется и публикуется с target API 36. Релизный ABI — `arm64-v8a`; `x86_64` используется для эмулятора. Совместимость API 29 подтверждена установкой на HarmonyOS 2. ARM32 можно добавить отдельным решением после проверки спроса, размера и производительности.
 
 На первом этапе не входят:
 
@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | .NET SDK | `10.0.302` | Сохранить текущую версию из `global.json`; Android workload ставить из того же workload set |
 | Target framework | `net10.0-android36.0` | Соответствует .NET 10 и target API 36 |
-| `minSdk` | API 31, Android 12 | Это нижняя граница Tier 2 Android-поддержки Avalonia 12; уменьшает количество опасных lifecycle-веток |
+| `minSdk` | API 29, Android 10 | Покрывает Android-совместимый слой HarmonyOS 2; host и platform-проект используют одну нижнюю границу |
 | `targetSdk` / compile SDK | API 36, Android 16 | Требование Google Play для новых приложений и обновлений с 31 августа 2026 года |
 | Avalonia | `12.1.2` | Оставить единую версию UI-пакетов Windows и Android |
 | Avalonia.Android | `12.1.2` | Android host и `AvaloniaMainActivity` |
@@ -35,7 +35,7 @@
 | Go toolchain для воспроизводимой AAR | `1.26.3` | Зафиксировать вместе с `golang.org/x/mobile` из release source; не использовать плавающий `latest` |
 | Тесты | xUnit `2.9.3`, runner `3.1.4`, Test SDK `17.14.1` | Сохранить текущие версии до отдельного обновления всего test stack |
 
-Перед первым Android merge создать `eng/android-runtime.json`: release tag, commit, URL/имя AAR, SHA-256, ABI, Go/gomobile versions и лицензии. Бинарник нельзя брать по плавающему URL. В CI либо воспроизводимо собирать AAR из закреплённого source tag, либо проверять подпись/хеш официального release asset.
+Манифест `eng/android-runtime.json` фиксирует release tag, commit, URL/имя AAR, SHA-256, ABI и версию Go. Бинарник нельзя брать по плавающему URL. В CI нужно либо воспроизводимо собирать AAR из закреплённого source tag, либо проверять хеш официального release asset.
 
 Xray-core Windows сейчас закреплён на `v26.3.27`. Переход на `v26.7.28` выполняется отдельным маленьким коммитом до Android-интеграции и только после повторной проверки HY2, VLESS TCP/WS/HTTPUpgrade, Trojan, Shadowsocks, TUN, DNS, IPv4/IPv6, split tunneling и WFP kill switch. Если регрессия не устранена, Windows временно остаётся на `v26.3.27`, а различие явно фиксируется в ADR и тестовой матрице.
 
@@ -234,11 +234,11 @@ Android не даёт обычному VPN-приложению программ
 - Добавить CI build/unit tests, emulator smoke без реальных подписок и ручной real-device checklist.
 - Подготовить privacy policy/data safety disclosure для VPN и канала распространения.
 
-**Gate:** clean install/update/uninstall, Android 12 и 16, arm64 device и x86_64 emulator; release artifacts не содержат тестовых серверов, ключей или полных сетевых журналов.
+**Gate:** clean install/update/uninstall, Android 10 и 16, ARM64 device и x86_64 emulator; release artifacts не содержат тестовых серверов, ключей или полных сетевых журналов. Результаты фиксируются в `android-release-validation.md`.
 
 ## 9. Матрица паритета
 
-| Функция Windows 0.3.30 | Android target | Комментарий |
+| Функция Windows | Android target | Комментарий |
 | --- | --- | --- |
 | HY2, VLESS TCP/WS/HTTPUpgrade, Trojan, SS | Да, A4 | Общий converter, Android libXray runtime |
 | VMess/произвольный JSON — хранение | Да, A3 | Подключение остаётся общим будущим улучшением |
@@ -263,7 +263,7 @@ Android не даёт обычному VPN-приложению программ
 - одинаковые golden configs обеих платформ;
 - Android compile, trimming/linker warnings as errors для нашего кода;
 - parser fuzz/property cases, IPC/input size limits, secret-redaction tests;
-- emulator API 31 и API 36 smoke: Activity, storage, service lifecycle без реального VPS.
+- emulator API 29 и API 36 smoke: Activity, storage, service lifecycle без реального VPS.
 
 На изолированном Android-устройстве/эмуляторе перед релизом:
 
