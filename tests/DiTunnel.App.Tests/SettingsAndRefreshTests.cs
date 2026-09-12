@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Avalonia;
 using DiTunnel.App.ViewModels;
+using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.App.Tests;
@@ -62,6 +63,51 @@ public sealed class SettingsAndRefreshTests
             File.WriteAllText(path, "broken"); Assert.Equal("ask", UserSettings.Load(path).CloseAction);
         }
         finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact] public void SplitTunnelRulesAreStoredSeparatelyForBothModes()
+    {
+        var settings = new UserSettings();
+        settings.SetSplitTunnelRules(SplitTunnelMode.BypassSelected, ["direct.example"], ["direct.app"]);
+        settings.SetSplitTunnelRules(SplitTunnelMode.ProxySelected, ["proxy.example"], ["proxy.app"]);
+
+        Assert.Equal(["direct.example"], settings.GetSplitTunnelRules(SplitTunnelMode.BypassSelected).Domains);
+        Assert.Equal(["direct.app"], settings.GetSplitTunnelRules(SplitTunnelMode.BypassSelected).Processes);
+        Assert.Equal(["proxy.example"], settings.GetSplitTunnelRules(SplitTunnelMode.ProxySelected).Domains);
+        Assert.Equal(["proxy.app"], settings.GetSplitTunnelRules(SplitTunnelMode.ProxySelected).Processes);
+    }
+
+    [Fact] public void LegacySplitTunnelRulesAreMigratedToTheirSelectedMode()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "settings.json");
+            File.WriteAllText(path, "{\"SplitTunnelMode\":2,\"SplitTunnelDomains\":[\"proxy.example\"],\"SplitTunnelProcesses\":[\"proxy.app\"]}");
+
+            var loaded = UserSettings.Load(path);
+
+            Assert.Equal(["proxy.example"], loaded.ProxySelectedSplitTunnelDomains);
+            Assert.Equal(["proxy.app"], loaded.ProxySelectedSplitTunnelProcesses);
+            Assert.Empty(loaded.BypassSplitTunnelDomains);
+            Assert.Empty(loaded.BypassSplitTunnelProcesses);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact] public void ApplicationAutoSelectionAddsExpectedPackagesWithoutInventingMissingOnes()
+    {
+        InstalledApplication[] installed =
+        [
+            new("com.google.android.youtube", "YouTube"),
+            new("com.openai.chatgpt", "ChatGPT"),
+            new("ru.sberbankmobile", "СберБанк"),
+            new("com.yandex.browser", "Яндекс Браузер"),
+            new("com.example.notes", "Notes")
+        ];
+
+        Assert.Equal(["com.google.android.youtube", "com.openai.chatgpt"], ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
+        Assert.Equal(["ru.sberbankmobile", "com.yandex.browser"], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
     }
     [Fact] public void DiagnosticsExportsOnlySanitizedNetworkEvents()
     {

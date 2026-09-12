@@ -15,8 +15,9 @@ public sealed class ProfileGroupTests
     [Fact] public void SwitchingGroupSelectsOnlyItsServers()
     {
         var vm = new MainViewModel(null, new Store());
+        vm.SelectedGroup = vm.Groups.Single(group => group.Id == "a");
         Assert.Equal(2, vm.Profiles.Count);
-        vm.SelectedGroup = vm.Groups[1];
+        vm.SelectedGroup = vm.Groups.Single(group => group.Id == "b");
         Assert.Equal("B1", Assert.Single(vm.Profiles).Name);
         Assert.Equal("B1", vm.SelectedProfile!.Name);
     }
@@ -24,6 +25,7 @@ public sealed class ProfileGroupTests
     {
         var store = new Store();
         var vm = new MainViewModel(null, store);
+        vm.SelectedGroup = vm.Groups.Single(group => group.Id == "a");
         vm.RemoveGroupCommand.Execute(null);
         Assert.Equal("B1", Assert.Single(store.Items).Name);
         var reloaded = new MainViewModel(null, store);
@@ -33,6 +35,7 @@ public sealed class ProfileGroupTests
     {
         var store = new Store { FailSave = true };
         var vm = new MainViewModel(null, store);
+        vm.SelectedGroup = vm.Groups.Single(group => group.Id == "a");
         vm.RemoveGroupCommand.Execute(null);
         Assert.Equal(3, store.Items.Count);
         Assert.Equal(2, vm.Profiles.Count);

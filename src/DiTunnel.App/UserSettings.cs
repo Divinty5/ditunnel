@@ -15,14 +15,44 @@ public sealed class UserSettings
     public string Theme { get; set; } = "system";
     public string CloseAction { get; set; } = "ask";
     public bool LowestMode { get; set; }
+    public ServerProbeMode ServerProbeMode { get; set; } = ServerProbeMode.Fast;
     public string? SelectedSourceId { get; set; }
     public SplitTunnelMode SplitTunnelMode { get; set; } = SplitTunnelMode.ProxyAll;
+    // Legacy 0.4.2 fields retained for one-way settings migration.
     public List<string> SplitTunnelDomains { get; set; } = [];
     public List<string> SplitTunnelProcesses { get; set; } = [];
+    public List<string> BypassSplitTunnelDomains { get; set; } = [];
+    public List<string> BypassSplitTunnelProcesses { get; set; } = [];
+    public List<string> ProxySelectedSplitTunnelDomains { get; set; } = [];
+    public List<string> ProxySelectedSplitTunnelProcesses { get; set; } = [];
     // On Android these values are package names. Windows keeps them serialized for a future
     // process-aware routing implementation, but does not apply them yet.
-    public SplitTunnelPolicy GetSplitTunnelPolicy() => new(
-        SplitTunnelMode, SplitTunnelDomains, OperatingSystem.IsAndroid() ? SplitTunnelProcesses : []);
+    public SplitTunnelPolicy GetSplitTunnelPolicy()
+    {
+        var domains = SplitTunnelMode == SplitTunnelMode.ProxySelected ? ProxySelectedSplitTunnelDomains : BypassSplitTunnelDomains;
+        var processes = SplitTunnelMode == SplitTunnelMode.ProxySelected ? ProxySelectedSplitTunnelProcesses : BypassSplitTunnelProcesses;
+        return new(SplitTunnelMode, domains, OperatingSystem.IsAndroid() ? processes : []);
+    }
+
+    public (List<string> Domains, List<string> Processes) GetSplitTunnelRules(SplitTunnelMode mode) => mode == SplitTunnelMode.ProxySelected
+        ? (ProxySelectedSplitTunnelDomains, ProxySelectedSplitTunnelProcesses)
+        : (BypassSplitTunnelDomains, BypassSplitTunnelProcesses);
+
+    public void SetSplitTunnelRules(SplitTunnelMode mode, IEnumerable<string> domains, IEnumerable<string> processes)
+    {
+        var normalizedDomains = domains.ToList();
+        var normalizedProcesses = processes.ToList();
+        if (mode == SplitTunnelMode.ProxySelected)
+        {
+            ProxySelectedSplitTunnelDomains = normalizedDomains;
+            ProxySelectedSplitTunnelProcesses = normalizedProcesses;
+        }
+        else
+        {
+            BypassSplitTunnelDomains = normalizedDomains;
+            BypassSplitTunnelProcesses = normalizedProcesses;
+        }
+    }
     public bool KillSwitchEnabled { get; set; }
     public bool AllowLocalNetwork { get; set; }
     public bool StartWithWindows { get; set; }
@@ -35,10 +65,15 @@ public sealed class UserSettings
     {
         try
         {
-            var settings = JsonSerializer.Deserialize<UserSettings>(File.ReadAllText(path)) ?? new();
+            var settings = JsonSerializer.Deserialize(File.ReadAllText(path), AppJsonContext.Default.UserSettings) ?? new();
             if (settings.Language is not ("ru" or "en")) settings.Language = "ru";
             if (settings.Theme is not ("system" or "dark" or "light")) settings.Theme = "system";
             if (settings.CloseAction is not ("ask" or "hide" or "exit")) settings.CloseAction = "ask";
+            if (!Enum.IsDefined(settings.ServerProbeMode)) settings.ServerProbeMode = ServerProbeMode.Fast;
+            if (settings.BypassSplitTunnelDomains.Count == 0 && settings.ProxySelectedSplitTunnelDomains.Count == 0
+                && settings.BypassSplitTunnelProcesses.Count == 0 && settings.ProxySelectedSplitTunnelProcesses.Count == 0
+                && (settings.SplitTunnelDomains.Count > 0 || settings.SplitTunnelProcesses.Count > 0))
+                settings.SetSplitTunnelRules(settings.SplitTunnelMode, settings.SplitTunnelDomains, settings.SplitTunnelProcesses);
             return settings;
         }
         catch { return new(); }
@@ -48,7 +83,7 @@ public sealed class UserSettings
     {
         path ??= Path.Combine(DataDirectory, "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(this));
+        File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(this, AppJsonContext.Default.UserSettings));
         File.Move(path + ".tmp", path, true);
     }
 

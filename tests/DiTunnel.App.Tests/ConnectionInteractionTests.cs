@@ -53,7 +53,7 @@ public sealed class ConnectionInteractionTests
     private sealed class Probe : IServerProbe
     {
         public int Calls;
-        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
         { Calls++; return Task.FromResult(new ServerProbeResult(42, "HTTPS · 42 мс")); }
     }
     [Fact] public async Task ProbeUpdatesRowAndReenablesControls()
@@ -66,11 +66,11 @@ public sealed class ConnectionInteractionTests
         Assert.False(vm.IsProbing);
         Assert.True(vm.CanImport);
         vm.ConnectionState = VpnConnectionState.Connected;
-        Assert.Equal("≈  42 мс", vm.ConnectionHint);
+        Assert.Equal("Windows TUN · Xray-core", vm.ConnectionHint);
     }
     private sealed class SortingProbe : IServerProbe
     {
-        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default) =>
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
             Task.FromResult(profile.Name switch
             {
                 "A" => new ServerProbeResult(180, "HTTPS · 180 мс"),
@@ -80,19 +80,110 @@ public sealed class ConnectionInteractionTests
     }
     private sealed class SortingStore : IProfileStore
     {
-        public IReadOnlyList<ImportedProfile> Load() =>
+        public List<ImportedProfile> Items { get; set; } =
         [
             new("B", "Hysteria 2", "hy2://b@192.0.2.2:443"),
             new("C", "Hysteria 2", "hy2://c@192.0.2.3:443"),
             new("A", "Hysteria 2", "hy2://a@192.0.2.1:443")
         ];
-        public void Save(IEnumerable<ImportedProfile> profiles) { }
+        public IReadOnlyList<ImportedProfile> Load() => Items;
+        public void Save(IEnumerable<ImportedProfile> profiles) => Items = profiles.ToList();
     }
     [Fact] public async Task ProbeSortsSuccessfulServersBeforeTimeouts()
     {
         var vm = new MainViewModel(null, new SortingStore(), new SortingProbe());
         await vm.ProbeAllCommand.ExecuteAsync(null);
         Assert.Equal(["C", "A", "B"], vm.Profiles.Select(profile => profile.Name));
+    }
+    [Fact]
+    public async Task FilteringRemovesOnlyServersThatFailedAProbe()
+    {
+        var store = new SortingStore();
+        var vm = new MainViewModel(null, store, new SortingProbe());
+        await vm.ProbeAllCommand.ExecuteAsync(null);
+        Assert.True(vm.CanRemoveUnavailable);
+
+        vm.RemoveUnavailableCommand.Execute(null);
+
+        Assert.Equal(["A", "C"], store.Items.Select(profile => profile.Name).Order());
+        Assert.DoesNotContain(vm.Profiles, profile => profile.Name == "B");
+    }
+
+    private sealed class GroupedStore : IProfileStore
+    {
+        public List<ImportedProfile> Items { get; set; } =
+        [
+            new("A1", "VLESS", "vless://a", "a", "Subscription A"),
+            new("B1", "VLESS", "vless://b1", "b", "Subscription B"),
+            new("B2", "VLESS", "vless://b2", "b", "Subscription B")
+        ];
+        public IReadOnlyList<ImportedProfile> Load() => Items;
+        public void Save(IEnumerable<ImportedProfile> profiles) => Items = profiles.ToList();
+    }
+
+    private sealed class ProgressiveProbe : IServerProbe
+    {
+        public TaskCompletionSource ReleaseSuccessfulProbe { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool SuccessfulProbeWasCancelled { get; private set; }
+        public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        {
+            if (profile.Name == "B2") return new(null, "Таймаут");
+            try { await ReleaseSuccessfulProbe.Task.WaitAsync(cancellationToken); }
+            catch (OperationCanceledException) { SuccessfulProbeWasCancelled = true; throw; }
+            return new(48, "HTTP · 48 мс");
+        }
+    }
+
+    [Fact]
+    public async Task FilteringDuringProbeKeepsSelectionResultsAndRemainingChecks()
+    {
+        var store = new GroupedStore();
+        var probe = new ProgressiveProbe();
+        var vm = new MainViewModel(null, store, probe);
+        vm.SelectedGroup = vm.Groups.Single(group => group.Id == "b");
+
+        var checking = vm.ProbeAllCommand.ExecuteAsync(null);
+        await WaitForAsync(() => vm.CanRemoveUnavailable);
+        vm.RemoveUnavailableCommand.Execute(null);
+
+        Assert.Equal("b", vm.SelectedGroup?.Id);
+        Assert.True(vm.IsProbing);
+        probe.ReleaseSuccessfulProbe.SetResult();
+        await checking;
+
+        Assert.False(probe.SuccessfulProbeWasCancelled);
+        var remaining = Assert.Single(vm.Profiles);
+        Assert.Equal("B1", remaining.Name);
+        Assert.Equal(48, remaining.ProbeMilliseconds);
+        Assert.Equal("b", vm.SelectedGroup?.Id);
+    }
+
+    private sealed class BatchProbe : IServerBatchProbe
+    {
+        public List<int> BatchSizes { get; } = [];
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            throw new InvalidOperationException("The batch path should be used.");
+        public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        {
+            BatchSizes.Add(profiles.Count);
+            return Task.FromResult<IReadOnlyList<ServerProbeResult>>(profiles.Select(_ => new ServerProbeResult(30, "HTTP · 30 мс")).ToArray());
+        }
+    }
+
+    [Fact]
+    public async Task BatchProbeRunsInGroupsOfAtMostFive()
+    {
+        var store = new GroupedStore();
+        store.Items = Enumerable.Range(1, 12)
+            .Select(index => new ImportedProfile($"P{index}", "VLESS", $"vless://p{index}", "batch", "Batch"))
+            .ToList();
+        var probe = new BatchProbe();
+        var vm = new MainViewModel(null, store, probe);
+
+        await vm.ProbeAllCommand.ExecuteAsync(null);
+
+        Assert.Equal([5, 5, 2], probe.BatchSizes);
+        Assert.All(vm.Profiles, profile => Assert.Equal(30, profile.ProbeMilliseconds));
     }
     [Fact] public async Task ProbeAllRemainsAvailableWhileVpnIsConnected()
     {
@@ -154,7 +245,7 @@ public sealed class ConnectionInteractionTests
         var vm = new MainViewModel(engine, new TwoProfileStore());
         await vm.ConnectCommand.ExecuteAsync(null);
 
-        vm.SelectedProfile = vm.Profiles.Single(profile => profile.Name == "B");
+        vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
         await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(2)), WaitForAsync(() => engine.ConnectedProfiles.Count == 2));
 
         Assert.Equal(["A", "B"], engine.ConnectedProfiles);
@@ -192,7 +283,7 @@ public sealed class ConnectionInteractionTests
         var engine = new SwitchingEngine();
         var vm = new MainViewModel(engine, new TwoProfileStore()) { ConnectionState = VpnConnectionState.Error };
 
-        vm.SelectedProfile = vm.Profiles.Single(profile => profile.Name == "B");
+        vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
         await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(2)), WaitForAsync(() => engine.ConnectedProfiles.Count == 1));
 
         Assert.Equal(["B"], engine.ConnectedProfiles);
