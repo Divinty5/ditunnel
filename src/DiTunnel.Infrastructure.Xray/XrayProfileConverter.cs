@@ -97,7 +97,7 @@ public static class XrayProfileConverter
             outbound["settings"] = new JsonObject { ["servers"] = new JsonArray(server) };
         }
         var security = hy2 || scheme == "trojan" ? Get("security", "tls") : Get("security", "none");
-        if (security is not ("tls" or "none")) throw new NotSupportedException("В этом прототипе доступны TLS и обычный транспорт; REALITY ещё не подключён.");
+        if (security is not ("tls" or "none" or "reality")) throw new NotSupportedException("Тип защиты профиля не поддерживается.");
         if (hy2 && security != "tls") throw new NotSupportedException("Hysteria 2 требует TLS.");
         stream["security"] = security;
         if (security == "tls")
@@ -108,7 +108,23 @@ public static class XrayProfileConverter
                 serverName = uri.Host;
             var tls = new JsonObject { ["serverName"] = serverName, ["allowInsecure"] = false };
             if (Get("alpn") != "") tls["alpn"] = new JsonArray(Get("alpn").Split(',').Select(s => (JsonNode?)JsonValue.Create(s)).ToArray());
+            if (Get("fp") != "") tls["fingerprint"] = Get("fp");
             stream["tlsSettings"] = tls;
+        }
+        else if (security == "reality")
+        {
+            var serverName = Get("sni", "");
+            var publicKey = Get("pbk", "");
+            if (string.IsNullOrWhiteSpace(serverName) || string.IsNullOrWhiteSpace(publicKey))
+                throw new FormatException("Для REALITY нужны параметры sni и pbk.");
+            stream["realitySettings"] = new JsonObject
+            {
+                ["serverName"] = serverName,
+                ["fingerprint"] = Get("fp", "chrome"),
+                ["publicKey"] = publicKey,
+                ["shortId"] = Get("sid", ""),
+                ["spiderX"] = Get("spx", "/")
+            };
         }
         if (!hy2)
         {

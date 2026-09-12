@@ -18,6 +18,12 @@ public sealed class ProfileImporterTests
         var content = Convert.ToBase64String(Encoding.UTF8.GetBytes(Link + "\n" + Link));
         Assert.Single(ProfileParser.Parse(content));
     }
+    [Fact]
+    public void ImportsWhitespaceSeparatedSubscription()
+    {
+        var second = Link.Replace("#Test%20server", "#Second");
+        Assert.Equal(2, ProfileParser.Parse(Link + " " + second).Count);
+    }
     [Theory]
     [InlineData("")]
     [InlineData("not a configuration")]
@@ -28,7 +34,21 @@ public sealed class ProfileImporterTests
     [InlineData("{broken")]
     [InlineData("vmess://e30=")]
     public void RejectsInvalidInput(string input) => Assert.Throws<FormatException>(() => ProfileParser.Parse(input));
-    [Fact] public void RejectsEntireSubscriptionOnBadEntry() => Assert.Throws<FormatException>(() => ProfileParser.Parse(Link + "\ninvalid"));
+    [Fact]
+    public void ImportsValidEntriesAndReportsBadOnes()
+    {
+        var profiles = ProfileParser.Parse(Link + "\n# comment\ninvalid\n" + Link, out var skipped);
+        Assert.Single(profiles);
+        Assert.Equal(1, skipped);
+    }
+    [Fact]
+    public void DoesNotCountWordsInProfileNamesAsSkippedEntries()
+    {
+        var second = Link.Replace("#Test%20server", "#Another server name");
+        var profiles = ProfileParser.Parse(Link + "\n" + second, out var skipped);
+        Assert.Equal(2, profiles.Count);
+        Assert.Equal(0, skipped);
+    }
     [Fact] public void AcceptsXrayJson() => Assert.Equal("Xray JSON", Assert.Single(ProfileParser.Parse("{\"outbounds\":[{\"protocol\":\"freedom\"}]}" )).Kind);
     [Fact] public void RejectsLargeInput() => Assert.Throws<FormatException>(() => ProfileParser.Parse(new string('a', ProfileParser.MaximumBytes + 1)));
     [Fact] public async Task RejectsInsecureSubscription() => await Assert.ThrowsAsync<FormatException>(() => new ProfileImporter().ImportAsync("http://example.com/sub"));

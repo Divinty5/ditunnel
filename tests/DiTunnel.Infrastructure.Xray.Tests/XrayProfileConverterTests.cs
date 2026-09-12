@@ -26,12 +26,29 @@ public sealed class XrayProfileConverterTests
         Assert.Equal("127.0.0.1", config.RootElement.GetProperty("inbounds")[0].GetProperty("listen").GetString());
         Assert.Single(config.RootElement.GetProperty("outbounds").EnumerateArray());
     }
+    [Fact] public void HysteriaPreservesTlsFingerprint()
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "Hysteria 2", "hy2://pass@example.com:443?alpn=h3&fp=chrome"));
+        var tls = converted.Outbound["streamSettings"]!["tlsSettings"]!;
+        Assert.Equal("chrome", tls["fingerprint"]!.GetValue<string>());
+        Assert.Equal("h3", tls["alpn"]![0]!.GetValue<string>());
+    }
     [Theory]
     [InlineData("hy2://pass@example.com:443?insecure=1")]
     [InlineData("hy2://pass@example.com:443?obfs=salamander")]
-    [InlineData("vless://00000000-0000-0000-0000-000000000001@example.com:443?security=reality")]
     [InlineData("vmess://e30=")]
     public void UnsupportedSettingsAreNotSilentlyDropped(string link) => Assert.Throws<NotSupportedException>(() => XrayProfileConverter.Convert(new("Test", "Test", link)));
+    [Fact]
+    public void VlessPreservesRealitySettings()
+    {
+        var link = "vless://00000000-0000-0000-0000-000000000001@example.com:443?security=reality&sni=cdn.example.com&fp=chrome&pbk=public-key&sid=0123456789abcdef&spx=%2F";
+        var converted = XrayProfileConverter.Convert(new("Reality", "VLESS", link));
+        var reality = converted.Outbound["streamSettings"]!["realitySettings"]!;
+        Assert.Equal("cdn.example.com", reality["serverName"]!.GetValue<string>());
+        Assert.Equal("public-key", reality["publicKey"]!.GetValue<string>());
+        Assert.Equal("0123456789abcdef", reality["shortId"]!.GetValue<string>());
+        Assert.Equal("/", reality["spiderX"]!.GetValue<string>());
+    }
     [Theory]
     [InlineData("ws", "wsSettings")]
     [InlineData("httpupgrade", "httpupgradeSettings")]
@@ -64,5 +81,21 @@ public sealed class XrayProfileConverterTests
 
         Assert.Contains(rules.EnumerateArray(), rule => rule.TryGetProperty("domain", out var domains) && domains[0].GetString() == "domain:github.com");
         Assert.Contains(rules.EnumerateArray(), rule => rule.TryGetProperty("ip", out var addresses) && addresses[0].GetString() == "192.0.2.40");
+    }
+
+    [Fact] public void ProxySelectedUsesDirectAsDefaultAndProxiesSelectedDomains()
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "VLESS", "vless://00000000-0000-0000-0000-000000000001@example.com:443"));
+        var policy = new SplitTunnelPolicy(SplitTunnelMode.ProxySelected, ["ifconfig.me"], []);
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", true, splitTunnel: policy));
+        var outbounds = config.RootElement.GetProperty("outbounds");
+        var rules = config.RootElement.GetProperty("routing").GetProperty("rules");
+
+        Assert.Equal("direct", outbounds[0].GetProperty("tag").GetString());
+        Assert.Equal("proxy", outbounds[1].GetProperty("tag").GetString());
+        Assert.Contains(rules.EnumerateArray(), rule =>
+            rule.TryGetProperty("domain", out var domains)
+            && domains[0].GetString() == "domain:ifconfig.me"
+            && rule.GetProperty("outboundTag").GetString() == "proxy");
     }
 }
