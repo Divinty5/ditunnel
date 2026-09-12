@@ -3,6 +3,7 @@ using System.Text.Json;
 using Android.Content;
 using Android.Security.Keystore;
 using DiTunnel.Core.Profiles;
+using DiTunnel.Core;
 using Java.Security;
 using Javax.Crypto;
 using Javax.Crypto.Spec;
@@ -27,12 +28,12 @@ public sealed class AndroidProfileStore(Context context) : IProfileStore
 
         var encrypted = File.ReadAllBytes(filePath);
         var json = Decrypt(encrypted);
-        return JsonSerializer.Deserialize<ImportedProfile[]>(json) ?? [];
+        return JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ImportedProfileArray) ?? [];
     }
 
     public void Save(IEnumerable<ImportedProfile> profiles)
     {
-        var encrypted = Encrypt(JsonSerializer.SerializeToUtf8Bytes(profiles));
+        var encrypted = Encrypt(JsonSerializer.SerializeToUtf8Bytes(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray));
         var temporary = filePath + ".tmp";
         File.WriteAllBytes(temporary, encrypted);
         File.Move(temporary, filePath, true);

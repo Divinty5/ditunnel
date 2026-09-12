@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-android36.0</TargetFramework>
-    <SupportedOSPlatformVersion>31.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion>29.0</SupportedOSPlatformVersion>
     <LibXrayAarPath Condition="'$(LibXrayAarPath)' == '' and '$(DITUNNEL_LIBXRAY_AAR)' != ''">$(DITUNNEL_LIBXRAY_AAR)</LibXrayAarPath>
   </PropertyGroup>
 

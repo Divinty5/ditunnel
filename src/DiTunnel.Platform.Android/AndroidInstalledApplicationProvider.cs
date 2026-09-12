@@ -7,8 +7,15 @@ namespace DiTunnel.Platform.Android;
 public sealed class AndroidInstalledApplicationProvider(Context context) : IInstalledApplicationProvider
 {
     private readonly Context context = context.ApplicationContext ?? context;
+    private Task<IReadOnlyList<InstalledApplication>>? cachedApplications;
 
-    public Task<IReadOnlyList<InstalledApplication>> GetInstalledApplicationsAsync(CancellationToken cancellationToken = default) => Task.Run(() =>
+    public Task<IReadOnlyList<InstalledApplication>> GetInstalledApplicationsAsync(CancellationToken cancellationToken = default)
+    {
+        cachedApplications ??= Task.Run(LoadApplications);
+        return cachedApplications.WaitAsync(cancellationToken);
+    }
+
+    private IReadOnlyList<InstalledApplication> LoadApplications()
     {
         var manager = context.PackageManager ?? throw new InvalidOperationException("Менеджер приложений Android недоступен.");
         using var intent = new Intent(Intent.ActionMain).AddCategory(Intent.CategoryLauncher);
@@ -18,7 +25,6 @@ public sealed class AndroidInstalledApplicationProvider(Context context) : IInst
             .DistinctBy(item => item.Id, StringComparer.Ordinal)
             .OrderBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
-        cancellationToken.ThrowIfCancellationRequested();
         return (IReadOnlyList<InstalledApplication>)applications;
-    }, cancellationToken);
+    }
 }

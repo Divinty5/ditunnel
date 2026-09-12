@@ -1,0 +1,6 @@
+<linker>
+  <assembly fullname="DiTunnel.App">
+    <!-- These properties are resolved by Avalonia bindings created in code. -->
+    <type fullname="DiTunnel.App.ViewModels.ServerItemViewModel" preserve="all" />
+  </assembly>
+</linker>

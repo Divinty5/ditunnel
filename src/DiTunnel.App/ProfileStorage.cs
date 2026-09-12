@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using DiTunnel.Core;
 using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.App;
@@ -8,11 +9,11 @@ internal sealed class ProfileStorage : IProfileStore
 {
     private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiTunnel", "profiles.dat");
     public IReadOnlyList<ImportedProfile> Load() => File.Exists(FilePath)
-        ? JsonSerializer.Deserialize<ImportedProfile[]>(Protect(File.ReadAllBytes(FilePath), false)) ?? [] : [];
+        ? JsonSerializer.Deserialize(Protect(File.ReadAllBytes(FilePath), false), DiTunnelJsonContext.Default.ImportedProfileArray) ?? [] : [];
 
     public void Save(IEnumerable<ImportedProfile> profiles)
     {
-        var bytes = Protect(JsonSerializer.SerializeToUtf8Bytes(profiles), true);
+        var bytes = Protect(JsonSerializer.SerializeToUtf8Bytes(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray), true);
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         var temporary = FilePath + ".tmp";
         File.WriteAllBytes(temporary, bytes);
