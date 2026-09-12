@@ -12,7 +12,7 @@ public sealed class WindowsServerProbe : IServerProbe
 
     public WindowsServerProbe(WindowsKillSwitchController? killSwitch = null) => this.killSwitch = killSwitch;
 
-    public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+    public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
     {
         var directory = WindowsRuntime.CreateSession();
         var path = Path.Combine(directory, "config.json");
@@ -27,8 +27,12 @@ public sealed class WindowsServerProbe : IServerProbe
                 ? NoopAsyncDisposable.Instance
                 : await killSwitch.PermitProbeEndpointAsync(address, configuration.ServerPort, configuration.ServerTransport, timeout.Token);
             await using var bypass = await WindowsProbeRouteBypass.CreateAsync(address, directory, timeout.Token);
-            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, WindowsRuntime.Find(), path, timeout.Token);
-            return new(milliseconds, $"HTTPS · {milliseconds:F0} мс");
+            // On Windows a raw TCP connect is not a reliable profile check while another
+            // Di-Tunnel route is active. Use the same temporary Xray outbound for both modes:
+            // HTTP remains the lightweight check, HTTPS validates the full TLS request.
+            var useHttps = mode == ServerProbeMode.Https;
+            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps);
+            return new(milliseconds, $"{(useHttps ? "HTTPS" : "HTTP")} · {milliseconds:F0} мс");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(null, "Таймаут"); }
         catch (TimeoutException) { return new(null, "Таймаут"); }

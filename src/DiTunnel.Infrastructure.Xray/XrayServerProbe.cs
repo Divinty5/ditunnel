@@ -6,7 +6,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public static class XrayServerProbe
 {
-    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken)
+    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(12));
@@ -38,7 +38,9 @@ public static class XrayServerProbe
             using var handler = new HttpClientHandler { UseProxy = true, Proxy = new WebProxy($"socks5://127.0.0.1:{port}") };
             using var client = new HttpClient(handler);
             var watch = Stopwatch.StartNew();
-            using var response = await client.GetAsync("https://1.1.1.1/cdn-cgi/trace", HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            var target = useHttps ? "https://1.1.1.1/cdn-cgi/trace" : "http://cp.cloudflare.com/";
+            using var request = new HttpRequestMessage(useHttps ? HttpMethod.Get : HttpMethod.Head, target);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             response.EnsureSuccessStatusCode();
             return watch.Elapsed.TotalMilliseconds;
         }
@@ -47,7 +49,7 @@ public static class XrayServerProbe
             await manager.StopAsync(CancellationToken.None);
             if (Volatile.Read(ref certificateError) != 0)
                 throw new InvalidOperationException("Сертификат VPN-сервера не прошёл проверку. Проверьте SNI и сертификат.");
-            throw new InvalidOperationException("Сервер не ответил через Xray. Проверьте интернет-соединение и настройки профиля.");
+            throw new InvalidOperationException("Сервер не ответил.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <uses-permission android:name="android.permission.CAMERA" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
   <queries>
@@ -12,7 +13,8 @@
   </queries>
   <application
       android:icon="@mipmap/app_icon"
-      android:roundIcon="@mipmap/app_icon">
+      android:roundIcon="@mipmap/app_icon"
+      android:enableOnBackInvokedCallback="false">
     <service
         android:name="com.divintyinteractive.ditunnel.DiTunnelVpnService"
         android:process=":vpn"
@@ -29,5 +31,9 @@
           android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
           android:value="User-initiated VPN tunnel carrying device network traffic" />
     </service>
+    <service
+        android:name="com.divintyinteractive.ditunnel.DiTunnelProbeService"
+        android:process=":probe"
+        android:exported="false" />
   </application>
 </manifest>
