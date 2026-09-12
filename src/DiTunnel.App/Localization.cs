@@ -13,7 +13,11 @@ public static class L
     private static Dictionary<string, string> Load()
     {
         using var stream = typeof(L).Assembly.GetManifestResourceStream("DiTunnel.App.Translations.json")!;
-        return JsonSerializer.Deserialize<Dictionary<string, string>>(stream)!;
+        using var document = JsonDocument.Parse(stream);
+        return document.RootElement.EnumerateObject().ToDictionary(
+            property => property.Name,
+            property => property.Value.GetString() ?? string.Empty,
+            StringComparer.Ordinal);
     }
     public static event Action? Changed;
     public static string T(string text)

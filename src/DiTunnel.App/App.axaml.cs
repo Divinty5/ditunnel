@@ -15,6 +15,7 @@ public partial class App : Application
         AvaloniaXamlLoader.Load(this);
         UserSettings.Current.ApplyTheme();
         L.Apply();
+        AppLocale.Apply();
     }
 
     public override void OnFrameworkInitializationCompleted()
