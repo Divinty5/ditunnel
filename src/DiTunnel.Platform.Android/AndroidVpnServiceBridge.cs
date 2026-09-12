@@ -16,6 +16,7 @@ internal static class AndroidVpnServiceBridge
     private static TaskCompletionSource<VpnStatus>? startCompletion;
     private static TaskCompletionSource<VpnStatus>? stopCompletion;
     private static StatusReceiver? receiver;
+    public static event EventHandler<VpnStatus>? StatusReceived;
 
     public static bool Register(Context context)
     {
@@ -41,14 +42,14 @@ internal static class AndroidVpnServiceBridge
     {
         var request = new ServiceRequest(profile, policy.Mode, policy.Domains.ToArray(), policy.Processes.ToArray());
         return new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionStart)
-            .PutExtra(ExtraRequest, JsonSerializer.Serialize(request));
+            .PutExtra(ExtraRequest, JsonSerializer.Serialize(request, AndroidJsonContext.Default.ServiceRequest));
     }
 
     public static (ImportedProfile Profile, SplitTunnelPolicy SplitTunnelPolicy)? ReadRequest(Intent intent)
     {
         var json = intent.GetStringExtra(ExtraRequest);
         if (string.IsNullOrWhiteSpace(json)) return null;
-        var request = JsonSerializer.Deserialize<ServiceRequest>(json);
+        var request = JsonSerializer.Deserialize(json, AndroidJsonContext.Default.ServiceRequest);
         return request is null ? null : (request.Profile, new(request.Mode, request.Domains, request.Processes));
     }
 
@@ -86,8 +87,9 @@ internal static class AndroidVpnServiceBridge
                 }
             }
             completion?.TrySetResult(status);
+            StatusReceived?.Invoke(null, status);
         }
     }
 
-    private sealed record ServiceRequest(ImportedProfile Profile, SplitTunnelMode Mode, string[] Domains, string[] Processes);
+    internal sealed record ServiceRequest(ImportedProfile Profile, SplitTunnelMode Mode, string[] Domains, string[] Processes);
 }

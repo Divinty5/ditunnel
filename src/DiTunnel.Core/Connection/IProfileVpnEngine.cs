@@ -5,6 +5,7 @@ namespace DiTunnel.Core.Connection;
 public interface IProfileVpnEngine : IAsyncDisposable
 {
     VpnStatus Status { get; }
+    ImportedProfile? ActiveProfile => null;
     event EventHandler<VpnStatus>? StatusChanged;
     bool RequiresAdministrator { get; }
     bool IsNetworkProtectionActive => false;

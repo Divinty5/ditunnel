@@ -66,8 +66,10 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
 
     public override void OnDestroy()
     {
+        AndroidVpnRuntimeState.Clear(this);
         CloseTunnel();
         StopForeground(StopForegroundFlags.Remove);
+        AndroidVpnServiceBridge.PublishStopped(this);
         base.OnDestroy();
     }
 
@@ -76,7 +78,11 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         await lifecycle.WaitAsync();
         try
         {
-            if (xrayRunning) return;
+            if (xrayRunning)
+            {
+                AndroidVpnServiceBridge.PublishStarted(this);
+                return;
+            }
             var pendingRequest = startIntent is null ? null : AndroidVpnServiceBridge.ReadRequest(startIntent);
             startIntent = null;
             var request = pendingRequest
@@ -107,17 +113,20 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             global::LibXray.LibXray.RegisterListenerController(dialerController);
             global::LibXray.LibXray.SetDNS(dialerController, "1.1.1.1:53");
 
+            var xrayPolicy = PolicyForXray(request.SplitTunnelPolicy);
             var configuration = CreateAndroidConfiguration(
-                profileConfiguration.Build(serverAddress.ToString(), tun: true, splitTunnel: request.SplitTunnelPolicy),
+                profileConfiguration.Build(serverAddress.ToString(), tun: true, splitTunnel: xrayPolicy),
                 tunnel.Fd);
             var response = Invoke("runXrayFromJson", new JsonObject { ["configJSON"] = configuration });
             if (!response.Success) throw new InvalidOperationException(SanitizeError(response.Error));
             xrayRunning = true;
+            AndroidVpnRuntimeState.SetConnected(this, request.Profile);
             UpdateNotification("VPN подключён");
             AndroidVpnServiceBridge.PublishStarted(this);
         }
         catch (Exception error)
         {
+            AndroidVpnRuntimeState.Clear(this);
             CloseTunnel();
             StopForeground(StopForegroundFlags.Remove);
             AndroidVpnServiceBridge.PublishStartFailed(this, error is InvalidOperationException or NotSupportedException or FormatException
@@ -135,6 +144,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
     {
         if (policy.Mode == DiTunnel.Core.Connection.SplitTunnelMode.ProxyAll) return;
         var packageNames = policy.Processes.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToList();
+        if (packageNames.Count == 0) return;
         // With an allow-list Android otherwise routes Di-Tunnel itself outside the VPN. libXray
         // still calls ProtectFd for its outbound sockets and treats Android's `false` as fatal.
         // Include the service package so ProtectFd can explicitly move those sockets outside TUN.
@@ -153,6 +163,16 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         }
     }
 
+    private static DiTunnel.Core.Connection.SplitTunnelPolicy PolicyForXray(DiTunnel.Core.Connection.SplitTunnelPolicy policy)
+    {
+        // Android's allow-list already limits TUN to the selected applications. Those packets
+        // must then use Xray's proxy by default; package names cannot be matched as desktop
+        // process names inside a TUN inbound.
+        if (policy.Mode == DiTunnel.Core.Connection.SplitTunnelMode.ProxySelected && policy.Processes.Count > 0)
+            return DiTunnel.Core.Connection.SplitTunnelPolicy.Default;
+        return new(policy.Mode, policy.Domains, []);
+    }
+
     private async Task StopTunnelAsync(bool stopService)
     {
         await lifecycle.WaitAsync();
@@ -161,10 +181,20 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             // libXray does not reliably support a second runXrayFromJson after stopXray in the
             // same Android process. Notify the UI first, then terminate the isolated :vpn process;
             // Android will create a clean Go runtime for the next connection.
-            AndroidVpnServiceBridge.PublishStopped(this);
+            if (xrayRunning)
+            {
+                try { _ = Invoke("stopXray", new JsonObject()); }
+                catch { /* The isolated process is terminated below even if native shutdown fails. */ }
+            }
+            try { global::LibXray.LibXray.ResetDNS(); } catch { }
+            AndroidVpnRuntimeState.Clear(this);
             StopForeground(StopForegroundFlags.Remove);
             CloseTunnel();
-            if (stopService) TerminateVpnProcess();
+            if (stopService) StopSelf();
+            AndroidVpnServiceBridge.PublishStopped(this);
+            // The UI process terminates this isolated process only after it has received
+            // STOPPED. Killing here raced Android's asynchronous broadcast delivery and
+            // caused intermittent ten-second stop timeouts during switch/recovery.
         }
         finally
         {
@@ -269,7 +299,10 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
     private static string SanitizeError(string? error)
     {
         if (string.IsNullOrWhiteSpace(error)) return "libXray не запустил VPN.";
-        return error.Length <= 400 ? error : error[..400];
+        var message = error.Length <= 400 ? error : error[..400];
+        return message.StartsWith("xray ", StringComparison.Ordinal)
+            ? "Xray " + message[5..]
+            : message;
     }
 
     private void CreateNotificationChannel()
