@@ -45,12 +45,12 @@
             <Image Source="/Assets/icon.png" Width="44" Height="44"/>
             <StackPanel VerticalAlignment="Center"><StackPanel Orientation="Horizontal" Spacing="8"><TextBlock Text="Di-Tunnel" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="{Binding AppVersion}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/></StackPanel><TextBlock Text="{Binding Tagline, Converter={StaticResource Translate}}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
           </StackPanel>
-          <Button Classes="icon" Grid.Column="1" Width="44" Height="44" Padding="8" Foreground="{DynamicResource AccentTextBrush}" Click="SettingsClick" VerticalAlignment="Center" Margin="0,0,4,0" ToolTip.Tip="Настройки"><Path Margin="0,4,0,0" Data="M3,6 L21,6 M3,12 L21,12 M3,18 L21,18 M8,3 L8,9 M16,9 L16,15 M10,15 L10,21" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="2.2" StrokeLineCap="Round"/></Button>
-          <Button Classes="icon" Grid.Column="2" Width="44" Height="44" Padding="8" Foreground="{DynamicResource AccentTextBrush}" Click="AddClick" VerticalAlignment="Center" ToolTip.Tip="Добавить профиль"><TextBlock Text="+" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Button>
+          <Button Classes="icon" Grid.Column="1" Width="44" Height="44" Padding="8" Foreground="{DynamicResource AccentTextBrush}" Click="SettingsClick" VerticalAlignment="Center" Margin="0,0,4,0" ToolTip.Tip="Настройки"><Path Width="24" Height="24" Stretch="Uniform" Data="M3,6 L21,6 M3,12 L21,12 M3,18 L21,18 M8,3 L8,9 M16,9 L16,15 M10,15 L10,21" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="2.2" StrokeLineCap="Round"/></Button>
+          <Button Classes="icon" Grid.Column="2" Width="44" Height="44" Padding="8" Foreground="{DynamicResource AccentTextBrush}" Click="AddClick" VerticalAlignment="Center" ToolTip.Tip="Добавить профиль"><Path Width="24" Height="24" Stretch="Uniform" Data="M12,3 L12,21 M3,12 L21,12" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="3" StrokeLineCap="Round"/></Button>
     </Grid>
     <Grid x:Name="ContentGrid" Margin="12,72,12,10" RowDefinitions="Auto,*,Auto" MaxWidth="840" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsImportOpen}">
         <Button Click="SubscriptionsClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" MaxWidth="720" Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="14,8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
-          <Grid ColumnDefinitions="Auto,*"><Grid Width="54" Height="40" Margin="0,0,12,0" VerticalAlignment="Center"><Image Source="{Binding SelectedFlag}" IsVisible="{Binding HasSelectedFlag}" Stretch="Uniform"/><TextBlock Text="🌐" IsVisible="{Binding !HasSelectedFlag}" FontSize="32" HorizontalAlignment="Center"/></Grid><StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding SelectedSummary, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding SubscriptionLimits, Converter={StaticResource Translate}}" FontSize="12"/></StackPanel></Grid>
+          <Grid ColumnDefinitions="Auto,*"><Grid Width="72" Height="48" Margin="0,0,14,0" VerticalAlignment="Center"><Image Source="{Binding SelectedFlag}" IsVisible="{Binding HasSelectedFlag}" Stretch="Uniform"/><TextBlock Text="🌐" IsVisible="{Binding !HasSelectedFlag}" FontSize="36" HorizontalAlignment="Center"/></Grid><StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding SelectedSummary, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding SubscriptionLimits, Converter={StaticResource Translate}}" FontSize="12"/></StackPanel></Grid>
         </Button>
         <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4" Margin="0,6">
           <Grid Width="178" Height="178"><Border Width="166" Height="166" CornerRadius="83" Background="{Binding PowerGlowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"><Border.Effect><BlurEffect Radius="26"/></Border.Effect></Border><Button Classes="power" Background="{DynamicResource PowerBrush}" BorderBrush="{Binding PowerBorderBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" AutomationProperties.Name="{Binding PowerText, Converter={StaticResource Translate}}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
@@ -65,20 +65,46 @@
           <Border Grid.Column="1" Background="{DynamicResource NoticeBrush}" CornerRadius="12" Padding="14,10"><TextBlock Text="{Binding Notice, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12"/></Border>
         </Grid>
     </Grid>
-    <Border Background="#D9000000" IsVisible="{Binding IsImportOpen}">
-        <Border Margin="12" MaxWidth="520" Padding="16,12" Background="{DynamicResource CardBrush}" CornerRadius="20" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" HorizontalAlignment="Stretch" VerticalAlignment="Center">
-          <StackPanel Spacing="8">
-            <TextBlock Text="{DynamicResource Text56E1BA97A28C}" FontSize="20" FontWeight="SemiBold"/>
-            <TextBlock Text="{DynamicResource Text5D615B281B3A}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
-            <Button Content="{DynamicResource TextEA16C39AEC08}" Click="PasteClick" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-            <TextBox Text="{Binding ImportName}" PlaceholderText="{DynamicResource Text1823C14B2604}" MaxLength="100" IsEnabled="{Binding CanImport}" />
-            <TextBox Text="{Binding ImportText}" PlaceholderText="{DynamicResource TextD058CCC6DADB}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="82" MaxHeight="105" IsEnabled="{Binding CanImport}" AutomationProperties.Name="{DynamicResource Text6BF8A742A026}"/>
-            <TextBlock Text="VLESS · Trojan · Shadowsocks · Hysteria 2" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-            <TextBlock Text="{Binding ImportMessage, Converter={StaticResource Translate}}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource AccentTextBrush}"/>
-            <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="3"/>
-            <Grid ColumnDefinitions="*,*"><Button Content="{DynamicResource Text8FBE9B75CBDF}" Command="{Binding CloseImportCommand}" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,0,6,0"/><Button Grid.Column="1" Classes="primary" Content="{DynamicResource Text848ED368817D}" Command="{Binding ImportCommand}" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="6,0,0,0"/></Grid>
-            <TextBlock Text="{Binding ImportStorageDescription, Converter={StaticResource Translate}}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
-          </StackPanel>
+    <Border Background="#D9000000" IsVisible="{Binding IsImportOpen}" PointerPressed="ImportBackdropPressed">
+        <Border Margin="16" MaxWidth="520" Padding="20,18" Background="{DynamicResource CardBrush}" CornerRadius="20" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1" HorizontalAlignment="Stretch" VerticalAlignment="Center" PointerPressed="ImportCardPressed">
+          <Grid>
+            <StackPanel Spacing="14" IsVisible="{Binding !IsManualImportOpen}">
+              <TextBlock Text="{DynamicResource Text56E1BA97A28C}" FontSize="22" FontWeight="SemiBold"/>
+              <TextBlock Text="{DynamicResource TextE332303204FA}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+              <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                <Button Grid.Column="0" Click="PasteClick" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" MinHeight="132" Padding="8">
+                  <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Path Width="54" Height="54" Margin="8,0,0,0" HorizontalAlignment="Center" Stretch="Uniform" Data="M8,4 L16,4 L16,7 L20,7 L20,22 L4,22 L4,7 L8,7 Z M8,2 L16,2 L16,7 L8,7 Z M8,11 L16,11 M8,15 L16,15 M8,19 L14,19" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="1.8" Fill="Transparent" StrokeLineCap="Round"/>
+                    <TextBlock Text="{DynamicResource TextEB31594AB4F1}" FontSize="13" TextAlignment="Center" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Button>
+                <Button Grid.Column="1" Click="ScanQrClick" IsVisible="{Binding IsAndroid}" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" MinHeight="132" Padding="8">
+                  <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Path Width="54" Height="54" HorizontalAlignment="Center" Stretch="Uniform" Data="M3,3 L10,3 L10,10 L3,10 Z M14,3 L21,3 L21,10 L14,10 Z M3,14 L10,14 L10,21 L3,21 Z M14,14 L17,14 L17,17 L14,17 Z M18,18 L21,18 L21,21 L18,21 Z M18,13 L21,13 L21,16 M13,19 L16,19 L16,22" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="1.8" Fill="Transparent"/>
+                    <TextBlock Text="{DynamicResource TextB1B6DAF4FBAB}" FontSize="13" TextAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Grid.Column="2" Click="ManualImportClick" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" MinHeight="132" Padding="8">
+                  <StackPanel Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Path Width="54" Height="54" Margin="8,0,0,0" HorizontalAlignment="Center" Stretch="Uniform" Data="M5,3 L17,3 L17,12 M5,3 L5,21 L17,21 L17,18 M8,7 L14,7 M8,11 L13,11 M8,15 L11,15 M13,17 L20,10 L22,12 L15,19 L12,20 Z" Stroke="{DynamicResource AccentTextBrush}" StrokeThickness="1.8" Fill="Transparent" StrokeLineCap="Round"/>
+                    <TextBlock Text="{DynamicResource Text3E17D77FCC6D}" FontSize="13" TextAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+              </Grid>
+              <TextBlock Text="{Binding ImportMessage, Converter={StaticResource Translate}}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource AccentTextBrush}"/>
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="3"/>
+            </StackPanel>
+            <StackPanel Spacing="10" IsVisible="{Binding IsManualImportOpen}">
+              <TextBlock Text="{DynamicResource TextC2897388132C}" FontSize="22" FontWeight="SemiBold"/>
+              <TextBox Text="{Binding ImportName}" PlaceholderText="{DynamicResource Text1823C14B2604}" MaxLength="100" IsEnabled="{Binding CanImport}" />
+              <TextBox Text="{Binding ImportText}" PlaceholderText="{DynamicResource TextD058CCC6DADB}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="140" MaxHeight="260" IsEnabled="{Binding CanImport}" AutomationProperties.Name="{DynamicResource Text6BF8A742A026}"/>
+              <TextBlock Text="VLESS · VMess · Trojan · Shadowsocks · Hysteria 2 · HTTPS" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+              <TextBlock Text="{Binding ImportMessage, Converter={StaticResource Translate}}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource AccentTextBrush}"/>
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Height="3"/>
+              <Button Classes="primary" Content="{DynamicResource Text848ED368817D}" Click="ManualImportSubmitClick" IsEnabled="{Binding CanImport}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+              <TextBlock Text="{Binding ImportStorageDescription, Converter={StaticResource Translate}}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+            </StackPanel>
+          </Grid>
         </Border>
     </Border>
     <Border IsVisible="{Binding IsRefreshToastVisible}" Background="#D92EBE39" CornerRadius="12" Padding="18,12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,16,16,28">

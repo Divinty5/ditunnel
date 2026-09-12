@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -35,7 +36,12 @@ public static class Dialogs
     private static TextBlock Label(string text) => new() { Text = L.T(text), TextWrapping = TextWrapping.Wrap };
     private static ScrollViewer Scroll(Control content)
     {
-        var scroll = new ScrollViewer { Content = content, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        var scroll = new ScrollViewer
+        {
+            Content = content,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalScrollBarVisibility = OperatingSystem.IsAndroid() ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto
+        };
         scroll.Bind(ScrollViewer.BackgroundProperty, scroll.GetResourceObservable("PageBrush"));
         return scroll;
     }
@@ -71,32 +77,51 @@ public static class Dialogs
     public static async Task Settings(ContentControl owner, MainViewModel vm)
     {
         var originalContent = owner.Content;
-        var installedApplications = OperatingSystem.IsAndroid()
-            ? await vm.GetInstalledApplicationsAsync()
-            : [];
+        IReadOnlyList<InstalledApplication> installedApplications = [];
+        var applicationsLoaded = !OperatingSystem.IsAndroid();
+        var draftDomains = new Dictionary<SplitTunnelMode, List<string>>();
+        var draftApplications = new Dictionary<SplitTunnelMode, HashSet<string>>();
+        foreach (var mode in new[] { SplitTunnelMode.BypassSelected, SplitTunnelMode.ProxySelected })
+        {
+            var rules = UserSettings.Current.GetSplitTunnelRules(mode);
+            draftDomains[mode] = [.. rules.Domains];
+            draftApplications[mode] = rules.Processes.ToHashSet(StringComparer.Ordinal);
+        }
         var originalNetworkSettings = NetworkSettingsFingerprint();
         var networkSettingsChangedExplicitly = false;
+        var isClosing = false;
+        Action? saveSplitRules = null;
+        async Task GoBackAsync()
+        {
+            if (isClosing) return;
+            isClosing = true;
+            saveSplitRules?.Invoke();
+            var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != NetworkSettingsFingerprint();
+            owner.Content = originalContent;
+            AppBackNavigation.Clear();
+            if (owner is Window window) window.Title = "Di-Tunnel";
+            // Give Avalonia one frame to present the restored main view before a VPN
+            // restart starts producing state changes. This avoids a transient empty frame.
+            if (networkSettingsChanged)
+            {
+                await Task.Delay(50);
+                await vm.ApplyNetworkSettingsAsync();
+            }
+        }
         void Build()
         {
             if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
             var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Center };
-            Action? saveSplitRules = null;
-            var back = AsyncButton("← Назад", async () =>
-            {
-                saveSplitRules?.Invoke();
-                var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != NetworkSettingsFingerprint();
-                owner.Content = originalContent;
-                if (owner is Window window) window.Title = "Di-Tunnel";
-                if (networkSettingsChanged)
-                    await vm.ApplyNetworkSettingsAsync();
-            });
+            var back = AsyncButton("← Назад", GoBackAsync);
             var status = Label("");
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
             panel.Children.Add(Button("Язык: Русский → English", () =>
             {
                 saveSplitRules?.Invoke();
                 UserSettings.Current.Language = UserSettings.Current.Language == "ru" ? "en" : "ru";
-                L.Apply(); Save(); Build();
+                // Updating Android's application locale recreates the Activity on API 33+.
+                // The Avalonia UI has its own live translations, so refresh those in place.
+                Save(); L.Apply(); vm.RefreshLanguage(); Build();
             }));
             var theme = new ComboBox { ItemsSource = new[] { L.T("Системная"), L.T("Тёмная"), L.T("Светлая") }, HorizontalAlignment = HorizontalAlignment.Stretch,
                 SelectedIndex = Array.IndexOf(new[] { "system", "dark", "light" }, UserSettings.Current.Theme) };
@@ -138,43 +163,95 @@ public static class Dialogs
             }
             panel.Children.Add(Label("Раздельное туннелирование"));
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = (int)UserSettings.Current.SplitTunnelMode };
-            var domains = new TextBox { Text = string.Join(Environment.NewLine, UserSettings.Current.SplitTunnelDomains), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
+            var activeMode = UserSettings.Current.SplitTunnelMode == SplitTunnelMode.ProxySelected ? SplitTunnelMode.ProxySelected : SplitTunnelMode.BypassSelected;
+            var domains = new TextBox { Text = string.Join(Environment.NewLine, draftDomains[activeMode]), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
             var splitRules = new StackPanel { Spacing = 12 };
-            var selectedApplications = UserSettings.Current.SplitTunnelProcesses.ToHashSet(StringComparer.Ordinal);
+            var selectedApplications = new HashSet<string>(draftApplications[activeMode], StringComparer.Ordinal);
+            Action rebuildApplicationRows = () => { };
+            splitRules.Children.Add(Label("Домены и IP-адреса"));
+            splitRules.Children.Add(domains);
             if (OperatingSystem.IsAndroid())
             {
                 splitRules.Children.Add(Label("Приложения Android (можно выбрать несколько)"));
-                var applicationRows = new StackPanel { Spacing = 2 };
-                foreach (var application in installedApplications)
+                var search = new TextBox { PlaceholderText = L.T("Поиск приложений"), HorizontalAlignment = HorizontalAlignment.Stretch };
+                splitRules.Children.Add(search);
+                var autoSelectStatus = Label("");
+                var autoSelect = Button("Автовыбор", () =>
                 {
-                    var check = new CheckBox
+                    var before = selectedApplications.Count;
+                    selectedApplications.UnionWith(ApplicationSelectionPresets.Select(activeMode, installedApplications));
+                    rebuildApplicationRows();
+                    autoSelectStatus.Text = $"{L.T("Автовыбор добавил приложений:")} {selectedApplications.Count - before}.";
+                });
+                autoSelect.HorizontalAlignment = HorizontalAlignment.Left;
+                autoSelect.Margin = new Thickness(0, 0, 8, 4);
+                var autoSelectRow = new WrapPanel();
+                autoSelectRow.Children.Add(autoSelect);
+                autoSelectRow.Children.Add(autoSelectStatus);
+                splitRules.Children.Add(autoSelectRow);
+                var applicationRows = new StackPanel { Spacing = 2 };
+                void BuildApplicationRows()
+                {
+                    applicationRows.Children.Clear();
+                    if (!applicationsLoaded)
                     {
-                        Content = $"{application.Name}\n{application.Id}",
-                        IsChecked = selectedApplications.Contains(application.Id),
-                        Padding = new Thickness(8, 6)
-                    };
-                    check.IsCheckedChanged += (_, _) =>
+                        applicationRows.Children.Add(Label("Загружаем список приложений…"));
+                        return;
+                    }
+                    var query = search.Text?.Trim() ?? "";
+                    foreach (var application in installedApplications
+                        .Where(item => query.Length == 0 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || item.Id.Contains(query, StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(item => selectedApplications.Contains(item.Id))
+                        .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
                     {
-                        if (check.IsChecked == true) selectedApplications.Add(application.Id);
-                        else selectedApplications.Remove(application.Id);
-                    };
-                    applicationRows.Children.Add(check);
+                        var check = new CheckBox { Content = $"{application.Name}\n{application.Id}", IsChecked = selectedApplications.Contains(application.Id), Padding = new Thickness(8, 6) };
+                        check.IsCheckedChanged += (_, _) =>
+                        {
+                            if (check.IsChecked == true) selectedApplications.Add(application.Id);
+                            else selectedApplications.Remove(application.Id);
+                        };
+                        applicationRows.Children.Add(check);
+                    }
                 }
-                splitRules.Children.Add(new ScrollViewer { Content = applicationRows, MinHeight = 140, MaxHeight = 320 });
+                rebuildApplicationRows = BuildApplicationRows;
+                search.TextChanged += (_, _) => rebuildApplicationRows();
+                rebuildApplicationRows();
+                splitRules.Children.Add(new ScrollViewer
+                {
+                    Content = applicationRows,
+                    MinHeight = 140,
+                    MaxHeight = 320,
+                    VerticalScrollBarVisibility = OperatingSystem.IsAndroid() ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto
+                });
             }
-            splitRules.Children.Add(Label("Домены и IP-адреса"));
-            splitRules.Children.Add(domains);
+            void CaptureDraft()
+            {
+                draftDomains[activeMode] = domains.Text?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(SplitTunnelPolicy.NormalizeDomain).Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+                draftApplications[activeMode] = new(selectedApplications, StringComparer.Ordinal);
+            }
             void UpdateSplitRulesVisibility() => splitRules.IsVisible = splitMode.SelectedIndex != (int)SplitTunnelMode.ProxyAll;
-            splitMode.SelectionChanged += (_, _) => UpdateSplitRulesVisibility();
+            splitMode.SelectionChanged += (_, _) =>
+            {
+                CaptureDraft();
+                if (splitMode.SelectedIndex is (int)SplitTunnelMode.BypassSelected or (int)SplitTunnelMode.ProxySelected)
+                {
+                    activeMode = (SplitTunnelMode)splitMode.SelectedIndex;
+                    domains.Text = string.Join(Environment.NewLine, draftDomains[activeMode]);
+                    selectedApplications.Clear();
+                    selectedApplications.UnionWith(draftApplications[activeMode]);
+                    rebuildApplicationRows();
+                }
+                UpdateSplitRulesVisibility();
+            };
             UpdateSplitRulesVisibility();
             panel.Children.Add(splitMode); panel.Children.Add(splitRules);
             saveSplitRules = () =>
             {
+                CaptureDraft();
                 UserSettings.Current.SplitTunnelMode = (DiTunnel.Core.Connection.SplitTunnelMode)Math.Max(0, splitMode.SelectedIndex);
-                UserSettings.Current.SplitTunnelDomains = domains.Text?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => !string.IsNullOrWhiteSpace(domain)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
-                if (OperatingSystem.IsAndroid())
-                    UserSettings.Current.SplitTunnelProcesses = selectedApplications.OrderBy(value => value, StringComparer.Ordinal).ToList();
+                foreach (var mode in new[] { SplitTunnelMode.BypassSelected, SplitTunnelMode.ProxySelected })
+                    UserSettings.Current.SetSplitTunnelRules(mode, draftDomains[mode], draftApplications[mode].OrderBy(value => value, StringComparer.Ordinal));
                 try { UserSettings.Current.Save(); status.Text = L.T("Правила будут применены при следующем подключении VPN."); } catch { status.Text = L.T("Не удалось сохранить настройки."); }
             };
             var serviceActions = new WrapPanel { IsVisible = !OperatingSystem.IsAndroid() };
@@ -217,9 +294,15 @@ public static class Dialogs
             panel.Children.Add(status);
             panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             owner.Content = Page("Настройки", back, panel);
+            AppBackNavigation.Set(() => _ = GoBackAsync());
         }
         Build();
-        await Task.CompletedTask;
+        if (OperatingSystem.IsAndroid())
+        {
+            installedApplications = await vm.GetInstalledApplicationsAsync();
+            applicationsLoaded = true;
+            if (!isClosing) Build();
+        }
     }
 
     private static string NetworkSettingsFingerprint()
@@ -231,10 +314,11 @@ public static class Dialogs
             .OrderBy(value => value, StringComparer.Ordinal));
 
         var settings = UserSettings.Current;
+        var rules = settings.GetSplitTunnelPolicy();
         return settings.SplitTunnelMode == SplitTunnelMode.ProxyAll
             ? string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, (int)settings.SplitTunnelMode)
             : string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork,
-                (int)settings.SplitTunnelMode, Canonical(settings.SplitTunnelDomains), Canonical(settings.SplitTunnelProcesses));
+                (int)settings.SplitTunnelMode, Canonical(rules.Domains), Canonical(rules.Processes));
     }
 
     public static async Task<string?> AskClose(Window owner)
@@ -254,7 +338,9 @@ public static class Dialogs
         var originalContent = owner.Content;
         if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
         var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Center };
-        var back = Button("← Назад", () => { owner.Content = originalContent; if (owner is Window window) window.Title = "Di-Tunnel"; });
+        void GoBack() { owner.Content = originalContent; AppBackNavigation.Clear(); if (owner is Window window) window.Title = "Di-Tunnel"; }
+        var back = Button("← Назад", GoBack);
+        AppBackNavigation.Set(GoBack);
         var groups = new ComboBox { MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Stretch };
         groups.Bind(ItemsControl.ItemsSourceProperty, new Binding("Groups"));
         groups.Bind(ComboBox.SelectedItemProperty, new Binding("SelectedGroup") { Mode = BindingMode.TwoWay });
@@ -262,25 +348,30 @@ public static class Dialogs
         panel.Children.Add(groups);
         var list = new ListBox
         {
-            MinHeight = 140, MaxHeight = 420, Background = Brushes.Transparent,
+            MinHeight = OperatingSystem.IsAndroid() ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
             ItemsPanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel { MinimumTileWidth = 200, MaximumTileWidth = 360, TileSpacing = 6 }),
             ItemTemplate = new FuncDataTemplate<ServerItemViewModel>((row, _) =>
             {
-                var flag = new Image { Width = 30, Height = 22, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+                var flag = new Image { Width = 60, Height = 42, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
                 flag.Bind(Image.SourceProperty, new Binding(nameof(ServerItemViewModel.FlagImage)));
                 flag.Bind(Visual.IsVisibleProperty, new Binding(nameof(ServerItemViewModel.HasFlag)));
-                var globe = new TextBlock { Text = "🌐", FontSize = 23, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+                var globe = new TextBlock { Text = "🌐", IsVisible = false, FontSize = 38, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) };
                 globe.Bind(Visual.IsVisibleProperty, new Binding("!" + nameof(ServerItemViewModel.HasFlag)));
                 var name = new TextBlock { FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
                 name.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Name)));
                 var summary = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.CharacterEllipsis };
                 summary.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Protocol)) { Converter = new TranslationConverter() });
-                var latency = new TextBlock { FontSize = 11, Foreground = Brushes.MediumPurple, TextTrimming = TextTrimming.CharacterEllipsis };
+                var latency = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
                 latency.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.ProbeText)) { Converter = new TranslationConverter() });
-                var details = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,Auto"), MinWidth = 130 };
+                latency.Bind(TextBlock.ForegroundProperty, new Binding(nameof(ServerItemViewModel.ProbeBrush)));
+                var details = new Grid
+                {
+                    RowDefinitions = new RowDefinitions("Auto,Auto,Auto"), MinWidth = 130,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
                 details.Children.Add(name); details.Children.Add(summary); details.Children.Add(latency);
                 Grid.SetRow(summary, 1); Grid.SetRow(latency, 2);
-                var rowPanel = new Grid { MinHeight = 56, Margin = new Thickness(8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+                var rowPanel = new Grid { MinHeight = 76, Margin = new Thickness(8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*") };
                 rowPanel.Children.Add(flag); rowPanel.Children.Add(globe); rowPanel.Children.Add(details);
                 Grid.SetColumn(details, 1);
                 return rowPanel;
@@ -292,12 +383,20 @@ public static class Dialogs
             {
                 new Avalonia.Styling.Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
                 new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
-                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 72d)
+                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d)
             }
         });
         list.Bind(ItemsControl.ItemsSourceProperty, new Binding("Profiles"));
         list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.TwoWay });
-        list.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
+        // ListBox owns the touch gesture on Android, so child Tapped handlers are not
+        // reliable. SelectionChanged is raised after the gesture has selected the row.
+        list.SelectionChanged += (_, _) =>
+        {
+            if (list.SelectedItem is ServerItemViewModel selected) vm.SelectProfileFromUser(selected);
+        };
+        ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Hidden);
+        ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
+        ScrollViewer.SetIsScrollChainingEnabled(list, true);
         panel.Children.Add(list);
         var testActions = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
         var testOne = Button("Проверить сервер", () => vm.ProbeSelectedCommand.Execute(null));
@@ -307,11 +406,24 @@ public static class Dialogs
         var cancelTests = Button("Отменить проверку", () => vm.CancelProbesCommand.Execute(null));
         cancelTests.Bind(Visual.IsVisibleProperty, new Binding("IsProbing")); testActions.Children.Add(cancelTests);
         panel.Children.Add(testActions);
+        var removeUnavailable = Button("Отфильтровать недоступные", () => vm.RemoveUnavailableCommand.Execute(null));
+        removeUnavailable.Margin = new Thickness(0, 0, 8, 2);
+        removeUnavailable.HorizontalAlignment = HorizontalAlignment.Left;
+        removeUnavailable.Bind(Control.IsEnabledProperty, new Binding("CanRemoveUnavailable"));
+        panel.Children.Add(removeUnavailable);
+        var probeMode = Button("", () => { });
+        void UpdateProbeMode() => probeMode.Content = L.T(UserSettings.Current.ServerProbeMode == ServerProbeMode.Fast
+            ? "Проверка: Быстрая (TCP/HTTP)" : "Проверка: Точная (HTTPS)");
+        probeMode.Click += (_, _) => { vm.ToggleProbeMode(); UpdateProbeMode(); };
+        UpdateProbeMode();
+        probeMode.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(probeMode);
         var lowest = new CheckBox { Content = L.T("Lowest: выбирать сервер с минимальной задержкой"), IsChecked = vm.IsLowestMode };
         lowest.IsCheckedChanged += (_, _) => vm.SetLowestMode(lowest.IsChecked == true);
         panel.Children.Add(lowest);
         panel.Children.Add(Label("Проверки: через 5, затем 10, затем каждые 15 минут. При смене сервера VPN переподключится."));
         var confirmationText = Label("Удалить выбранную подписку и все её серверы?");
+        Action confirmedAction = () => vm.RemoveGroupCommand.Execute(null);
         var confirmationActions = new WrapPanel();
         var confirmationCard = new Border
         {
@@ -321,13 +433,84 @@ public static class Dialogs
         };
         confirmationCard.Bind(Border.BackgroundProperty, confirmationCard.GetResourceObservable("CardBrush"));
         var confirmation = new Border { IsVisible = false, Background = new SolidColorBrush(Color.FromArgb(190, 0, 0, 0)), Child = confirmationCard, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
-        var confirmDelete = Button("Удалить", () => { confirmation.IsVisible = false; vm.RemoveGroupCommand.Execute(null); });
+        void CloseConfirmation() { confirmation.IsVisible = false; AppBackNavigation.Set(GoBack); }
+        void ShowConfirmation(string text, Action action)
+        {
+            confirmationText.Text = L.T(text);
+            confirmedAction = action;
+            confirmation.IsVisible = true;
+            AppBackNavigation.Set(CloseConfirmation);
+        }
+        var confirmDelete = Button("Удалить", () => { CloseConfirmation(); confirmedAction(); });
         confirmDelete.Margin = new Thickness(0, 0, 8, 0); confirmationActions.Children.Add(confirmDelete);
-        confirmationActions.Children.Add(Button("Отмена", () => confirmation.IsVisible = false));
+        confirmationActions.Children.Add(Button("Отмена", CloseConfirmation));
+
+        string shareValue = "";
+        Avalonia.Media.Imaging.Bitmap? shareBitmap = null;
+        var shareTitle = Label("Поделиться");
+        var shareQr = new Image { Width = 300, Height = 300, Stretch = Stretch.Uniform, IsVisible = false };
+        var shareOptions = new WrapPanel();
+        var shareCard = new Border
+        {
+            MaxWidth = 360, Padding = new Thickness(20), CornerRadius = new CornerRadius(18),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Child = new StackPanel { Spacing = 14, Children = { shareTitle, shareQr, shareOptions } }
+        };
+        shareCard.Bind(Border.BackgroundProperty, shareCard.GetResourceObservable("CardBrush"));
+        var shareOverlay = new Border { IsVisible = false, Background = new SolidColorBrush(Color.FromArgb(210, 0, 0, 0)), Child = shareCard };
+        void CloseShare()
+        {
+            shareOverlay.IsVisible = false;
+            shareQr.IsVisible = false;
+            shareOptions.IsVisible = true;
+            shareQr.Source = null;
+            shareBitmap?.Dispose(); shareBitmap = null;
+            AppBackNavigation.Set(GoBack);
+        }
+        async Task CopyShareAsync()
+        {
+            var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
+            if (clipboard is not null) await clipboard.SetTextAsync(shareValue);
+            vm.Notice = "Ссылка скопирована в буфер обмена.";
+            CloseShare();
+        }
+        void OpenShare(string title, string value)
+        {
+            shareTitle.Text = L.T(title);
+            shareValue = value;
+            shareOverlay.IsVisible = true;
+            AppBackNavigation.Set(CloseShare);
+        }
+        var copyShare = AsyncButton("Буфер обмена", CopyShareAsync);
+        copyShare.Margin = new Thickness(0, 0, 8, 6); shareOptions.Children.Add(copyShare);
+        var qrShare = Button("QR-код", () =>
+        {
+            try { shareBitmap = QrCodeImage.Create(shareValue); shareQr.Source = shareBitmap; shareQr.IsVisible = true; shareOptions.IsVisible = false; }
+            catch { vm.Notice = "Не удалось создать QR-код."; CloseShare(); }
+        });
+        qrShare.Margin = new Thickness(0, 0, 8, 6); shareOptions.Children.Add(qrShare);
+        shareOptions.Children.Add(Button("Отмена", CloseShare));
+        static Control ShareButtonContent(string text)
+        {
+            var icon = new Avalonia.Controls.Shapes.Path
+            {
+                Width = 18, Height = 18, Stretch = Stretch.Uniform,
+                Data = Geometry.Parse("M5,19 L19,5 M11,5 L19,5 L19,13 M5,9 L5,19 L15,19"),
+                StrokeThickness = 2, StrokeLineCap = PenLineCap.Round
+            };
+            icon.Bind(Avalonia.Controls.Shapes.Shape.StrokeProperty, icon.GetResourceObservable("AccentTextBrush"));
+            return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { icon, Label(text) } };
+        }
         var management = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
         var refresh = Button("Обновить подписки", async () => await vm.RefreshSubscriptionsAsync());
         refresh.Margin = new Thickness(0, 0, 8, 6); refresh.Bind(Control.IsEnabledProperty, new Binding("CanRefreshSubscriptions")); management.Children.Add(refresh);
-        var remove = Button("Удалить всю подписку", () => confirmation.IsVisible = true);
+        var shareSubscription = Button("Поделиться подпиской", () => { if (vm.SelectedSubscriptionUrl is { } value) OpenShare("Поделиться подпиской", value); });
+        shareSubscription.Content = ShareButtonContent("Поделиться подпиской");
+        shareSubscription.Margin = new Thickness(0, 0, 8, 6); shareSubscription.Bind(Control.IsEnabledProperty, new Binding("CanShareSubscription")); management.Children.Add(shareSubscription);
+        var shareServer = Button("Поделиться сервером", () => { if (vm.SelectedServerUri is { } value) OpenShare("Поделиться сервером", value); });
+        shareServer.Content = ShareButtonContent("Поделиться сервером");
+        shareServer.Margin = new Thickness(0, 0, 8, 6); shareServer.Bind(Control.IsEnabledProperty, new Binding("CanShareServer")); management.Children.Add(shareServer);
+        var remove = Button("Удалить всю подписку", () => ShowConfirmation("Удалить выбранную подписку и все её серверы?", () => vm.RemoveGroupCommand.Execute(null)));
         remove.Margin = new Thickness(0, 0, 8, 6); remove.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(remove);
         var removeOne = Button("Удалить выбранный", () => vm.RemoveProfileCommand.Execute(null));
         removeOne.Margin = new Thickness(0, 0, 8, 6); removeOne.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(removeOne);
@@ -338,6 +521,7 @@ public static class Dialogs
         var root = new Grid();
         root.Children.Add(page);
         root.Children.Add(confirmation);
+        root.Children.Add(shareOverlay);
         owner.Content = root;
         await Task.CompletedTask;
     }
