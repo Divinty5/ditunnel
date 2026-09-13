@@ -118,48 +118,11 @@ public partial class MainWindow : Window
 
     public async Task<string> CheckForUpdatesAsync(bool manual)
     {
-        if (App.UpdateInstaller is null || DataContext is not MainViewModel vm) return "Автообновление недоступно на этой платформе.";
-        if (manual) vm.Notice = "Проверяем обновления…";
-        var result = await ReleaseChecker.CheckAsync();
-        if (result.Release is not { } release)
+        if (DataContext is not MainViewModel vm) return "Автообновление недоступно на этой платформе.";
+        return await UpdateFlow.CheckAsync(this, vm, manual, () =>
         {
-            if (manual) vm.Notice = result.Message;
-            return result.Message;
-        }
-        var releaseVersion = ReleaseChecker.FormatVersion(release.Version);
-        if (!manual && UserSettings.Current.SkippedUpdateVersion == releaseVersion) return result.Message;
-
-        var action = await Dialogs.AskUpdate(this, release, release.InstallerUrl is not null && release.ChecksumUrl is not null);
-        if (action == "later")
-        {
-            UserSettings.Current.SkippedUpdateVersion = releaseVersion;
-            try { UserSettings.Current.Save(); } catch { }
-            return "Обновление пропущено до следующей версии.";
-        }
-        if (action == "github")
-        {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(release.PageUrl) { UseShellExecute = true }); }
-            catch { vm.Notice = "Не удалось открыть страницу релиза."; }
-            return result.Message;
-        }
-        if (action != "install") return result.Message;
-
-        try
-        {
-            var progress = new Progress<int>(value => vm.Notice = $"Загрузка обновления: {value}%");
-            var path = await App.UpdateInstaller.DownloadAsync(release, progress);
-            vm.Notice = "Обновление загружено. Отключаем VPN…";
-            await vm.PrepareToCloseAsync(TimeSpan.FromSeconds(8));
-            App.UpdateInstaller.Launch(path);
-            canClose = true;
-            Close();
+            canClose = true; Close();
             if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
-            return "Установщик обновления запущен.";
-        }
-        catch
-        {
-            vm.Notice = "Не удалось скачать или запустить обновление. Контрольная сумма и подключение не прошли проверку.";
-            return vm.Notice;
-        }
+        });
     }
 }

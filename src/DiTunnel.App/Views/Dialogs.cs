@@ -281,21 +281,20 @@ public static class Dialogs
                 panel.Children.Add(Label("Диагностика"));
                 panel.Children.Add(serviceActions);
                 panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
-                panel.Children.Add(Label("Обновления"));
             }
+            panel.Children.Add(Label("Обновления"));
             var automaticUpdates = new CheckBox { Content = L.T("Автоматически проверять обновления"), IsChecked = UserSettings.Current.CheckForUpdatesAutomatically };
             automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.CheckForUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
             var updates = Button("Проверить обновления", async () =>
             {
                 status.Text = L.T("Проверяем обновления…");
-                if (owner is MainWindow window) status.Text = L.T(await window.CheckForUpdatesAsync(true));
+                status.Text = L.T(owner is MainWindow window
+                    ? await window.CheckForUpdatesAsync(true)
+                    : await UpdateFlow.CheckAsync(owner, vm, true));
             });
             updates.Margin = new Thickness(0, 0, 8, 6);
-            if (!OperatingSystem.IsAndroid())
-            {
-                panel.Children.Add(automaticUpdates);
-                panel.Children.Add(updates);
-            }
+            panel.Children.Add(automaticUpdates);
+            panel.Children.Add(updates);
             panel.Children.Add(status);
             panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             owner.Content = Page("Настройки", back, panel);
@@ -310,20 +309,28 @@ public static class Dialogs
         }
     }
 
-    public static async Task<string?> AskUpdate(Window owner, AppRelease release, bool canInstall)
+    public static Task<string?> AskUpdate(ContentControl owner, AppRelease release, bool canInstall)
     {
-        var dialog = Window(owner, "Доступно обновление", 330);
-        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 16 };
+        if (owner.Content is not Control original) return Task.FromResult<string?>(null);
+        var completion = new TaskCompletionSource<string?>();
+        var panel = new StackPanel { Spacing = 16 };
+        panel.Children.Add(new TextBlock { Text = L.T("Доступно обновление"), FontSize = 22, FontWeight = FontWeight.SemiBold });
         panel.Children.Add(Label($"Доступна версия {ReleaseChecker.FormatVersion(release.Version)}. Установленная версия: {UserSettings.Version}."));
         panel.Children.Add(Label(canInstall
             ? "Установщик будет загружен и проверен по SHA-256. Перед его запуском VPN будет отключён."
             : "В релизе нет установщика Windows или файла SHA-256. Откройте страницу релиза для ручной установки."));
-        if (canInstall) panel.Children.Add(Button("Скачать и установить", () => dialog.Close("install")));
-        panel.Children.Add(Button("Открыть релиз на GitHub", () => dialog.Close("github")));
-        panel.Children.Add(Button("Напомнить при следующей версии", () => dialog.Close("later")));
-        panel.Children.Add(Button("Отмена", () => dialog.Close((string?)null)));
-        dialog.Content = Scroll(panel);
-        return await dialog.ShowDialog<string?>(owner);
+        void Complete(string? result) { owner.Content = original; completion.TrySetResult(result); }
+        if (canInstall) panel.Children.Add(Button("Скачать и установить", () => Complete("install")));
+        panel.Children.Add(Button("Открыть релиз на GitHub", () => Complete("github")));
+        panel.Children.Add(Button("Напомнить при следующей версии", () => Complete("later")));
+        panel.Children.Add(Button("Отмена", () => Complete(null)));
+        var card = new Border { Margin = new Thickness(16), MaxWidth = 560, Padding = new Thickness(24), Background = Brushes.Black,
+            CornerRadius = new CornerRadius(18), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Child = panel };
+        card.Bind(Border.BackgroundProperty, card.GetResourceObservable("CardBrush"));
+        var overlay = new Grid(); overlay.Children.Add(original);
+        overlay.Children.Add(new Border { Background = new SolidColorBrush(Color.FromArgb(210, 0, 0, 0)), Child = card });
+        owner.Content = overlay;
+        return completion.Task;
     }
 
     private static string NetworkSettingsFingerprint()
