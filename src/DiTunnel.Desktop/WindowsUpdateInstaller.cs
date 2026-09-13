@@ -20,6 +20,12 @@ internal sealed class WindowsUpdateInstaller : IUpdateInstaller
         var temporaryPath = installerPath + ".download";
         var checksumText = await Client.GetStringAsync(release.ChecksumUrl, cancellationToken);
         var expectedHash = ParseChecksum(checksumText, fileName);
+        if (File.Exists(installerPath) && await HasExpectedHashAsync(installerPath, expectedHash, cancellationToken))
+        {
+            progress?.Report(100);
+            return installerPath;
+        }
+        if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
         using (var response = await Client.GetAsync(release.InstallerUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
         {
             response.EnsureSuccessStatusCode();
@@ -47,6 +53,13 @@ internal sealed class WindowsUpdateInstaller : IUpdateInstaller
         File.Move(temporaryPath, installerPath, true);
         progress?.Report(100);
         return installerPath;
+    }
+
+    private static async Task<bool> HasExpectedHashAsync(string path, string expectedHash, CancellationToken cancellationToken)
+    {
+        await using var file = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(file, cancellationToken))
+            .Equals(expectedHash, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Launch(string installerPath) => Process.Start(new ProcessStartInfo(installerPath) { UseShellExecute = true, Verb = "runas" });

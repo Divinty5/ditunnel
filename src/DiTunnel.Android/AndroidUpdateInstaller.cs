@@ -21,6 +21,12 @@ internal sealed class AndroidUpdateInstaller(Context context) : IUpdateInstaller
         var temporary = path + ".download";
         var checksum = await Client.GetStringAsync(release.ChecksumUrl, cancellationToken);
         var expected = ParseChecksum(checksum, fileName);
+        if (File.Exists(path) && await HasExpectedHashAsync(path, expected, cancellationToken))
+        {
+            progress?.Report(100);
+            return path;
+        }
+        if (File.Exists(temporary)) File.Delete(temporary);
         using (var response = await Client.GetAsync(release.InstallerUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
         {
             response.EnsureSuccessStatusCode();
@@ -38,6 +44,13 @@ internal sealed class AndroidUpdateInstaller(Context context) : IUpdateInstaller
         var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) { File.Delete(temporary); throw new InvalidDataException(); }
         File.Move(temporary, path, true); progress?.Report(100); return path;
+    }
+
+    private static async Task<bool> HasExpectedHashAsync(string path, string expected, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken))
+            .Equals(expected, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Launch(string installerPath)

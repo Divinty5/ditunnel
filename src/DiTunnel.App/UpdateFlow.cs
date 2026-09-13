@@ -31,9 +31,10 @@ public static class UpdateFlow
             var path = await App.UpdateInstaller.DownloadAsync(release, progress);
             vm.Notice = "Обновление загружено. Отключаем VPN…";
             await vm.PrepareToCloseAsync(TimeSpan.FromSeconds(8));
-            App.UpdateInstaller.Launch(path); afterLaunch?.Invoke();
-            return "Установщик обновления запущен.";
+            App.UpdateInstaller.Launch(path);
         }
         catch { return vm.Notice = "Не удалось скачать или запустить обновление. Контрольная сумма и подключение не прошли проверку."; }
+        try { afterLaunch?.Invoke(); } catch { }
+        return "Установщик обновления запущен.";
     }
 }
