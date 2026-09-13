@@ -2,7 +2,7 @@
 param([string]$CompilerPath)
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$version = ([xml](Get-Content -Raw (Join-Path $repositoryRoot 'Directory.Build.props'))).Project.PropertyGroup.Version
+$version = ([xml](Get-Content -Raw (Join-Path $repositoryRoot 'Directory.Build.props'))).Project.PropertyGroup.Version.Trim()
 $publishDir = Join-Path $repositoryRoot "artifacts\windows\$version\client"
 if (-not $CompilerPath) {
     $candidates = @((Join-Path $repositoryRoot '.tools\inno\ISCC.exe'), "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 7\ISCC.exe")
