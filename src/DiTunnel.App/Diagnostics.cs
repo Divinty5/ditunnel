@@ -6,7 +6,7 @@ namespace DiTunnel.App;
 public static partial class Diagnostics
 {
     // Export only the existing sanitized stage log format. Never copy profiles or runtime configs.
-    [GeneratedRegex(@"^\S+ (?:STAGE_[A-Z_]+|ERROR_[A-Za-z0-9_-]+|CONNECTED|STOPPED|CANCELLED|EXIT_-?\d+)$")]
+    [GeneratedRegex(@"^\S+ (?:STAGE_[A-Z_]+|ERROR_[A-Za-z0-9_-]+|PHYSICAL_INTERFACE_\d+|TAKEOVER_OTHER_VPN|CONNECTED|STOPPED|CANCELLED|EXIT_-?\d+)$")]
     private static partial Regex SafeLine();
 
     public static void Export(string destination, string? directory = null)

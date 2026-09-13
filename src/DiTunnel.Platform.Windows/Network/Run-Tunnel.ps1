@@ -51,17 +51,36 @@ function Save-XrayDiagnostics([string]$text) {
         [IO.File]::WriteAllLines($xrayDiagnosticPath, @($safe))
     } catch { }
 }
-function Test-OtherVpnActive {
-    $hiddify = Get-Process -Name 'Hiddify' -ErrorAction SilentlyContinue
-    if ($hiddify) {
-        $internetSettings = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue
-        if ($internetSettings.ProxyEnable -eq 1) { return $true }
+function Find-PhysicalUpstreamRoute {
+    $candidates = foreach ($route in (Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)) {
+        $adapter = Get-NetAdapter -InterfaceIndex $route.InterfaceIndex -ErrorAction SilentlyContinue
+        if (-not $adapter -or -not $adapter.HardwareInterface -or $adapter.Status -ne 'Up' -or $route.NextHop -eq '0.0.0.0') { continue }
+        $ipInterface = Get-NetIPInterface -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+        [pscustomobject]@{
+            InterfaceIndex = $route.InterfaceIndex
+            InterfaceAlias = $adapter.Name
+            NextHop = $route.NextHop
+            Metric = [int]$route.RouteMetric + [int]($ipInterface.InterfaceMetric | Select-Object -First 1)
+        }
     }
-    $vpnAdapter = Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object {
-        $_.Name -ne $TunnelName -and $_.Status -eq 'Up' -and
-        (($_.Name + ' ' + $_.InterfaceDescription) -match '(?i)(hiddify|wintun|wireguard|\btun\b|\btap\b|\bvpn\b)')
-    } | Select-Object -First 1
-    return $null -ne $vpnAdapter
+    return $candidates | Sort-Object Metric | Select-Object -First 1
+}
+function Set-XrayOutboundSource([int]$interfaceIndex) {
+    $sourceAddress = Get-NetIPAddress -InterfaceIndex $interfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.AddressState -in @('Preferred','Deprecated') } |
+        Select-Object -ExpandProperty IPAddress -First 1
+    if (-not $sourceAddress) { throw 'Physical IPv4 source address is unavailable' }
+    $configuration = Get-Content -LiteralPath $ConfigurationPath -Raw | ConvertFrom-Json
+    $tunInbound = $configuration.inbounds | Where-Object { $_.tag -eq 'tun' } | Select-Object -First 1
+    if (-not $tunInbound) { throw 'TUN inbound is missing' }
+    # Localized Windows adapter names cannot be resolved reliably by Xray/Go. Bind its
+    # sockets to the physical IPv4 source; the exact server route keeps them outside both TUNs.
+    $tunInbound.settings.PSObject.Properties.Remove('autoOutboundsInterface')
+    foreach ($outbound in $configuration.outbounds) {
+        $outbound | Add-Member -NotePropertyName sendThrough -NotePropertyValue $sourceAddress -Force
+    }
+    $json = $configuration | ConvertTo-Json -Depth 100 -Compress
+    [IO.File]::WriteAllText($ConfigurationPath, $json, [Text.UTF8Encoding]::new($false))
 }
 function Add-TunnelAddress([string]$address, [byte]$prefixLength, [string]$addressFamily) {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -207,25 +226,34 @@ try {
     $owner = Get-Process -Id $OwnerProcessId
     $ownerStart = $owner.StartTime
     Enter-Stage 'PRECHECK'
-    if (Test-OtherVpnActive) { Emit 'ERROR_OTHER_VPN'; throw 'Disconnect other VPN first' }
     $ip = [Net.IPAddress]::Parse($ServerAddress)
     if ($ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'IPv4 upstream required' }
-    $path = @(Find-NetRoute -RemoteIPAddress $ServerAddress)
-    $upstream = $path | Where-Object { $_.PSObject.Properties.Name -contains 'NextHop' } | Select-Object -First 1
-    if (-not $upstream -or $upstream.InterfaceAlias -eq $TunnelName) { throw 'No physical upstream route' }
-    $physicalAdapter = Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex
-    if (-not $physicalAdapter.HardwareInterface) { Emit 'ERROR_OTHER_VPN'; throw 'Disconnect other VPN first' }
+    $upstream = Find-PhysicalUpstreamRoute
+    if (-not $upstream) { Emit 'ERROR_NO_PHYSICAL_UPSTREAM'; throw 'No physical upstream route' }
+    Emit ('PHYSICAL_INTERFACE_' + $upstream.InterfaceIndex)
     $defaultPrefixes = @('0.0.0.0/0','0.0.0.0/1','128.0.0.0/1','::/0','::/1','8000::/1')
+    $otherVpnDetected = $false
     foreach ($otherRoute in (Get-NetRoute | Where-Object { $_.DestinationPrefix -in $defaultPrefixes })) {
         $otherAdapter = Get-NetAdapter -InterfaceIndex $otherRoute.InterfaceIndex -ErrorAction SilentlyContinue
         if ($otherAdapter -and -not $otherAdapter.HardwareInterface -and $otherAdapter.Status -eq 'Up') {
-            Emit 'ERROR_OTHER_VPN'; throw 'Another tunnel has a default route'
+            $otherVpnDetected = $true
         }
     }
+    if ($otherVpnDetected) { Emit 'TAKEOVER_OTHER_VPN' }
     if (Get-NetAdapter -Name $TunnelName -ErrorAction SilentlyContinue) { throw 'Tunnel already exists' }
     # A /32 prevents the proxy connection from being captured by the new split default routes.
-    $existing = @(Get-NetRoute -DestinationPrefix "$ServerAddress/32" -ErrorAction SilentlyContinue)
-    if ($existing.Count -eq 0) { Add-OwnedRoute "$ServerAddress/32" $upstream.InterfaceIndex $upstream.NextHop }
+    $physicalServerRoute = Get-NetRoute -DestinationPrefix "$ServerAddress/32" -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceIndex -eq $upstream.InterfaceIndex -and $_.NextHop -eq $upstream.NextHop } | Select-Object -First 1
+    if (-not $physicalServerRoute) { Add-OwnedRoute "$ServerAddress/32" $upstream.InterfaceIndex $upstream.NextHop }
+    # Verify the exact route we own, rather than Find-NetRoute's source-address choice.
+    # With AmneziaWG active, Find-NetRoute can prefer its low-metric source interface even
+    # while the more-specific physical /32 is present and usable by a new socket.
+    $installedServerRoute = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix "$ServerAddress/32" -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceIndex -eq $upstream.InterfaceIndex -and $_.NextHop -eq $upstream.NextHop } | Select-Object -First 1
+    if (-not $installedServerRoute) {
+        Emit 'ERROR_VPN_TAKEOVER'; throw 'The physical server route was not installed'
+    }
+    Set-XrayOutboundSource $upstream.InterfaceIndex
     Enter-Stage 'XRAY'
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $RuntimePath
@@ -249,6 +277,8 @@ try {
     Enter-Stage 'ADDRESSES'
     Add-TunnelAddress '172.31.255.1' 30 'IPv4'
     Add-TunnelAddress 'fd52:d17::1' 64 'IPv6'
+    Set-NetIPInterface -InterfaceIndex $index -AddressFamily IPv4 -InterfaceMetric 1
+    Set-NetIPInterface -InterfaceIndex $index -AddressFamily IPv6 -InterfaceMetric 1
     # The interface exists and has both address families before default routes are changed.
     # This is the only safe hand-off point for a kill-switch controller: it can permit the
     # TUN interface first, then install a physical-interface block without a leak window.
@@ -346,7 +376,6 @@ try {
 catch {
     # Send only allowlisted stage/type information, never command arguments or server credentials.
     Emit ('ERROR_STAGE_' + $stage)
-    if ($stage -eq 'XRAY' -and (Test-OtherVpnActive)) { Emit 'ERROR_OTHER_VPN' }
     Emit ('ERROR_CODE_' + $_.Exception.GetType().Name + '_' + $_.Exception.HResult)
     Emit ('ERROR_CATEGORY_' + $_.CategoryInfo.Category)
     $failedCommand = $_.InvocationInfo.MyCommand.Name

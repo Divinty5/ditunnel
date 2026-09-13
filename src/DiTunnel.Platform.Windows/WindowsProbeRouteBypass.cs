@@ -10,8 +10,9 @@ namespace DiTunnel.Platform.Windows;
 internal sealed class WindowsProbeRouteBypass : IAsyncDisposable
 {
     private readonly string? scriptPath;
+    public string? SourceAddress { get; }
 
-    private WindowsProbeRouteBypass(string? scriptPath) => this.scriptPath = scriptPath;
+    private WindowsProbeRouteBypass(string? scriptPath, string? sourceAddress = null) { this.scriptPath = scriptPath; SourceAddress = sourceAddress; }
 
     public static async Task<WindowsProbeRouteBypass> CreateAsync(IPAddress server, string sessionDirectory, CancellationToken cancellationToken)
     {
@@ -22,8 +23,9 @@ internal sealed class WindowsProbeRouteBypass : IAsyncDisposable
             await File.WriteAllTextAsync(path, Script, cancellationToken);
             var output = await RunAsync(path, "add", server.ToString(), cancellationToken);
             if (output == "NONE") { File.Delete(path); return new(null); }
-            if (output != "ADDED") throw new InvalidOperationException("Не удалось подготовить маршрут для проверки сервера при активном VPN.");
-            return new(path);
+            if (!output.StartsWith("ADDED|", StringComparison.Ordinal) || !IPAddress.TryParse(output[6..], out _))
+                throw new InvalidOperationException("Не удалось подготовить маршрут для проверки сервера при активном VPN.");
+            return new(path, output[6..]);
         }
         catch
         {
@@ -65,15 +67,22 @@ if ($Action -eq 'remove') {
   exit 0
 }
 $current = Find-NetRoute -RemoteIPAddress $Address | Where-Object { $_.PSObject.Properties.Name -contains 'NextHop' } | Select-Object -First 1
-if (-not $current -or $current.InterfaceAlias -ne 'DiTunnel') { 'NONE'; exit 0 }
-$physical = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric,InterfaceMetric | ForEach-Object {
+if (-not $current -or $current.InterfaceAlias -notlike 'DiTunnel-*') { 'NONE'; exit 0 }
+$physical = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | ForEach-Object {
   $adapter = Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue
-  if ($adapter -and $adapter.HardwareInterface -and $adapter.Status -eq 'Up' -and $_.NextHop -ne '0.0.0.0') { $_; break }
-}
+  if ($adapter -and $adapter.HardwareInterface -and $adapter.Status -eq 'Up' -and $_.NextHop -ne '0.0.0.0') {
+    $ipInterface = Get-NetIPInterface -InterfaceIndex $_.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+    [pscustomobject]@{ InterfaceIndex=$_.InterfaceIndex; NextHop=$_.NextHop; Metric=[int]$_.RouteMetric + [int]($ipInterface.InterfaceMetric | Select-Object -First 1) }
+  }
+} | Sort-Object Metric | Select-Object -First 1
 if (-not $physical) { throw 'Physical route unavailable' }
+$sourceAddress = Get-NetIPAddress -InterfaceIndex $physical.InterfaceIndex -AddressFamily IPv4 -ErrorAction Stop |
+  Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.AddressState -in @('Preferred','Deprecated') } |
+  Select-Object -ExpandProperty IPAddress -First 1
+if (-not $sourceAddress) { throw 'Physical source address unavailable' }
 $prefix = "$Address/32"
 New-NetRoute -DestinationPrefix $prefix -InterfaceIndex $physical.InterfaceIndex -NextHop $physical.NextHop -RouteMetric 1 -PolicyStore ActiveStore | Out-Null
 @{ Prefix=$prefix; InterfaceIndex=$physical.InterfaceIndex; NextHop=$physical.NextHop } | ConvertTo-Json -Compress | Set-Content -LiteralPath $state -NoNewline
-'ADDED'
+'ADDED|' + $sourceAddress
 """;
 }

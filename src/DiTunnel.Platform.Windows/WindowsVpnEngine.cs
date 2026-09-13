@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Principal;
 using DiTunnel.Core.Connection;
@@ -23,6 +24,9 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     private ImportedProfile? reconnectProfile;
     private IPAddress? reconnectServerAddress;
     private CancellationTokenSource reconnectCancellation = new();
+    private readonly SemaphoreSlim physicalNetworkAvailable = new(0, 1);
+    private int? physicalInterfaceIndex;
+    private int exhaustedRecoveryArmed;
     private int reconnectFailures;
     public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
     public event EventHandler<VpnStatus>? StatusChanged;
@@ -31,6 +35,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         this.splitTunnelPolicy = splitTunnelPolicy ?? (() => SplitTunnelPolicy.Default);
         this.connectionPolicy = connectionPolicy ?? (() => ConnectionPolicy.Default);
         this.killSwitch = killSwitch ?? new WindowsKillSwitchController();
+        NetworkChange.NetworkAvailabilityChanged += OnNetworkChanged;
+        NetworkChange.NetworkAddressChanged += OnNetworkChanged;
     }
     public bool RequiresAdministrator => !new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public bool IsNetworkProtectionActive => killSwitch.Status.State == NetworkProtectionState.Active;
@@ -90,7 +96,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         }
     }
 
-    private async Task ConnectCoreAsync(ImportedProfile profile, CancellationToken cancellationToken, bool preserveKillSwitch, IPAddress? knownServerAddress = null)
+    private async Task ConnectCoreAsync(ImportedProfile profile, CancellationToken cancellationToken, bool preserveKillSwitch, IPAddress? knownServerAddress = null, bool recoveryAttempt = false)
     {
         await gate.WaitAsync(cancellationToken);
         try
@@ -158,10 +164,12 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         {
             await StopCoreAsync();
             var cancelled = error is OperationCanceledException && cancellationToken.IsCancellationRequested;
-            var recoveringFailClosed = preserveKillSwitch && !cancelled && IsNetworkProtectionActive;
-            Publish(cancelled ? VpnConnectionState.Disconnected : recoveringFailClosed ? VpnConnectionState.Reconnecting : VpnConnectionState.Error,
+            var recovering = recoveryAttempt && !cancelled;
+            Publish(cancelled ? VpnConnectionState.Disconnected : recovering ? VpnConnectionState.Reconnecting : VpnConnectionState.Error,
                 cancelled ? "Подключение отменено."
-                : recoveringFailClosed ? "Попытка восстановления не удалась. Kill switch сохраняет блокировку…"
+                : recovering ? (IsNetworkProtectionActive
+                    ? "Попытка восстановления не удалась. Kill switch сохраняет блокировку…"
+                    : "Сеть ещё недоступна. Ожидаем следующую попытку восстановления…")
                 : error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException ? error.Message
                 : "Подключение не установлено. Проверьте профиль и доступность сервера.");
             throw;
@@ -205,8 +213,10 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         catch (UnauthorizedAccessException) { }
         while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|TUNNEL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|PROBE_WARNING|CONNECTED|STOPPED|CANCELLED)$"))
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|PROBE_WARNING|CONNECTED|STOPPED|CANCELLED)$"))
                 await AppendDiagnosticAsync(logPath, line);
+            if (line.StartsWith("PHYSICAL_INTERFACE_", StringComparison.Ordinal) && int.TryParse(line[19..], out var physicalIndex))
+                physicalInterfaceIndex = physicalIndex;
             if (protection is not null && line.StartsWith("TUNNEL_INTERFACE_", StringComparison.Ordinal) && uint.TryParse(line[17..], out var interfaceIndex))
             {
                 try
@@ -272,6 +282,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             }
             switch (line)
             {
+                case "TAKEOVER_OTHER_VPN": Publish(VpnConnectionState.Connecting, "Обнаружен другой VPN. Переключаем маршруты на Di-Tunnel…"); break;
                 case "PROBE_WARNING": probeWarning = true; break;
                 case "STOPPED": rollbackConfirmed = true; break;
                 case "CONNECTED":
@@ -281,7 +292,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                     ready.TrySetResult();
                     break;
                 case "ERROR_DNS_POLICY": error = "Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их."; break;
-                case "ERROR_OTHER_VPN": error = "Сначала отключите другой VPN: он может конфликтовать с TUN-адаптером и маршрутами Di-Tunnel."; break;
+                case "ERROR_VPN_TAKEOVER": error = "Другой VPN блокирует прямой маршрут к серверу. Отключите в нём kill switch или режим блокировки соединений вне VPN."; break;
+                case "ERROR_NO_PHYSICAL_UPSTREAM": error = "Не найден активный физический интернет-интерфейс для переключения с другого VPN."; break;
                 case "ERROR_NETWORK_CHANGED": recoveryReason = VpnRecoveryReason.NetworkChanged; error = "Сетевой адаптер отключён. Ожидаем восстановления сети."; break;
                 case "ERROR_CLEANUP": cleanupFailed = true; error = "Не удалось полностью восстановить сеть. Запустите scripts/Repair-DiTunnelNetwork.ps1 от администратора."; break;
                 case "ERROR_TUN": error ??= "Не удалось настроить TUN или проверить соединение с сервером."; break;
@@ -340,8 +352,9 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         if (schedule is null)
         {
             Publish(VpnConnectionState.Error, IsNetworkProtectionActive
-                ? "Автоматическое восстановление остановлено после 10 попыток. Kill switch сохраняет блокировку; повторите подключение вручную."
-                : "Автоматическое восстановление остановлено после 10 попыток. Повторите подключение вручную.");
+                ? "Автоматические попытки приостановлены после 10 сбоев. Kill switch сохраняет блокировку; VPN возобновится при восстановлении сети."
+                : "Автоматические попытки приостановлены после 10 сбоев. VPN возобновится при восстановлении сети.");
+            ArmRecoveryAfterNetworkReturns(profile, reason);
             return;
         }
         var token = reconnectCancellation.Token;
@@ -349,13 +362,24 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         {
             try
             {
-                Publish(VpnConnectionState.Reconnecting, $"Сеть изменилась. Повторное подключение через {schedule.Delay.TotalSeconds:0} с…");
-                await Task.Delay(schedule.Delay, token);
+                if (reason is VpnRecoveryReason.NetworkChanged or VpnRecoveryReason.NetworkLost)
+                {
+                    Publish(VpnConnectionState.Reconnecting, HasPhysicalNetwork()
+                        ? "Физическая сеть доступна. Переподключаем VPN…"
+                        : "Нет подключения к интернету. Ожидаем восстановления сети…");
+                    await WaitForPhysicalNetworkAsync(token);
+                }
+                else
+                {
+                    Publish(VpnConnectionState.Reconnecting, $"Сеть изменилась. Повторное подключение через {schedule.Delay.TotalSeconds:0} с…");
+                    await Task.Delay(schedule.Delay, token);
+                }
                 token.ThrowIfCancellationRequested();
                 reconnectFailures++;
                 await ConnectCoreAsync(profile, token,
                     preserveKillSwitch: policy.KillSwitchEnabled && IsNetworkProtectionActive,
-                    knownServerAddress: reconnectServerAddress);
+                    knownServerAddress: reconnectServerAddress,
+                    recoveryAttempt: true);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch
@@ -366,12 +390,69 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         }, CancellationToken.None);
     }
 
+    private void ArmRecoveryAfterNetworkReturns(ImportedProfile profile, VpnRecoveryReason reason)
+    {
+        if (reason is not (VpnRecoveryReason.NetworkChanged or VpnRecoveryReason.NetworkLost)
+            || Interlocked.Exchange(ref exhaustedRecoveryArmed, 1) != 0) return;
+        var token = reconnectCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (physicalNetworkAvailable.Wait(0)) { }
+                while (!HasPhysicalNetwork()) await physicalNetworkAvailable.WaitAsync(token);
+                await Task.Delay(TimeSpan.FromMilliseconds(150), token);
+                reconnectFailures = 0;
+                Interlocked.Exchange(ref exhaustedRecoveryArmed, 0);
+                await ConnectCoreAsync(profile, token,
+                    preserveKillSwitch: connectionPolicy().Normalize().KillSwitchEnabled && IsNetworkProtectionActive,
+                    knownServerAddress: reconnectServerAddress,
+                    recoveryAttempt: true);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch
+            {
+                Interlocked.Exchange(ref exhaustedRecoveryArmed, 0);
+                QueueReconnect(reason);
+            }
+        }, CancellationToken.None);
+    }
+
+    private void OnNetworkChanged(object? sender, EventArgs args)
+    {
+        if (!HasPhysicalNetwork() || physicalNetworkAvailable.CurrentCount != 0) return;
+        try { physicalNetworkAvailable.Release(); } catch (ObjectDisposedException) { }
+    }
+
+    private async Task WaitForPhysicalNetworkAsync(CancellationToken cancellationToken)
+    {
+        while (!HasPhysicalNetwork()) await physicalNetworkAvailable.WaitAsync(cancellationToken);
+        // Let Windows finish assigning the gateway/address announced by NetworkChange.
+        await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken);
+    }
+
+    private bool HasPhysicalNetwork()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces().Any(network =>
+                network.OperationalStatus == OperationalStatus.Up
+                && network.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
+                && (physicalInterfaceIndex is null || network.GetIPProperties().GetIPv4Properties()?.Index == physicalInterfaceIndex)
+                && network.GetIPProperties().GatewayAddresses.Any(gateway =>
+                    gateway.Address.AddressFamily == AddressFamily.InterNetwork
+                    && !gateway.Address.Equals(IPAddress.Any)));
+        }
+        catch (NetworkInformationException) { return false; }
+    }
+
     private void CancelReconnect()
     {
         reconnectCancellation.Cancel();
         reconnectCancellation.Dispose();
         reconnectCancellation = new CancellationTokenSource();
         reconnectFailures = 0;
+        Interlocked.Exchange(ref exhaustedRecoveryArmed, 0);
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
@@ -379,6 +460,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         CancelReconnect();
         reconnectProfile = null;
         reconnectServerAddress = null;
+        physicalInterfaceIndex = null;
         await gate.WaitAsync(cancellationToken);
         try
         {
@@ -433,5 +515,14 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
-    public async ValueTask DisposeAsync() { await DisconnectAsync(); await killSwitch.DisposeAsync(); reconnectCancellation.Dispose(); gate.Dispose(); }
+    public async ValueTask DisposeAsync()
+    {
+        NetworkChange.NetworkAvailabilityChanged -= OnNetworkChanged;
+        NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
+        await DisconnectAsync();
+        await killSwitch.DisposeAsync();
+        reconnectCancellation.Dispose();
+        physicalNetworkAvailable.Dispose();
+        gate.Dispose();
+    }
 }

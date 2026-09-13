@@ -48,8 +48,9 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty] private string subscriptionStatus = "";
     [ObservableProperty] private string refreshToast = "";
     [ObservableProperty] private bool isRefreshToastVisible;
+    [ObservableProperty] private IBrush refreshToastBackground = new SolidColorBrush(Color.Parse("#D92EBE39"));
 
-    public async Task RefreshSubscriptionsAsync(Func<string, CancellationToken, Task<IReadOnlyList<ImportedProfile>>>? download = null)
+    public async Task RefreshSubscriptionsAsync(Func<string, CancellationToken, Task<IReadOnlyList<ImportedProfile>>>? download = null, bool showToast = true)
     {
         if (!CanRefreshSubscriptions || !storageAvailable) return;
         var sources = allProfiles.Where(p => p.SourceUrl is not null).GroupBy(p => p.SourceId).Select(g => g.First()).ToArray();
@@ -80,9 +81,13 @@ public sealed partial class MainViewModel : ViewModelBase
             RebuildGroups();
             SelectedProfile = Profiles.FirstOrDefault(p => p.Profile.Content == selectedContent) ?? SelectedProfile;
             SubscriptionStatus = failed == 0 ? $"Подписки обновлены: {updated} · {DateTime.Now:HH:mm}" : $"Обновлено: {updated}. Не удалось обновить: {failed}. Сохранены прежние серверы.";
-            RefreshToast = failed == 0 ? "Профиль успешно обновлён" : "Не удалось обновить профиль";
-            IsRefreshToastVisible = true;
-            _ = HideRefreshToastAsync();
+            if (showToast)
+            {
+                RefreshToast = failed == 0 ? "Подписки успешно обновлены" : "Не удалось обновить подписки";
+                RefreshToastBackground = new SolidColorBrush(Color.Parse(failed == 0 ? "#D92EBE39" : "#D9C8324A"));
+                IsRefreshToastVisible = true;
+                _ = HideRefreshToastAsync();
+            }
         }
         finally { IsBusy = false; }
     }

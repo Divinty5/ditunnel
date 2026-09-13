@@ -98,4 +98,15 @@ public sealed class XrayProfileConverterTests
             && domains[0].GetString() == "domain:ifconfig.me"
             && rule.GetProperty("outboundTag").GetString() == "proxy");
     }
+
+    [Fact]
+    public void OutboundSourceAddressIsAppliedToEveryOutbound()
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "VLESS", "vless://00000000-0000-0000-0000-000000000001@example.com:443"));
+        var policy = new SplitTunnelPolicy(SplitTunnelMode.BypassSelected, ["example.org"], []);
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", true, splitTunnel: policy, outboundSourceAddress: "192.168.3.5"));
+
+        Assert.All(config.RootElement.GetProperty("outbounds").EnumerateArray(), outbound =>
+            Assert.Equal("192.168.3.5", outbound.GetProperty("sendThrough").GetString()));
+    }
 }

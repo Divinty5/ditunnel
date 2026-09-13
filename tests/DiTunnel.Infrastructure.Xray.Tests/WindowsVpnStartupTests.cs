@@ -113,4 +113,58 @@ public sealed class WindowsVpnStartupTests
         Assert.Contains("AddSeconds(1)", source);
         Assert.Contains("SPLIT_ADDRESS_", source);
     }
+
+    [Fact]
+    public async Task ExistingVpnIsTakenOverWithoutMutatingItsAdapterOrRoutes()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var source = await File.ReadAllTextAsync(Path.Combine(root.FullName, "src", "DiTunnel.Platform.Windows", "Network", "Run-Tunnel.ps1"));
+
+        Assert.Contains("function Find-PhysicalUpstreamRoute", source);
+        Assert.Contains("if ($otherVpnDetected) { Emit 'TAKEOVER_OTHER_VPN' }", source);
+        Assert.Contains("ERROR_VPN_TAKEOVER", source);
+        Assert.Contains("$installedServerRoute = Get-NetRoute -AddressFamily IPv4", source);
+        Assert.Contains("The physical server route was not installed", source);
+        Assert.Contains("Set-NetIPInterface -InterfaceIndex $index -AddressFamily IPv4 -InterfaceMetric 1", source);
+        Assert.Contains("Set-XrayOutboundSource $upstream.InterfaceIndex", source);
+        Assert.Contains("Add-Member -NotePropertyName sendThrough", source);
+        Assert.DoesNotContain("Test-OtherVpnActive", source);
+        Assert.DoesNotContain("Disconnect other VPN first", source);
+        Assert.DoesNotContain("Disable-NetAdapter", source);
+        Assert.DoesNotContain("Remove-NetAdapter", source);
+    }
+
+    [Fact]
+    public async Task ServerProbeRecognizesRandomizedDiTunnelAdapterAndUsesPhysicalMetric()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var source = await File.ReadAllTextAsync(Path.Combine(root.FullName, "src", "DiTunnel.Platform.Windows", "WindowsProbeRouteBypass.cs"));
+
+        Assert.Contains("$current.InterfaceAlias -notlike 'DiTunnel-*'", source);
+        Assert.Contains("Get-NetIPInterface -InterfaceIndex $_.InterfaceIndex", source);
+        Assert.Contains("Sort-Object Metric", source);
+        Assert.Contains("'ADDED|' + $sourceAddress", source);
+    }
+
+    [Fact]
+    public async Task WindowsRecoveryUsesNetworkChangeCallbacks()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var source = await File.ReadAllTextAsync(Path.Combine(root.FullName, "src", "DiTunnel.Platform.Windows", "WindowsVpnEngine.cs"));
+
+        Assert.Contains("NetworkChange.NetworkAvailabilityChanged += OnNetworkChanged", source);
+        Assert.Contains("NetworkChange.NetworkAddressChanged += OnNetworkChanged", source);
+        Assert.Contains("await WaitForPhysicalNetworkAsync(token)", source);
+        Assert.Contains("GatewayAddresses.Any", source);
+        Assert.Contains("PHYSICAL_INTERFACE_", source);
+        Assert.Contains("ArmRecoveryAfterNetworkReturns(profile, reason)", source);
+        Assert.Contains("recoveryAttempt: true", source);
+        Assert.Contains("NetworkChange.NetworkAvailabilityChanged -= OnNetworkChanged", source);
+    }
 }

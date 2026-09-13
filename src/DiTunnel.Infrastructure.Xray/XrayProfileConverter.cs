@@ -7,7 +7,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPort, KillSwitchTransportProtocol ServerTransport, JsonObject Outbound)
 {
-    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null)
+    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null)
     {
         var outbound = (JsonObject)Outbound.DeepClone();
         var settings = outbound["settings"]!.AsObject();
@@ -23,6 +23,8 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(DirectOutbound());
         outbounds.Add(outbound);
         if (splitTunnel.Mode == SplitTunnelMode.BypassSelected) outbounds.Add(DirectOutbound());
+        if (!string.IsNullOrWhiteSpace(outboundSourceAddress))
+            foreach (var item in outbounds.OfType<JsonObject>()) item["sendThrough"] = outboundSourceAddress;
         var rules = new JsonArray();
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected)
             rules.Add(new JsonObject { ["ip"] = new JsonArray("1.1.1.1", "1.0.0.1"), ["outboundTag"] = "proxy" });

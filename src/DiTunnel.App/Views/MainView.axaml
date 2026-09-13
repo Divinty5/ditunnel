@@ -107,7 +107,7 @@
           </Grid>
         </Border>
     </Border>
-    <Border IsVisible="{Binding IsRefreshToastVisible}" Background="#D92EBE39" CornerRadius="12" Padding="18,12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,16,16,28">
+    <Border IsVisible="{Binding IsRefreshToastVisible}" Background="{Binding RefreshToastBackground}" CornerRadius="12" Padding="18,12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,16,16,28">
       <TextBlock Text="{Binding RefreshToast, Converter={StaticResource Translate}}" FontWeight="SemiBold"/>
     </Border>
   </Grid>

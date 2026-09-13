@@ -31,7 +31,7 @@ public sealed class WindowsServerProbe : IServerProbe
             // Di-Tunnel route is active. Use the same temporary Xray outbound for both modes:
             // HTTP remains the lightweight check, HTTPS validates the full TLS request.
             var useHttps = mode == ServerProbeMode.Https;
-            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps);
+            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps, bypass.SourceAddress);
             return new(milliseconds, $"{(useHttps ? "HTTPS" : "HTTP")} · {milliseconds:F0} мс");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(null, "Таймаут"); }
