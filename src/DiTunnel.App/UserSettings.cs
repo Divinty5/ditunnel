@@ -57,9 +57,11 @@ public sealed class UserSettings
     public bool AllowLocalNetwork { get; set; }
     public bool StartWithWindows { get; set; }
     public bool AutoConnect { get; set; }
+    public bool CheckForUpdatesAutomatically { get; set; } = true;
+    public string? SkippedUpdateVersion { get; set; }
     public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect).Normalize();
     public WindowPlacement? Window { get; set; }
-    public static string Version => typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.4.24";
+    public static string Version => typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.4.25";
 
     public static UserSettings Load(string path)
     {

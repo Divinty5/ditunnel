@@ -30,11 +30,22 @@ public sealed class SettingsAndRefreshTests
         var store = new Store(); var vm = new MainViewModel(null, store);
         await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException());
         Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
+        Assert.Equal("#d9c8324a", vm.RefreshToastBackground.ToString());
         store.Fail = true;
         await vm.RefreshSubscriptionsAsync((_, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new")]));
         Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
         Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
         Assert.False(vm.IsBusy);
+    }
+    [Fact] public async Task AutomaticStartupRefreshKeepsFailureSilent()
+    {
+        var store = new Store(); var vm = new MainViewModel(null, store);
+
+        await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException(), showToast: false);
+
+        Assert.False(vm.IsRefreshToastVisible);
+        Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
+        Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
     }
     [Fact] public void WindowPlacementRespectsSideTaskbarAndDpi()
     {

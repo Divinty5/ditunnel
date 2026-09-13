@@ -277,16 +277,13 @@ public static class Dialogs
                 catch { status.Text = L.T("Не удалось открыть папку."); }
             });
             openLogs.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(openLogs);
+            var automaticUpdates = new CheckBox { Content = L.T("Автоматически проверять обновления"), IsChecked = UserSettings.Current.CheckForUpdatesAutomatically };
+            automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.CheckForUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
+            serviceActions.Children.Add(automaticUpdates);
             var updates = Button("Проверить обновления", async () =>
             {
-                status.Text = L.T("Проверяем…");
-                var result = await ReleaseChecker.CheckAsync();
-                status.Text = L.T(result.Message);
-                if (result.Url is { } url)
-                {
-                    var open = Button("Открыть релиз на GitHub", () => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }));
-                    panel.Children.Add(open);
-                }
+                status.Text = L.T("Проверяем обновления…");
+                if (owner is MainWindow window) status.Text = L.T(await window.CheckForUpdatesAsync(true));
             });
             updates.Margin = new Thickness(0, 0, 8, 6);
             serviceActions.Children.Add(updates);
@@ -303,6 +300,22 @@ public static class Dialogs
             applicationsLoaded = true;
             if (!isClosing) Build();
         }
+    }
+
+    public static async Task<string?> AskUpdate(Window owner, AppRelease release, bool canInstall)
+    {
+        var dialog = Window(owner, "Доступно обновление", 330);
+        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 16 };
+        panel.Children.Add(Label($"Доступна версия {ReleaseChecker.FormatVersion(release.Version)}. Установленная версия: {UserSettings.Version}."));
+        panel.Children.Add(Label(canInstall
+            ? "Установщик будет загружен и проверен по SHA-256. Перед его запуском VPN будет отключён."
+            : "В релизе нет установщика Windows или файла SHA-256. Откройте страницу релиза для ручной установки."));
+        if (canInstall) panel.Children.Add(Button("Скачать и установить", () => dialog.Close("install")));
+        panel.Children.Add(Button("Открыть релиз на GitHub", () => dialog.Close("github")));
+        panel.Children.Add(Button("Напомнить при следующей версии", () => dialog.Close("later")));
+        panel.Children.Add(Button("Отмена", () => dialog.Close((string?)null)));
+        dialog.Content = Scroll(panel);
+        return await dialog.ShowDialog<string?>(owner);
     }
 
     private static string NetworkSettingsFingerprint()

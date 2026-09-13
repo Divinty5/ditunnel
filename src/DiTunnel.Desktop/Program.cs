@@ -49,6 +49,7 @@ internal static class Program
             }
         };
         timer.Start();
+        App.App.UpdateInstaller = new WindowsUpdateInstaller();
         App.App.CreateMainViewModel = () =>
         {
             var killSwitch = new Platform.Windows.WindowsKillSwitchController();
