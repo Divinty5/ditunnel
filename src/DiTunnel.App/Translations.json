@@ -148,6 +148,8 @@
   "← Назад": "← Back",
   "Раздельное туннелирование": "Split tunneling",
   "Защита соединения": "Connection protection",
+  "Диагностика": "Diagnostics",
+  "Обновления": "Updates",
   "Для полной блокировки трафика вне VPN используйте системные настройки Android: постоянный VPN и блокировку подключений без VPN. Встроенный kill switch Windows на Android недоступен.": "For complete traffic blocking outside the VPN, use Android system settings: Always-on VPN and Block connections without VPN. The Windows kill switch is unavailable on Android.",
   "Всё через VPN": "Everything through VPN",
   "Обход выбранных": "Bypass selected",

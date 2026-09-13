@@ -270,24 +270,32 @@ public static class Dialogs
                 catch { status.Text = L.T("Не удалось выгрузить журналы."); }
             });
             export.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(export);
-            if (!OperatingSystem.IsAndroid()) panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
             var openLogs = Button("Открыть папку журналов", () =>
             {
                 try { Directory.CreateDirectory(UserSettings.DataDirectory); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UserSettings.DataDirectory) { UseShellExecute = true }); }
                 catch { status.Text = L.T("Не удалось открыть папку."); }
             });
             openLogs.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(openLogs);
+            if (!OperatingSystem.IsAndroid())
+            {
+                panel.Children.Add(Label("Диагностика"));
+                panel.Children.Add(serviceActions);
+                panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
+                panel.Children.Add(Label("Обновления"));
+            }
             var automaticUpdates = new CheckBox { Content = L.T("Автоматически проверять обновления"), IsChecked = UserSettings.Current.CheckForUpdatesAutomatically };
             automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.CheckForUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
-            serviceActions.Children.Add(automaticUpdates);
             var updates = Button("Проверить обновления", async () =>
             {
                 status.Text = L.T("Проверяем обновления…");
                 if (owner is MainWindow window) status.Text = L.T(await window.CheckForUpdatesAsync(true));
             });
             updates.Margin = new Thickness(0, 0, 8, 6);
-            serviceActions.Children.Add(updates);
-            panel.Children.Add(serviceActions);
+            if (!OperatingSystem.IsAndroid())
+            {
+                panel.Children.Add(automaticUpdates);
+                panel.Children.Add(updates);
+            }
             panel.Children.Add(status);
             panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             owner.Content = Page("Настройки", back, panel);
