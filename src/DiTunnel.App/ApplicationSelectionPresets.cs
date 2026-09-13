@@ -16,13 +16,15 @@ public static class ApplicationSelectionPresets
 
     private static readonly string[] BypassPackagePrefixes =
     [
-        "ru.", "com.yandex.", "com.ozon.", "com.wildberries.", "com.samokat."
+        "ru.", "com.yandex.", "com.ozon.", "com.wildberries.", "com.samokat.",
+        "com.vkontakte.", "com.vk.", "com.mail.ru."
     ];
 
     private static readonly string[] BypassNameFragments =
     [
         "сбер", "sber", "тинькофф", "t-bank", "т-банк", "втб", "альфа", "alfa", "mir pay", "мир pay",
-        "рсхб", "rshb", "ozon", "wildberries", "самокат", "яндекс", "yandex", "max"
+        "рсхб", "rshb", "ozon", "wildberries", "самокат", "яндекс", "yandex", "max",
+        "вконтакте", "vk видео", "vk video", "одноклассники", "rutube", "рутуб", "тамтам", "дзен", "dzen", "rustore"
     ];
 
     public static IReadOnlyList<string> Select(SplitTunnelMode mode, IEnumerable<InstalledApplication> applications)

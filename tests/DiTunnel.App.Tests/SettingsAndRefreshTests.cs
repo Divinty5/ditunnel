@@ -120,6 +120,22 @@ public sealed class SettingsAndRefreshTests
         Assert.Equal(["com.google.android.youtube", "com.openai.chatgpt"], ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
         Assert.Equal(["ru.sberbankmobile", "com.yandex.browser"], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
     }
+    [Fact] public void BypassAutoSelectionAddsRussianSocialAppsAndRuStore()
+    {
+        InstalledApplication[] installed =
+        [
+            new("com.vkontakte.android", "ВКонтакте"),
+            new("com.vk.vkvideo", "VK Видео"),
+            new("ru.oneme.app", "MAX"),
+            new("ru.ok.android", "Одноклассники"),
+            new("ru.vk.store", "RuStore"),
+            new("com.example.notes", "Notes")
+        ];
+
+        Assert.Equal(
+            ["com.vkontakte.android", "com.vk.vkvideo", "ru.oneme.app", "ru.ok.android", "ru.vk.store"],
+            ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
+    }
     [Fact] public void DiagnosticsExportsOnlySanitizedNetworkEvents()
     {
         var dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
