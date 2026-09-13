@@ -63,6 +63,7 @@
   "Автообновление недоступно на этой платформе.": "Automatic updates are unavailable on this platform.",
   "Обновление пропущено до следующей версии.": "This update will be skipped until the next version.",
   "Не удалось открыть страницу релиза.": "Could not open the release page.",
+  "Не удалось показать предложение обновления. Попробуйте позже.": "Could not show the update prompt. Try again later.",
   "Загрузка обновления:": "Downloading update:",
   "Обновление загружено. Отключаем VPN…": "Update downloaded. Disconnecting VPN…",
   "Установщик обновления запущен.": "The update installer has started.",

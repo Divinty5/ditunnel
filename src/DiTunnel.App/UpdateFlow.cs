@@ -14,7 +14,9 @@ public static class UpdateFlow
         if (result.Release is not { } release) { if (manual) vm.Notice = result.Message; return result.Message; }
         var version = ReleaseChecker.FormatVersion(release.Version);
         if (!manual && UserSettings.Current.SkippedUpdateVersion == version) return result.Message;
-        var action = await Dialogs.AskUpdate(owner, release, release.InstallerUrl is not null && release.ChecksumUrl is not null);
+        string? action;
+        try { action = await Dialogs.AskUpdate(owner, release, release.InstallerUrl is not null && release.ChecksumUrl is not null); }
+        catch { return vm.Notice = "Не удалось показать предложение обновления. Попробуйте позже."; }
         if (action == "later") { UserSettings.Current.SkippedUpdateVersion = version; try { UserSettings.Current.Save(); } catch { } return "Обновление пропущено до следующей версии."; }
         if (action == "github")
         {

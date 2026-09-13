@@ -319,7 +319,13 @@ public static class Dialogs
         panel.Children.Add(Label(canInstall
             ? "Установщик будет загружен и проверен по SHA-256. Перед его запуском VPN будет отключён."
             : "В релизе нет установщика Windows или файла SHA-256. Откройте страницу релиза для ручной установки."));
-        void Complete(string? result) { owner.Content = original; completion.TrySetResult(result); }
+        var overlay = new Grid();
+        void Complete(string? result)
+        {
+            overlay.Children.Remove(original);
+            owner.Content = original;
+            completion.TrySetResult(result);
+        }
         if (canInstall) panel.Children.Add(Button("Скачать и установить", () => Complete("install")));
         panel.Children.Add(Button("Открыть релиз на GitHub", () => Complete("github")));
         panel.Children.Add(Button("Напомнить при следующей версии", () => Complete("later")));
@@ -327,7 +333,8 @@ public static class Dialogs
         var card = new Border { Margin = new Thickness(16), MaxWidth = 560, Padding = new Thickness(24), Background = Brushes.Black,
             CornerRadius = new CornerRadius(18), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Child = panel };
         card.Bind(Border.BackgroundProperty, card.GetResourceObservable("CardBrush"));
-        var overlay = new Grid(); overlay.Children.Add(original);
+        owner.Content = null;
+        overlay.Children.Add(original);
         overlay.Children.Add(new Border { Background = new SolidColorBrush(Color.FromArgb(210, 0, 0, 0)), Child = card });
         owner.Content = overlay;
         return completion.Task;
