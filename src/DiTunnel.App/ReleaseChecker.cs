@@ -23,13 +23,13 @@ public static class ReleaseChecker
             response.EnsureSuccessStatusCode();
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            return Parse(json.RootElement, Version.Parse(UserSettings.Version));
+            return Parse(json.RootElement, Version.Parse(UserSettings.Version), OperatingSystem.IsAndroid());
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { return new("Не удалось проверить обновления. Попробуйте позже."); }
     }
 
-    public static ReleaseCheckResult Parse(JsonElement release, Version currentVersion)
+    public static ReleaseCheckResult Parse(JsonElement release, Version currentVersion, bool android = false)
     {
         var tag = release.TryGetProperty("tag_name", out var tagElement) ? tagElement.GetString() ?? "" : "";
         if (!Version.TryParse(tag.TrimStart('v', 'V'), out var remote)) return new("Не удалось определить версию релиза.");
@@ -42,7 +42,9 @@ public static class ReleaseChecker
         string? installerUrl = null;
         string? checksumUrl = null;
         var displayVersion = FormatVersion(remote);
-        var installerName = $"Di-Tunnel-{displayVersion}-Setup-x64.exe";
+        var installerName = android
+            ? $"Di-Tunnel-{displayVersion}-arm64.apk"
+            : $"Di-Tunnel-{displayVersion}-Setup-x64.exe";
         if (release.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
         {
             foreach (var asset in assets.EnumerateArray())

@@ -8,6 +8,7 @@ namespace DiTunnel.App.Views;
 
 public partial class MainView : UserControl
 {
+    private bool updateChecked;
     public MainView()
     {
         InitializeComponent();
@@ -16,6 +17,12 @@ public partial class MainView : UserControl
             ContentGrid.MinHeight = 0;
             ContentGrid.MaxWidth = Bounds.Width >= 1260 ? 960 : 840;
             BackgroundMap.IsVisible = true;
+        };
+        AttachedToVisualTree += async (_, _) =>
+        {
+            if (updateChecked || !OperatingSystem.IsAndroid() || !UserSettings.Current.CheckForUpdatesAutomatically || DataContext is not MainViewModel vm) return;
+            updateChecked = true;
+            await UpdateFlow.CheckAsync(this, vm, false);
         };
     }
 

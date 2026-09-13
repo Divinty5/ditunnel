@@ -44,6 +44,25 @@ public sealed class ReleaseCheckerTests
     }
 
     [Fact]
+    public void ParseFindsMatchingAndroidApkAndChecksum()
+    {
+        using var json = JsonDocument.Parse("""
+        {
+          "tag_name": "v0.4.27",
+          "assets": [
+            { "name": "Di-Tunnel-0.4.27-arm64.apk", "browser_download_url": "https://github.com/Divinty5/ditunnel/releases/download/v0.4.27/Di-Tunnel-0.4.27-arm64.apk" },
+            { "name": "Di-Tunnel-0.4.27-arm64.apk.sha256", "browser_download_url": "https://github.com/Divinty5/ditunnel/releases/download/v0.4.27/Di-Tunnel-0.4.27-arm64.apk.sha256" }
+          ]
+        }
+        """);
+
+        var result = ReleaseChecker.Parse(json.RootElement, new Version(0, 4, 26), android: true);
+
+        Assert.EndsWith(".apk", result.Release?.InstallerUrl);
+        Assert.EndsWith(".apk.sha256", result.Release?.ChecksumUrl);
+    }
+
+    [Fact]
     public void ParseReportsCurrentVersion()
     {
         using var json = JsonDocument.Parse("""{ "tag_name": "v0.4.24" }""");

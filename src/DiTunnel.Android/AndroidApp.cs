@@ -15,6 +15,7 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
     {
         AndroidLocaleCoordinator.Initialize(this);
         App.QrScanner.ScanAsync = QrScannerCoordinator.Instance.ScanAsync;
+        App.App.UpdateInstaller = new AndroidUpdateInstaller(this);
         var engine = new AndroidVpnEngine(
             this,
             VpnPermissionCoordinator.Instance,
