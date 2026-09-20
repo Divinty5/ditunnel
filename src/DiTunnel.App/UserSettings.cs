@@ -63,7 +63,7 @@ public sealed class UserSettings
     public string? SkippedUpdateVersion { get; set; }
     public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect).Normalize();
     public WindowPlacement? Window { get; set; }
-    public static string Version => typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.4.29";
+    public static string Version => typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.4.33";
 
     public static UserSettings Load(string path)
     {
