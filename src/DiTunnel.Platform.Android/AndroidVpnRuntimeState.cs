@@ -1,5 +1,6 @@
 using Android.App;
 using Android.Content;
+using Android.Net;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using DiTunnel.Core;
@@ -42,7 +43,16 @@ internal static class AndroidVpnRuntimeState
     }
 
     public static bool IsVpnProcessRunning(Context context)
-        => Preferences(context).GetBoolean(ActiveKey, false);
+    {
+        if (!Preferences(context).GetBoolean(ActiveKey, false)) return false;
+        if (IsSystemVpnActive(context)) return true;
+
+        // The isolated :vpn process can be killed without getting a chance to clear the
+        // persisted flag (especially on vendor Android builds). Do not restore a connected
+        // UI from that stale flag when Android no longer has a VPN transport.
+        Clear(context);
+        return false;
+    }
 
     public static bool IsVpnProcessAlive(Context context)
     {
@@ -61,6 +71,20 @@ internal static class AndroidVpnRuntimeState
     }
 
     private static int GetVpnProcessId(Context context) => Preferences(context).GetInt(ProcessIdKey, 0);
+
+    private static bool IsSystemVpnActive(Context context)
+    {
+        if (context.GetSystemService(Context.ConnectivityService) is not ConnectivityManager manager) return false;
+        try
+        {
+            return manager.GetAllNetworks().Any(network =>
+                manager.GetNetworkCapabilities(network)?.HasTransport(TransportType.Vpn) == true);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 
     private static global::Android.Content.ISharedPreferences Preferences(Context context) =>
         context.GetSharedPreferences(PreferencesName, FileCreationMode.Private)
