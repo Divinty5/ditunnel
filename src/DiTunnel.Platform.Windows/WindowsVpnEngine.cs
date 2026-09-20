@@ -13,6 +13,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
 {
     private readonly Func<SplitTunnelPolicy> splitTunnelPolicy;
     private readonly Func<ConnectionPolicy> connectionPolicy;
+    private readonly Func<bool> blockAds;
+    private readonly Func<bool> strictAdBlocking;
     private readonly WindowsKillSwitchController killSwitch;
     private readonly SemaphoreSlim gate = new(1, 1);
     private Process? host;
@@ -30,11 +32,13 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     private int reconnectFailures;
     public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
     public event EventHandler<VpnStatus>? StatusChanged;
-    public WindowsVpnEngine(Func<SplitTunnelPolicy>? splitTunnelPolicy = null, Func<ConnectionPolicy>? connectionPolicy = null, WindowsKillSwitchController? killSwitch = null)
+    public WindowsVpnEngine(Func<SplitTunnelPolicy>? splitTunnelPolicy = null, Func<ConnectionPolicy>? connectionPolicy = null, WindowsKillSwitchController? killSwitch = null, Func<bool>? blockAds = null, Func<bool>? strictAdBlocking = null)
     {
         this.splitTunnelPolicy = splitTunnelPolicy ?? (() => SplitTunnelPolicy.Default);
         this.connectionPolicy = connectionPolicy ?? (() => ConnectionPolicy.Default);
         this.killSwitch = killSwitch ?? new WindowsKillSwitchController();
+        this.blockAds = blockAds ?? (() => false);
+        this.strictAdBlocking = strictAdBlocking ?? (() => false);
         NetworkChange.NetworkAvailabilityChanged += OnNetworkChanged;
         NetworkChange.NetworkAddressChanged += OnNetworkChanged;
     }
@@ -138,7 +142,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             }
             else delayMilliseconds = null;
             Publish(VpnConnectionState.Connecting, "Запускаем сетевой модуль Windows…");
-            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName), timeout.Token);
+            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName, blockAds: blockAds(), strictAdBlocking: strictAdBlocking()), timeout.Token);
             // On Windows, `xray run -test` initializes the TUN inbound and therefore creates a
             // short-lived Wintun adapter. Starting the real host immediately afterwards can race
             // that adapter's removal. The SOCKS probe above already validates the profile and

@@ -38,19 +38,19 @@ internal static class AndroidVpnServiceBridge
         }
     }
 
-    public static Intent CreateStartIntent(Context context, ImportedProfile profile, SplitTunnelPolicy policy)
+    public static Intent CreateStartIntent(Context context, ImportedProfile profile, SplitTunnelPolicy policy, bool blockAds, bool strictAdBlocking)
     {
-        var request = new ServiceRequest(profile, policy.Mode, policy.Domains.ToArray(), policy.Processes.ToArray());
+        var request = new ServiceRequest(profile, policy.Mode, policy.Domains.ToArray(), policy.Processes.ToArray(), blockAds, strictAdBlocking);
         return new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionStart)
             .PutExtra(ExtraRequest, JsonSerializer.Serialize(request, AndroidJsonContext.Default.ServiceRequest));
     }
 
-    public static (ImportedProfile Profile, SplitTunnelPolicy SplitTunnelPolicy)? ReadRequest(Intent intent)
+    public static (ImportedProfile Profile, SplitTunnelPolicy SplitTunnelPolicy, bool BlockAds, bool StrictAdBlocking)? ReadRequest(Intent intent)
     {
         var json = intent.GetStringExtra(ExtraRequest);
         if (string.IsNullOrWhiteSpace(json)) return null;
         var request = JsonSerializer.Deserialize(json, AndroidJsonContext.Default.ServiceRequest);
-        return request is null ? null : (request.Profile, new(request.Mode, request.Domains, request.Processes));
+        return request is null ? null : (request.Profile, new(request.Mode, request.Domains, request.Processes), request.BlockAds, request.StrictAdBlocking);
     }
 
     public static Task<VpnStatus> ExpectStart() { lock (Sync) return (startCompletion = NewCompletion()).Task; }
@@ -91,5 +91,5 @@ internal static class AndroidVpnServiceBridge
         }
     }
 
-    internal sealed record ServiceRequest(ImportedProfile Profile, SplitTunnelMode Mode, string[] Domains, string[] Processes);
+    internal sealed record ServiceRequest(ImportedProfile Profile, SplitTunnelMode Mode, string[] Domains, string[] Processes, bool BlockAds, bool StrictAdBlocking);
 }

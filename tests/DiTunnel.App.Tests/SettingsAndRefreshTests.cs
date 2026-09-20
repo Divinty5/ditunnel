@@ -67,8 +67,8 @@ public sealed class SettingsAndRefreshTests
         try
         {
             var path = Path.Combine(dir, "settings.json");
-            new UserSettings { Theme = "light", Language = "en", CloseAction = "hide", KillSwitchEnabled = true, AllowLocalNetwork = true, StartWithWindows = true, AutoConnect = true, Window = new(10, 20, 600, 700, true) }.Save(path);
-            var loaded = UserSettings.Load(path); Assert.Equal("en", loaded.Language); Assert.Equal("light", loaded.Theme); Assert.True(loaded.Window!.Maximized); Assert.True(loaded.GetConnectionPolicy().KillSwitchEnabled); Assert.True(loaded.GetConnectionPolicy().AutoConnect);
+            new UserSettings { Theme = "light", Language = "en", CloseAction = "hide", KillSwitchEnabled = true, BlockAdsEnabled = true, StrictAdBlockingEnabled = true, AllowLocalNetwork = true, StartWithWindows = true, AutoConnect = true, Window = new(10, 20, 600, 700, true) }.Save(path);
+            var loaded = UserSettings.Load(path); Assert.Equal("en", loaded.Language); Assert.Equal("light", loaded.Theme); Assert.True(loaded.Window!.Maximized); Assert.True(loaded.GetConnectionPolicy().KillSwitchEnabled); Assert.True(loaded.BlockAdsEnabled); Assert.True(loaded.StrictAdBlockingEnabled); Assert.True(loaded.GetConnectionPolicy().AutoConnect);
             File.WriteAllText(path, "{\"Language\":\"bad\",\"Theme\":\"bad\"}");
             Assert.Equal("ru", UserSettings.Load(path).Language); Assert.Equal("system", UserSettings.Load(path).Theme);
             File.WriteAllText(path, "broken"); Assert.Equal("ask", UserSettings.Load(path).CloseAction);

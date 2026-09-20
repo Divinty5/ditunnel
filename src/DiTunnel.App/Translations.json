@@ -1,5 +1,9 @@
 {
   "Настройки": "Settings",
+  "Блокировать рекламу и трекеры": "Block ads and trackers",
+  "Строгая блокировка рекламы": "Strict ad blocking",
+  "Дополнительно блокируются общие домены, через которые мобильные рекламные SDK могут загружать объявления. Некоторые сервисы Яндекса могут перестать работать до отключения строгого режима и переподключения VPN.": "Also blocks shared domains that mobile advertising SDKs may use to load ads. Some Yandex services may stop working until strict mode is disabled and the VPN is reconnected.",
+  "Блокируются известные рекламные домены во всём трафике VPN. Реклама YouTube может не блокироваться, потому что доставляется с тех же доменов, что и видео.": "Known advertising domains are blocked across all VPN traffic. YouTube ads may not be blocked because they are delivered from the same domains as videos.",
   "Подписки": "Subscriptions",
   "Удалить выбранную подписку и все её серверы?": "Delete the selected subscription and all its servers?",
   "Ваше пространство. Ваша сеть.": "Your space. Your network.",

@@ -109,4 +109,40 @@ public sealed class XrayProfileConverterTests
         Assert.All(config.RootElement.GetProperty("outbounds").EnumerateArray(), outbound =>
             Assert.Equal("192.168.3.5", outbound.GetProperty("sendThrough").GetString()));
     }
+
+    [Fact]
+    public void AdBlockingPrecedesSplitTunnelRulesAndUsesBlackhole()
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "VLESS", "vless://00000000-0000-0000-0000-000000000001@example.com:443"));
+        var policy = new SplitTunnelPolicy(SplitTunnelMode.BypassSelected, ["ads.example"], []);
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", true, splitTunnel: policy, blockAds: true));
+
+        var outbounds = config.RootElement.GetProperty("outbounds");
+        Assert.Contains(outbounds.EnumerateArray(), item => item.GetProperty("tag").GetString() == "block" && item.GetProperty("protocol").GetString() == "blackhole");
+        var firstRule = config.RootElement.GetProperty("routing").GetProperty("rules")[0];
+        Assert.Equal("geosite:category-ads-all", firstRule.GetProperty("domain")[0].GetString());
+        Assert.Equal("domain:yandexadexchange.net", firstRule.GetProperty("domain")[1].GetString());
+        Assert.Contains(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:adsdk.yandex.ru");
+        Assert.Contains(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:an.yandex.ru");
+        Assert.Contains(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:adfox.ru");
+        Assert.Contains(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:tracking.intl.miui.com");
+        Assert.Contains(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:metok.sys.miui.com");
+        Assert.Contains(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:abtest.mistat.xiaomi.com");
+        Assert.DoesNotContain(firstRule.GetProperty("domain").EnumerateArray(), item => item.GetString() == "domain:yandex.ru");
+        Assert.Equal("block", firstRule.GetProperty("outboundTag").GetString());
+    }
+
+    [Fact]
+    public void StrictAdBlockingAddsSharedAdvertisingInfrastructureOnlyWhenOptedIn()
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "VLESS", "vless://00000000-0000-0000-0000-000000000001@example.com:443"));
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", true, blockAds: true, strictAdBlocking: true));
+
+        var domains = config.RootElement.GetProperty("routing").GetProperty("rules")[0].GetProperty("domain");
+        Assert.Contains(domains.EnumerateArray(), item => item.GetString() == "domain:yandex.ru");
+        Assert.Contains(domains.EnumerateArray(), item => item.GetString() == "domain:yandex.com");
+        Assert.Contains(domains.EnumerateArray(), item => item.GetString() == "domain:avatars.mds.yandex.net");
+        Assert.Contains(domains.EnumerateArray(), item => item.GetString() == "domain:yastatic.net");
+        Assert.DoesNotContain(domains.EnumerateArray(), item => item.GetString() == "domain:www.google.com");
+    }
 }

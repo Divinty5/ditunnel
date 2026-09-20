@@ -19,7 +19,9 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
         var engine = new AndroidVpnEngine(
             this,
             VpnPermissionCoordinator.Instance,
-            () => App.UserSettings.Current.GetSplitTunnelPolicy());
+            () => App.UserSettings.Current.GetSplitTunnelPolicy(),
+            () => App.UserSettings.Current.BlockAdsEnabled,
+            () => App.UserSettings.Current.StrictAdBlockingEnabled);
         App.App.CreateMainViewModel = () => new MainViewModel(
             engine,
             store: new AndroidProfileStore(this),

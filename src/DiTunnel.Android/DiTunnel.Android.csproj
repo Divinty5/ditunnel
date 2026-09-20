@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <AndroidAsset Include="..\..\.tools\xray\26.3.27\windows-x64\geoip.dat" Link="geoip.dat" />
+    <AndroidAsset Include="..\..\.tools\xray\26.3.27\windows-x64\geosite.dat" Link="geosite.dat" />
   </ItemGroup>
 
   <ItemGroup>

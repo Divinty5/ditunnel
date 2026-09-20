@@ -138,6 +138,30 @@ public static class Dialogs
             if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1); }
             panel.Children.Add(appearance);
             panel.Children.Add(Label("Защита соединения"));
+            var blockAds = new CheckBox { Content = L.T("Блокировать рекламу и трекеры"), IsChecked = UserSettings.Current.BlockAdsEnabled };
+            var strictAdBlocking = new CheckBox
+            {
+                Content = L.T("Строгая блокировка рекламы"),
+                IsChecked = UserSettings.Current.StrictAdBlockingEnabled,
+                IsEnabled = UserSettings.Current.BlockAdsEnabled
+            };
+            blockAds.IsCheckedChanged += (_, _) =>
+            {
+                networkSettingsChangedExplicitly = true;
+                UserSettings.Current.BlockAdsEnabled = blockAds.IsChecked == true;
+                strictAdBlocking.IsEnabled = UserSettings.Current.BlockAdsEnabled;
+                Save();
+            };
+            panel.Children.Add(blockAds);
+            panel.Children.Add(Label("Блокируются известные рекламные домены во всём трафике VPN. Реклама YouTube может не блокироваться, потому что доставляется с тех же доменов, что и видео."));
+            strictAdBlocking.IsCheckedChanged += (_, _) =>
+            {
+                networkSettingsChangedExplicitly = true;
+                UserSettings.Current.StrictAdBlockingEnabled = strictAdBlocking.IsChecked == true;
+                Save();
+            };
+            panel.Children.Add(strictAdBlocking);
+            panel.Children.Add(Label("Дополнительно блокируются общие домены, через которые мобильные рекламные SDK могут загружать объявления. Некоторые сервисы Яндекса могут перестать работать до отключения строгого режима и переподключения VPN."));
             var killSwitch = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled };
             var allowLan = new CheckBox { Content = L.T("Разрешать локальную сеть при активном kill switch"), IsChecked = UserSettings.Current.AllowLocalNetwork, IsEnabled = UserSettings.Current.KillSwitchEnabled };
             void SaveProtection()
@@ -351,8 +375,8 @@ public static class Dialogs
         var settings = UserSettings.Current;
         var rules = settings.GetSplitTunnelPolicy();
         return settings.SplitTunnelMode == SplitTunnelMode.ProxyAll
-            ? string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, (int)settings.SplitTunnelMode)
-            : string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork,
+            ? string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled, (int)settings.SplitTunnelMode)
+            : string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled,
                 (int)settings.SplitTunnelMode, Canonical(rules.Domains), Canonical(rules.Processes));
     }
 

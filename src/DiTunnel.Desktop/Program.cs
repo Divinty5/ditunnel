@@ -55,7 +55,9 @@ internal static class Program
             var killSwitch = new Platform.Windows.WindowsKillSwitchController();
             return new App.ViewModels.MainViewModel(new Platform.Windows.WindowsVpnEngine(
                 () => App.UserSettings.Current.GetSplitTunnelPolicy(),
-                () => App.UserSettings.Current.GetConnectionPolicy(), killSwitch),
+                () => App.UserSettings.Current.GetConnectionPolicy(), killSwitch,
+                () => App.UserSettings.Current.BlockAdsEnabled,
+                () => App.UserSettings.Current.StrictAdBlockingEnabled),
                 probe: new Platform.Windows.WindowsServerProbe(killSwitch), countryResolver: new Platform.Windows.WindowsServerCountryResolver());
         };
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);

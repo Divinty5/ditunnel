@@ -114,9 +114,10 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             global::LibXray.LibXray.SetDNS(dialerController, "1.1.1.1:53");
 
             var xrayPolicy = PolicyForXray(request.SplitTunnelPolicy);
+            var assetDirectory = request.BlockAds ? EnsureXrayAssets() : null;
             var configuration = CreateAndroidConfiguration(
-                profileConfiguration.Build(serverAddress.ToString(), tun: true, splitTunnel: xrayPolicy),
-                tunnel.Fd);
+                profileConfiguration.Build(serverAddress.ToString(), tun: true, splitTunnel: xrayPolicy, blockAds: request.BlockAds, strictAdBlocking: request.StrictAdBlocking),
+                tunnel.Fd, assetDirectory);
             var response = Invoke("runXrayFromJson", new JsonObject { ["configJSON"] = configuration });
             if (!response.Success) throw new InvalidOperationException(SanitizeError(response.Error));
             xrayRunning = true;
@@ -264,14 +265,31 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         });
     }
 
-    private static string CreateAndroidConfiguration(string source, int tunFileDescriptor)
+    private string EnsureXrayAssets()
+    {
+        var directory = Path.Combine(FilesDir?.AbsolutePath ?? throw new InvalidOperationException("Каталог приложения Android недоступен."), "xray-assets");
+        Directory.CreateDirectory(directory);
+        foreach (var name in new[] { "geoip.dat", "geosite.dat" })
+        {
+            var destination = Path.Combine(directory, name);
+            if (File.Exists(destination) && new FileInfo(destination).Length > 0) continue;
+            using var source = Assets?.Open(name) ?? throw new InvalidOperationException($"Ресурс Xray {name} отсутствует.");
+            using var target = File.Create(destination);
+            source.CopyTo(target);
+        }
+        return directory;
+    }
+
+    private static string CreateAndroidConfiguration(string source, int tunFileDescriptor, string? assetDirectory)
     {
         var root = JsonNode.Parse(source)?.AsObject()
             ?? throw new FormatException("Xray вернул пустую конфигурацию.");
-        root["env"] = new JsonObject
+        var environment = new JsonObject
         {
             ["xray.tun.fd"] = tunFileDescriptor.ToString(CultureInfo.InvariantCulture)
         };
+        if (assetDirectory is not null) environment["xray.location.asset"] = assetDirectory;
+        root["env"] = environment;
         var settings = root["inbounds"]?[0]?["settings"]?.AsObject()
             ?? throw new FormatException("В конфигурации Xray отсутствует TUN inbound.");
         settings["name"] = "DiTunnel";

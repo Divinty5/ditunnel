@@ -7,7 +7,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPort, KillSwitchTransportProtocol ServerTransport, JsonObject Outbound)
 {
-    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null)
+    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false)
     {
         var outbound = (JsonObject)Outbound.DeepClone();
         var settings = outbound["settings"]!.AsObject();
@@ -23,9 +23,44 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(DirectOutbound());
         outbounds.Add(outbound);
         if (splitTunnel.Mode == SplitTunnelMode.BypassSelected) outbounds.Add(DirectOutbound());
+        if (blockAds) outbounds.Add(new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" });
         if (!string.IsNullOrWhiteSpace(outboundSourceAddress))
             foreach (var item in outbounds.OfType<JsonObject>()) item["sendThrough"] = outboundSourceAddress;
         var rules = new JsonArray();
+        if (blockAds)
+        {
+            var blockedDomains = new JsonArray(
+                "geosite:category-ads-all",
+                // Yandex Mobile Ads loads through this dedicated ad exchange domain, but
+                // upstream geosite currently does not mark it with the @ads attribute.
+                "domain:yandexadexchange.net",
+                // Yandex Mobile Ads can request inventory through Direct/Adfox endpoints
+                // before fetching the creative. Block the dedicated ad services, but do
+                // not block shared yandex.ru/yastatic.net content hosts in normal mode.
+                "domain:adsdk.yandex.ru",
+                "domain:an.yandex.ru",
+                "domain:adfox.ru",
+                // The main Xiaomi ad hosts are already in category-ads-all. These narrowly
+                // scoped MIUI/HyperOS telemetry hosts are not, while broader security,
+                // cloud, update and theme endpoints must remain reachable.
+                "domain:tracking.intl.miui.com",
+                "domain:metok.sys.miui.com",
+                "domain:abtest.mistat.xiaomi.com");
+            if (strictAdBlocking)
+            {
+                // Captured mobile-ad traffic can deliberately use shared Yandex frontends
+                // and content CDNs. This opt-in mode accepts the resulting collateral damage.
+                blockedDomains.Add("domain:yandex.ru");
+                blockedDomains.Add("domain:yandex.com");
+                blockedDomains.Add("domain:avatars.mds.yandex.net");
+                blockedDomains.Add("domain:yastatic.net");
+            }
+            rules.Add(new JsonObject
+            {
+                ["domain"] = blockedDomains,
+                ["outboundTag"] = "block"
+            });
+        }
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected)
             rules.Add(new JsonObject { ["ip"] = new JsonArray("1.1.1.1", "1.0.0.1"), ["outboundTag"] = "proxy" });
         var destinations = splitTunnel.Domains.Where(d => !string.IsNullOrWhiteSpace(d)).Select(SplitTunnelPolicy.NormalizeDomain).Where(d => d.Length > 0).ToArray();
