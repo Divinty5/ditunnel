@@ -53,12 +53,13 @@ internal static class Program
         App.App.CreateMainViewModel = () =>
         {
             var killSwitch = new Platform.Windows.WindowsKillSwitchController();
-            return new App.ViewModels.MainViewModel(new Platform.Windows.WindowsVpnEngine(
+            var engine = new Platform.Windows.WindowsVpnEngine(
                 () => App.UserSettings.Current.GetSplitTunnelPolicy(),
                 () => App.UserSettings.Current.GetConnectionPolicy(), killSwitch,
                 () => App.UserSettings.Current.BlockAdsEnabled,
-                () => App.UserSettings.Current.StrictAdBlockingEnabled),
-                probe: new Platform.Windows.WindowsServerProbe(killSwitch), countryResolver: new Platform.Windows.WindowsServerCountryResolver());
+                () => App.UserSettings.Current.StrictAdBlockingEnabled);
+            return new App.ViewModels.MainViewModel(engine,
+                probe: new Platform.Windows.WindowsServerProbe(killSwitch, engine), countryResolver: new Platform.Windows.WindowsServerCountryResolver());
         };
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         timer.Stop();

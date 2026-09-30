@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\.tools\amneziawg\1\windows-x64\*" Link="Runtime\AmneziaWG\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\geoip.dat" Link="Runtime\geoip.dat" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\geoip.dat')" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\geosite.dat" Link="Runtime\geosite.dat" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\geosite.dat')" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\xray.exe" Link="Runtime\xray.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\xray.exe')" />

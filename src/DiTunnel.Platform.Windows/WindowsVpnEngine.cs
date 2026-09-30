@@ -45,8 +45,43 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     public bool RequiresAdministrator => !new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public bool IsNetworkProtectionActive => killSwitch.Status.State == NetworkProtectionState.Active;
 
+    internal async Task<ActiveAmneziaProbe?> AcquireActiveAmneziaProbeAsync(ImportedProfile profile, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        var leased = false;
+        try
+        {
+            if (Status.State != VpnConnectionState.Connected || host is not { HasExited: false } ||
+                sessionDirectory is null || reconnectProfile?.Content != profile.Content ||
+                !AmneziaWgProfileConverter.IsAmneziaWg(profile)) return null;
+            var port = int.Parse(await File.ReadAllTextAsync(Path.Combine(sessionDirectory, "amneziawg.ready"), cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
+            using var config = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(sessionDirectory, "amneziawg.json"), cancellationToken));
+            var proxy = AmneziaWgProfileConverter.Convert(profile).CreateProxyConfiguration(port,
+                config.RootElement.GetProperty("username").GetString()!, config.RootElement.GetProperty("password").GetString()!);
+            leased = true;
+            return new(proxy, gate);
+        }
+        catch (Exception error) when (error is IOException or System.Text.Json.JsonException or FormatException)
+        {
+            throw new InvalidOperationException("Активное ядро AmneziaWG восстанавливается. Повторите проверку.");
+        }
+        finally { if (!leased) gate.Release(); }
+    }
+
+    internal sealed class ActiveAmneziaProbe(XrayProfileConfiguration proxy, SemaphoreSlim gate) : IAsyncDisposable
+    {
+        internal XrayProfileConfiguration Proxy { get; } = proxy;
+        private int disposed;
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0) gate.Release();
+            return ValueTask.CompletedTask;
+        }
+    }
+
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        await ValidateProfileAsync(profile, cancellationToken);
         CancelReconnect();
         reconnectProfile = profile;
         var preserveProtection = connectionPolicy().Normalize().KillSwitchEnabled && IsNetworkProtectionActive;
@@ -56,6 +91,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
 
     public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        await ValidateProfileAsync(profile, cancellationToken);
         if (!connectionPolicy().Normalize().KillSwitchEnabled || host is null || !IsNetworkProtectionActive)
         {
             await DisconnectAsync(cancellationToken);
@@ -69,7 +105,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var configuration = XrayProfileConverter.Convert(profile);
+            var configuration = ConvertProfile(profile);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             var address = (await Dns.GetHostAddressesAsync(configuration.ServerHost, timeout.Token)).FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
@@ -110,7 +146,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             if (RequiresAdministrator) throw new InvalidOperationException("Закройте Di-Tunnel и запустите его от имени администратора. Права нужны для TUN-адаптера, маршрутов и DNS.");
             // Clear deterministic stale objects left by an earlier crash before DNS/profile probing.
             if (!preserveKillSwitch) await killSwitch.DeactivateAsync(cancellationToken);
-            var configuration = XrayProfileConverter.Convert(profile);
+            var awg = AmneziaWgProfileConverter.IsAmneziaWg(profile) ? AmneziaWgProfileConverter.Convert(profile) : null;
+            var configuration = ConvertProfile(profile);
             var connection = connectionPolicy().Normalize();
             var policy = splitTunnelPolicy();
             if (policy.Mode == SplitTunnelMode.ProxySelected && policy.Domains.Count == 0)
@@ -122,7 +159,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             if (!File.Exists(script)) throw new InvalidOperationException("Сетевой модуль не найден. Пересоберите Windows-клиент.");
             var cleanupExecutable = Path.Combine(AppContext.BaseDirectory, "Di-Tunnel.exe");
             if (!File.Exists(cleanupExecutable)) throw new InvalidOperationException("Модуль очистки WFP не найден. Пересоберите Windows-клиент.");
-            Publish(VpnConnectionState.Connecting, "Запускаем Xray и настраиваем системный туннель…");
+            Publish(VpnConnectionState.Connecting, awg is null ? "Запускаем Xray и настраиваем системный туннель…" : "Запускаем AmneziaWG и настраиваем системный туннель…");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(75));
             var address = knownServerAddress ?? (await Dns.GetHostAddressesAsync(configuration.ServerHost, timeout.Token)).FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
@@ -137,12 +174,21 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             var tunnelName = $"DiTunnel-{Guid.NewGuid():N}"[..17];
             if (!preserveKillSwitch)
             {
-                Publish(VpnConnectionState.Connecting, "Проверяем сервер через Xray (до 12 секунд)…");
-                delayMilliseconds = await XrayServerProbe.MeasureAsync(configuration, address, runtime, configPath, timeout.Token);
+                Publish(VpnConnectionState.Connecting, awg is null ? "Проверяем сервер через Xray (до 12 секунд)…" : "Проверяем сервер через AmneziaWG (до 12 секунд)…");
+                await using var bypass = awg is null ? null : await WindowsProbeRouteBypass.CreateAsync(address, sessionDirectory, timeout.Token);
+                await using var awgProbe = awg is null ? null : await WindowsAmneziaWgRuntime.StartAsync(awg, address.ToString(), sessionDirectory, bypass?.SourceAddress, timeout.Token);
+                delayMilliseconds = await XrayServerProbe.MeasureAsync(awgProbe?.Proxy ?? configuration, address, runtime, configPath, timeout.Token, outboundSourceAddress: bypass?.SourceAddress);
             }
             else delayMilliseconds = null;
             Publish(VpnConnectionState.Connecting, "Запускаем сетевой модуль Windows…");
-            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName, blockAds: blockAds(), strictAdBlocking: strictAdBlocking()), timeout.Token);
+            if (awg is not null)
+            {
+                var credentials = WindowsAmneziaWgRuntime.CreateCredentials();
+                var readyPath = Path.Combine(sessionDirectory, "amneziawg.ready");
+                await File.WriteAllTextAsync(Path.Combine(sessionDirectory, "amneziawg.json"), awg.BuildRuntimeConfiguration(address.ToString(), credentials.Username, credentials.Password, readyPath), timeout.Token);
+                configuration = awg.CreateProxyConfiguration(0, credentials.Username, credentials.Password);
+            }
+            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName, blockAds: blockAds(), strictAdBlocking: strictAdBlocking(), dnsServers: awg?.DnsServers), timeout.Token);
             // On Windows, `xray run -test` initializes the TUN inbound and therefore creates a
             // short-lived Wintun adapter. Starting the real host immediately afterwards can race
             // that adapter's removal. The SOCKS probe above already validates the profile and
@@ -155,6 +201,11 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             };
             var splitDomains = policy.Domains.Where(domain => !string.IsNullOrWhiteSpace(domain)).Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => domain.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase);
             foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-RuntimePath", runtime, "-ConfigurationPath", configPath, "-ServerAddress", address.ToString(), "-OwnerProcessId", Environment.ProcessId.ToString(), "-TunnelName", tunnelName, "-SplitTunnelMode", policy.Mode.ToString(), "-SplitAddresses", string.Join(',', splitAddresses.Select(ip => ip.ToString())), "-SplitDomains", string.Join(';', splitDomains), "-KillSwitchReadyPath", connection.KillSwitchEnabled ? killSwitchReadyPath : "", "-CleanupExecutablePath", cleanupExecutable }) start.ArgumentList.Add(argument);
+            if (awg is not null)
+            {
+                start.ArgumentList.Add("-AmneziaRuntimePath"); start.ArgumentList.Add(WindowsAmneziaWgRuntime.Find());
+                start.ArgumentList.Add("-TunnelDnsServers"); start.ArgumentList.Add(string.Join(',', awg.DnsServers));
+            }
             stopping = false;
             cleanupFailed = false;
             host = Process.Start(start) ?? throw new InvalidOperationException("Не удалось запустить сетевой модуль.");
@@ -179,6 +230,17 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             throw;
         }
         finally { gate.Release(); }
+    }
+
+    private static XrayProfileConfiguration ConvertProfile(ImportedProfile profile) => AmneziaWgProfileConverter.IsAmneziaWg(profile)
+        ? AmneziaWgProfileConverter.Convert(profile).CreateProxyConfiguration(0, "pending", "pending")
+        : XrayProfileConverter.Convert(profile);
+
+    private static async Task ValidateProfileAsync(ImportedProfile profile, CancellationToken cancellationToken)
+    {
+        if (AmneziaWgProfileConverter.IsAmneziaWg(profile))
+            await WindowsAmneziaWgRuntime.ValidateAsync(AmneziaWgProfileConverter.Convert(profile), cancellationToken);
+        else _ = XrayProfileConverter.Convert(profile);
     }
 
     private static async Task<IPAddress[]> ResolveSplitAddressesAsync(SplitTunnelPolicy policy, CancellationToken cancellationToken)
@@ -253,6 +315,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 {
                     "STAGE_PRECHECK" => "Проверяем маршруты и настройки Windows…",
                     "STAGE_XRAY" => "Создаём TUN-адаптер (до 20 секунд)…",
+                    "STAGE_AMNEZIAWG" => "Запускаем ядро AmneziaWG…",
                     "STAGE_ADDRESSES" => "Назначаем адреса TUN-адаптеру…",
                     "STAGE_ROUTES" => "Настраиваем маршруты IPv4 и IPv6…",
                     "STAGE_DNS_RULE" => "Создаём правило DNS для туннеля…",
@@ -269,6 +332,11 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             if (line.StartsWith("ERROR_NATIVE_", StringComparison.Ordinal)) error += $" Код Windows: {line[13..]}.";
             if (line.StartsWith("ERROR_ROUTE_CODE_", StringComparison.Ordinal)) error += $" Код route.exe: {line[17..]}.";
             if (line.StartsWith("ERROR_XRAY_EXIT_", StringComparison.Ordinal)) error = $"Xray-core завершился во время работы туннеля. Код: {line[16..]}.";
+            if (line.StartsWith("ERROR_AWG_EXIT_", StringComparison.Ordinal))
+            {
+                error = "Ядро AmneziaWG завершилось во время работы туннеля.";
+                recoveryReason = VpnRecoveryReason.TunnelProcessExited;
+            }
             if (line.StartsWith("ERROR_ROUTE_", StringComparison.Ordinal))
                 error += $" Маршрут: {line[12..] switch { "IPV4_LOW" => "IPv4 0.0.0.0/1", "IPV4_HIGH" => "IPv4 128.0.0.0/1", "IPV6_LOW" => "IPv6 ::/1", "IPV6_HIGH" => "IPv6 8000::/1", _ => "к адресу сервера" }}.";
             if (line.StartsWith("ERROR_ROUTE_REASON_", StringComparison.Ordinal))
@@ -499,6 +567,11 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         if (sessionDirectory is not null)
         {
             var config = Path.Combine(sessionDirectory, "config.json");
+            foreach (var file in new[] { "amneziawg.json", "amneziawg.ready", "amneziawg.ready.tmp" })
+            {
+                var path = Path.Combine(sessionDirectory, file);
+                if (File.Exists(path)) File.Delete(path);
+            }
             if (File.Exists(config + ".stop")) File.Delete(config + ".stop");
             var preserve = Path.Combine(sessionDirectory, "preserve-kill-switch");
             if (File.Exists(preserve)) File.Delete(preserve);

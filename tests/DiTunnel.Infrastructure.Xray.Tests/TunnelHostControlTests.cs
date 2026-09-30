@@ -17,6 +17,12 @@ public sealed class TunnelHostControlTests
         var script = Path.Combine(root.FullName, "src", "DiTunnel.Platform.Windows", "Network", "Run-Tunnel.ps1");
         var directory = Path.Combine(Path.GetTempPath(), "ditunnel-host-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
+        // Isolate only the mutex so a running production Di-Tunnel cannot block mocked host tests.
+        // All OS network operations remain stubbed below; the production mutex stays unchanged.
+        var isolatedScript = Path.Combine(directory, "Run-Tunnel.ps1");
+        var source = await File.ReadAllTextAsync(script);
+        Assert.Contains("Global\\DiTunnel.NetworkHost.v1", source);
+        await File.WriteAllTextAsync(isolatedScript, source.Replace("Global\\DiTunnel.NetworkHost.v1", "Local\\DiTunnel.HostTest." + Guid.NewGuid().ToString("N"), StringComparison.Ordinal));
         var config = Path.Combine(directory, "config.json");
         await File.WriteAllTextAsync(config, "{}");
         if (cancel) await File.WriteAllTextAsync(config + ".stop", "stop");
@@ -24,7 +30,7 @@ public sealed class TunnelHostControlTests
         // Only mock OS network access. Execute the real production control/cleanup code in Windows PowerShell 5.
         var command = "function Get-DnsClientNrptRule {}\nfunction Remove-DnsClientNrptRule {}\nfunction Clear-DnsClientCache {}\nfunction Get-NetAdapter {}\nfunction Get-NetRoute {}\nfunction Get-NetIPInterface {}\n" +
             "function Find-NetRoute { throw [InvalidOperationException]::new('synthetic precheck failure') }\n" +
-            $"& {Quote(script)} -RuntimePath 'unused' -ConfigurationPath {Quote(config)} -ServerAddress '192.0.2.1' -OwnerProcessId {Environment.ProcessId} -TunnelName 'DiTunnel-test'";
+            $"& {Quote(isolatedScript)} -RuntimePath 'unused' -ConfigurationPath {Quote(config)} -ServerAddress '192.0.2.1' -OwnerProcessId {Environment.ProcessId} -TunnelName 'DiTunnel-test'";
         var info = new ProcessStartInfo
         {
             FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
@@ -50,6 +56,7 @@ public sealed class TunnelHostControlTests
             if (!process.HasExited) { process.Kill(); await process.WaitForExitAsync(); }
             if (File.Exists(config)) File.Delete(config);
             if (File.Exists(config + ".stop")) File.Delete(config + ".stop");
+            File.Delete(isolatedScript);
             Directory.Delete(directory);
         }
     }

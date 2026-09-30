@@ -25,6 +25,7 @@ public sealed class TunnelDnsStageTests
             $ProgressPreference = 'SilentlyContinue'
             $index = 99
             $dnsComment = 'test'
+            $dnsServers = @('1.1.1.1','1.0.0.1')
             $SplitTunnelMode = 'BypassSelected'
             $splitIps = @()
             function Enter-Stage($name) { $script:stage = $name }

@@ -9,8 +9,10 @@ namespace DiTunnel.Platform.Windows;
 public sealed class WindowsServerProbe : IServerProbe
 {
     private readonly WindowsKillSwitchController? killSwitch;
+    private readonly WindowsVpnEngine? engine;
 
-    public WindowsServerProbe(WindowsKillSwitchController? killSwitch = null) => this.killSwitch = killSwitch;
+    public WindowsServerProbe(WindowsKillSwitchController? killSwitch = null, WindowsVpnEngine? engine = null)
+    { this.killSwitch = killSwitch; this.engine = engine; }
 
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
     {
@@ -18,21 +20,33 @@ public sealed class WindowsServerProbe : IServerProbe
         var path = Path.Combine(directory, "config.json");
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(15));
-            var configuration = XrayProfileConverter.Convert(profile);
-            var address = (await Dns.GetHostAddressesAsync(configuration.ServerHost, timeout.Token)).FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+            var awg = AmneziaWgProfileConverter.IsAmneziaWg(profile) ? AmneziaWgProfileConverter.Convert(profile) : null;
+            await using var active = awg is null || engine is null ? null : await engine.AcquireActiveAmneziaProbeAsync(profile, cancellationToken);
+            if (active is not null)
+            {
+                var precise = mode == ServerProbeMode.Https;
+                var measured = await XrayServerProbe.MeasureAsync(active.Proxy, IPAddress.Loopback, WindowsRuntime.Find(), path,
+                    cancellationToken, useHttps: precise, tcpOnly: !precise);
+                return new(measured, $"{(precise ? "HTTPS" : "TLS")} · {measured:F0} мс");
+            }
+            var configuration = awg?.CreateProxyConfiguration(0, "pending", "pending") ?? XrayProfileConverter.Convert(profile);
+            var address = (await Dns.GetHostAddressesAsync(configuration.ServerHost, cancellationToken).WaitAsync(TimeSpan.FromSeconds(15), cancellationToken)).FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
                 ?? throw new NotSupportedException("Нет IPv4-адреса сервера.");
+            await using var bypass = await WindowsProbeRouteBypass.CreateAsync(address, directory, cancellationToken);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             await using var permit = killSwitch is null
                 ? NoopAsyncDisposable.Instance
-                : await killSwitch.PermitProbeEndpointAsync(address, configuration.ServerPort, configuration.ServerTransport, timeout.Token);
-            await using var bypass = await WindowsProbeRouteBypass.CreateAsync(address, directory, timeout.Token);
+                : await killSwitch.PermitProbeEndpointAsync(address, configuration.ServerPort, configuration.ServerTransport, cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
             // On Windows a raw TCP connect is not a reliable profile check while another
             // Di-Tunnel route is active. Use the same temporary Xray outbound for both modes:
-            // HTTP remains the lightweight check, HTTPS validates the full TLS request.
+            // AWG waits for a TLS handshake to a literal IP for its fast check. Other profiles
+            // keep HTTP; HTTPS validates the full TLS request in the precise mode.
             var useHttps = mode == ServerProbeMode.Https;
-            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps, bypass.SourceAddress);
-            return new(milliseconds, $"{(useHttps ? "HTTPS" : "HTTP")} · {milliseconds:F0} мс");
+            var tcpOnly = awg is not null && !useHttps;
+            await using var awgRuntime = awg is null ? null : await WindowsAmneziaWgRuntime.StartAsync(awg, address.ToString(), directory, bypass.SourceAddress, timeout.Token);
+            var milliseconds = await XrayServerProbe.MeasureAsync(awgRuntime?.Proxy ?? configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps, bypass.SourceAddress, tcpOnly);
+            return new(milliseconds, $"{(tcpOnly ? "TLS" : useHttps ? "HTTPS" : "HTTP")} · {milliseconds:F0} мс");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(null, "Таймаут"); }
         catch (TimeoutException) { return new(null, "Таймаут"); }

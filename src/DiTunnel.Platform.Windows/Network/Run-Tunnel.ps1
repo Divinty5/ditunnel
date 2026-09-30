@@ -8,13 +8,21 @@ param(
     [string]$SplitAddresses = '',
     [string]$SplitDomains = '',
     [string]$KillSwitchReadyPath = '',
-    [string]$CleanupExecutablePath = ''
+    [string]$CleanupExecutablePath = '',
+    [string]$AmneziaRuntimePath = '',
+    [string]$TunnelDnsServers = '1.1.1.1,1.0.0.1'
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$dnsServers = @($TunnelDnsServers -split ',' | ForEach-Object { [Net.IPAddress]::Parse($_).ToString() } | Select-Object -Unique)
+if ($dnsServers.Count -eq 0) { throw 'No tunnel DNS resolvers' }
 $ownedRoutes = [System.Collections.Generic.List[object]]::new()
 $dnsRule = $null
 $xrayProcess = $null
+$amneziaProcess = $null
+$tunnelConnected = $false
+$amneziaConfigurationPath = Join-Path ([IO.Path]::GetDirectoryName($ConfigurationPath)) 'amneziawg.json'
+$amneziaReadyPath = Join-Path ([IO.Path]::GetDirectoryName($ConfigurationPath)) 'amneziawg.ready'
 $mutex = [Threading.Mutex]::new($false, 'Global\DiTunnel.NetworkHost.v1')
 $locked = $false
 $cleanupFailed = $false
@@ -43,7 +51,7 @@ function Save-XrayDiagnostics([string]$text) {
     try {
         $safe = $text -split "`r?`n" | Where-Object { $_ -match '(?i)(error|failed|fatal|panic)' } | Select-Object -Last 10 | ForEach-Object {
             $line = $_ -replace '(?i)\b(vless|vmess|trojan|ss|hy2|hysteria2)://\S+', '[profile]'
-            $line = $line -replace '(?i)(password|token|secret|privatekey|uuid|auth)\s*[:=]\s*[^\s,}"\\]+', '$1=[redacted]'
+            $line = $line -replace '(?i)(password|pass|user|username|token|secret|privatekey|uuid|auth)\s*[:=]\s*[^\s,}"\\]+', '$1=[redacted]'
             $line = $line -replace '\b(?:\d{1,3}\.){3}\d{1,3}\b', '[address]'
             if ($line.Length -gt 400) { $line.Substring(0, 400) } else { $line }
         }
@@ -70,6 +78,7 @@ function Set-XrayOutboundSource([int]$interfaceIndex) {
         Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.AddressState -in @('Preferred','Deprecated') } |
         Select-Object -ExpandProperty IPAddress -First 1
     if (-not $sourceAddress) { throw 'Physical IPv4 source address is unavailable' }
+    $script:physicalSourceAddress = $sourceAddress
     $configuration = Get-Content -LiteralPath $ConfigurationPath -Raw | ConvertFrom-Json
     $tunInbound = $configuration.inbounds | Where-Object { $_.tag -eq 'tun' } | Select-Object -First 1
     if (-not $tunInbound) { throw 'TUN inbound is missing' }
@@ -77,10 +86,65 @@ function Set-XrayOutboundSource([int]$interfaceIndex) {
     # sockets to the physical IPv4 source; the exact server route keeps them outside both TUNs.
     $tunInbound.settings.PSObject.Properties.Remove('autoOutboundsInterface')
     foreach ($outbound in $configuration.outbounds) {
+        if ($AmneziaRuntimePath -and $outbound.tag -eq 'proxy') { continue }
         $outbound | Add-Member -NotePropertyName sendThrough -NotePropertyValue $sourceAddress -Force
     }
     $json = $configuration | ConvertTo-Json -Depth 100 -Compress
     [IO.File]::WriteAllText($ConfigurationPath, $json, [Text.UTF8Encoding]::new($false))
+    if ($AmneziaRuntimePath) {
+        $awgConfiguration = Get-Content -LiteralPath $amneziaConfigurationPath -Raw | ConvertFrom-Json
+        $awgConfiguration.sourceAddress = $sourceAddress
+        $awgConfiguration.sourceInterface = $interfaceIndex
+        [IO.File]::WriteAllText($amneziaConfigurationPath, ($awgConfiguration | ConvertTo-Json -Depth 100 -Compress), [Text.UTF8Encoding]::new($false))
+    }
+}
+function Start-AmneziaCore {
+    Enter-Stage 'AMNEZIAWG'
+    $awgStart = [Diagnostics.ProcessStartInfo]::new()
+    $awgStart.FileName = $AmneziaRuntimePath
+    $awgStart.WorkingDirectory = [IO.Path]::GetDirectoryName($AmneziaRuntimePath)
+    # Only a protected file path and this host's PID enter the command line.
+    $awgStart.Arguments = '-config "' + $amneziaConfigurationPath + '" -owner ' + $PID
+    $awgStart.UseShellExecute = $false
+    $awgStart.CreateNoWindow = $true
+    $awgStart.RedirectStandardOutput = $true
+    $awgStart.RedirectStandardError = $true
+    $script:amneziaProcess = [Diagnostics.Process]::Start($awgStart)
+    $script:awgOutput = $amneziaProcess.StandardOutput.ReadToEndAsync()
+    $script:awgError = $amneziaProcess.StandardError.ReadToEndAsync()
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while (-not (Test-Path -LiteralPath $amneziaReadyPath)) {
+        if (Test-StopRequested) { throw [OperationCanceledException]::new() }
+        if ($amneziaProcess.HasExited -or [DateTime]::UtcNow -ge $deadline) { throw 'AmneziaWG startup failed' }
+        Start-Sleep -Milliseconds 100
+    }
+    $port = 0
+    if (-not [int]::TryParse((Get-Content -LiteralPath $amneziaReadyPath -Raw), [ref]$port) -or $port -lt 1 -or $port -gt 65535) { throw 'Invalid AmneziaWG readiness' }
+    $configuration = Get-Content -LiteralPath $ConfigurationPath -Raw | ConvertFrom-Json
+    $proxy = $configuration.outbounds | Where-Object { $_.tag -eq 'proxy' } | Select-Object -First 1
+    if ($proxy.protocol -ne 'socks' -or $proxy.settings.servers[0].address -ne '127.0.0.1') { throw 'Invalid AmneziaWG proxy hop' }
+    $proxy.settings.servers[0].port = $port
+    [IO.File]::WriteAllText($ConfigurationPath, ($configuration | ConvertTo-Json -Depth 100 -Compress), [Text.UTF8Encoding]::new($false))
+}
+function Test-AmneziaCoreExited {
+    if ($amneziaProcess -and $amneziaProcess.HasExited) {
+        Emit ('ERROR_AWG_EXIT_' + $amneziaProcess.ExitCode)
+        # Preserve protection throughout automatic recovery of either core.
+        if ($KillSwitchReadyPath -and $tunnelConnected) { Set-Content -LiteralPath $preserveKillSwitchPath -Value 'READY' -NoNewline }
+        return $true
+    }
+    return $false
+}
+function Test-PhysicalNetworkChanged {
+    if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') { return $true }
+    if ($AmneziaRuntimePath) {
+        $sourceStillAssigned = Get-NetIPAddress -InterfaceIndex $upstream.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -eq $physicalSourceAddress -and $_.AddressState -in @('Preferred','Deprecated') } | Select-Object -First 1
+        $gatewayStillAssigned = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+            Where-Object { $_.InterfaceIndex -eq $upstream.InterfaceIndex -and $_.NextHop -eq $upstream.NextHop } | Select-Object -First 1
+        if (-not $sourceStillAssigned -or -not $gatewayStillAssigned) { return $true }
+    }
+    return $false
 }
 function Add-TunnelAddress([string]$address, [byte]$prefixLength, [string]$addressFamily) {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -165,7 +229,7 @@ function Update-SplitRoutes([string[]]$addresses) {
     if ($SplitTunnelMode -eq 'ProxyAll') { return }
     $desired = @{}
     foreach ($address in $addresses) {
-        if ($address -and $address -ne $ServerAddress) { $desired[$address] = $true }
+        if ($address -and $address -ne $ServerAddress -and $address -notin $dnsServers) { $desired[$address] = $true }
     }
     if ($desired.Count -eq 0) { return }
     foreach ($address in @($splitRoutes.Keys)) {
@@ -254,6 +318,7 @@ try {
         Emit 'ERROR_VPN_TAKEOVER'; throw 'The physical server route was not installed'
     }
     Set-XrayOutboundSource $upstream.InterfaceIndex
+    if ($AmneziaRuntimePath) { Start-AmneziaCore }
     Enter-Stage 'XRAY'
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $RuntimePath
@@ -268,7 +333,7 @@ try {
     $discardError = $xrayProcess.StandardError.ReadToEndAsync()
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
-        if ($xrayProcess.HasExited -or $owner.HasExited -or (Test-StopRequested)) { throw 'Startup interrupted' }
+        if ($xrayProcess.HasExited -or $owner.HasExited -or (Test-StopRequested) -or (Test-AmneziaCoreExited)) { throw 'Startup interrupted' }
         $adapter = Get-NetAdapter -Name $TunnelName -ErrorAction SilentlyContinue
         if ($adapter) { break }
         Start-Sleep -Milliseconds 200
@@ -300,15 +365,15 @@ try {
         Add-OwnedRoute '128.0.0.0/1' $index '0.0.0.0'
         Add-OwnedRoute '::/1' $index '::'
         Add-OwnedRoute '8000::/1' $index '::'
-    } else {
-        # Keep DNS resolution available without leaking it to the physical adapter. Xray has
-        # matching IP rules that force these two resolver destinations through the VPN outbound.
-        Add-OwnedRoute '1.1.1.1/32' $index '0.0.0.0'
-        Add-OwnedRoute '1.0.0.1/32' $index '0.0.0.0'
+    }
+    # Exact resolver routes also override connected LAN routes for private AWG DNS addresses.
+    foreach ($resolver in $dnsServers) {
+        if ($resolver.Contains(':')) { Add-OwnedRoute "$resolver/128" $index '::' }
+        else { Add-OwnedRoute "$resolver/32" $index '0.0.0.0' }
     }
     Update-SplitRoutes $splitIps
     Enter-Stage 'DNS_RULE'
-    $dnsRule = Add-DnsClientNrptRule -Namespace '.' -NameServers '1.1.1.1','1.0.0.1' -Comment $dnsComment -PassThru
+    $dnsRule = Add-DnsClientNrptRule -Namespace '.' -NameServers $dnsServers -Comment $dnsComment -PassThru
     Enter-Stage 'DNS_CACHE'
     Clear-DnsClientCache
     if ($SplitTunnelMode -eq 'ProxySelected') {
@@ -326,12 +391,14 @@ try {
             } while ([DateTime]::UtcNow -lt $dnsDeadline)
             if (-not $resolvedSelected) { throw 'Selected-domain DNS did not become ready' }
         }
+        $tunnelConnected = $true
         Emit 'CONNECTED'
         while (-not (Test-StopRequested)) {
             $owner.Refresh(); $xrayProcess.Refresh()
             if ($owner.HasExited -or $owner.StartTime -ne $ownerStart) { break }
             if ($xrayProcess.HasExited) { Emit ('ERROR_XRAY_EXIT_' + $xrayProcess.ExitCode); break }
-            if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') {
+            if (Test-AmneziaCoreExited) { break }
+            if (Test-PhysicalNetworkChanged) {
                 Emit 'ERROR_NETWORK_CHANGED'
                 if ($KillSwitchReadyPath) { Set-Content -LiteralPath $preserveKillSwitchPath -Value 'READY' -NoNewline }
                 break
@@ -359,12 +426,14 @@ try {
         # Routing is already installed. A failed optional reachability probe must not tear down a working tunnel.
         Emit 'PROBE_WARNING'
     } finally { $probeClient.Dispose() }
+    $tunnelConnected = $true
     Emit 'CONNECTED'
     while (-not (Test-StopRequested)) {
         $owner.Refresh(); $xrayProcess.Refresh()
         if ($owner.HasExited -or $owner.StartTime -ne $ownerStart) { break }
         if ($xrayProcess.HasExited) { Emit ('ERROR_XRAY_EXIT_' + $xrayProcess.ExitCode); break }
-        if ((Get-NetAdapter -InterfaceIndex $upstream.InterfaceIndex).Status -ne 'Up') {
+        if (Test-AmneziaCoreExited) { break }
+        if (Test-PhysicalNetworkChanged) {
             Emit 'ERROR_NETWORK_CHANGED'
             if ($KillSwitchReadyPath) { Set-Content -LiteralPath $preserveKillSwitchPath -Value 'READY' -NoNewline }
             break
@@ -406,6 +475,13 @@ finally {
         try { if ($xrayProcess -and -not $xrayProcess.HasExited) { $xrayProcess.Kill(); $xrayProcess.WaitForExit() } } catch { $cleanupFailed = $true }
         try { Save-XrayDiagnostics (($discardOutput.GetAwaiter().GetResult()) + "`n" + ($discardError.GetAwaiter().GetResult())) } catch { }
         if ($xrayProcess) { $xrayProcess.Dispose() }
+        try { if ($amneziaProcess -and -not $amneziaProcess.HasExited) { $amneziaProcess.Kill(); $amneziaProcess.WaitForExit() } } catch { $cleanupFailed = $true }
+        if ($amneziaProcess) { $amneziaProcess.Dispose() }
+        if ($AmneziaRuntimePath) {
+            foreach ($awgFile in @($amneziaConfigurationPath, $amneziaReadyPath, ($amneziaReadyPath + '.tmp'))) {
+                try { if (Test-Path -LiteralPath $awgFile) { Remove-Item -LiteralPath $awgFile -Force -ErrorAction Stop } } catch { $cleanupFailed = $true }
+            }
+        }
         try { Remove-Item -LiteralPath $ConfigurationPath -Force -ErrorAction Stop } catch { $cleanupFailed = $true }
         if ($KillSwitchReadyPath -and $CleanupExecutablePath -and -not (Test-Path -LiteralPath $preserveKillSwitchPath)) {
             try {

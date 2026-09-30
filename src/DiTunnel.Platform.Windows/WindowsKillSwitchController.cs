@@ -51,6 +51,7 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
     ];
 
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly AsyncProbeLeaseGate probeLeases = new();
     private bool installed;
     private ulong activeTunnelLuid;
     private KillSwitchConfiguration? activeConfiguration;
@@ -138,21 +139,23 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
 
     public async Task<IAsyncDisposable> PermitProbeEndpointAsync(IPAddress address, ushort port, KillSwitchTransportProtocol transport, CancellationToken cancellationToken = default)
     {
-        await gate.WaitAsync(cancellationToken);
-        try
+        var key = address.AddressFamily == AddressFamily.InterNetwork ? ProbeV4Key : ProbeV6Key;
+        return await probeLeases.AcquireAsync(async () =>
         {
-            if (!installed) return ProbePermitLease.Empty;
-            var key = address.AddressFamily == AddressFamily.InterNetwork ? ProbeV4Key : ProbeV6Key;
-            var layer = address.AddressFamily == AddressFamily.InterNetwork ? PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V4 : PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V6;
-            var configuration = KillSwitchConfiguration.Create([address], port, transport, false);
-            WfpEngineTransaction.Execute(engine =>
+            await gate.WaitAsync(cancellationToken);
+            try
             {
-                DeleteFilter(engine, key);
-                AddServerFilter(engine, key, "Permit temporary Di-Tunnel server probe", layer, address, configuration);
-            });
-            return new ProbePermitLease(this, key);
-        }
-        finally { gate.Release(); }
+                if (!installed) return;
+                var layer = address.AddressFamily == AddressFamily.InterNetwork ? PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V4 : PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V6;
+                var configuration = KillSwitchConfiguration.Create([address], port, transport, false);
+                WfpEngineTransaction.Execute(engine =>
+                {
+                    DeleteFilter(engine, key);
+                    AddServerFilter(engine, key, "Permit temporary Di-Tunnel server probe", layer, address, configuration);
+                });
+            }
+            finally { gate.Release(); }
+        }, () => RemoveProbePermitAsync(key), cancellationToken);
     }
 
     private async ValueTask RemoveProbePermitAsync(Guid key)
@@ -167,17 +170,6 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
             });
         }
         finally { gate.Release(); }
-    }
-
-    private sealed class ProbePermitLease(WindowsKillSwitchController? owner, Guid key) : IAsyncDisposable
-    {
-        internal static readonly ProbePermitLease Empty = new(null, Guid.Empty);
-        private WindowsKillSwitchController? currentOwner = owner;
-        public async ValueTask DisposeAsync()
-        {
-            var value = Interlocked.Exchange(ref currentOwner, null);
-            if (value is not null) await value.RemoveProbePermitAsync(key);
-        }
     }
 
     private static unsafe ulong ConvertInterfaceIndexToLuid(uint interfaceIndex)
