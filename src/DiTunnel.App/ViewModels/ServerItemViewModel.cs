@@ -9,7 +9,7 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     public ImportedProfile Profile { get; } = profile;
     public string Name => Profile.Name;
     public string Summary => Profile.Summary;
-    public string Protocol => Profile.Kind.Equals("SS", StringComparison.OrdinalIgnoreCase) ? "Shadowsocks" : Profile.Kind;
+    public string Protocol => Profile.Kind.Equals("SS", StringComparison.OrdinalIgnoreCase) ? "Shadowsocks" : Profile.ProtocolName;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private string probeText = "Не проверен";

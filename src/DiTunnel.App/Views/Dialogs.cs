@@ -472,9 +472,10 @@ public static class Dialogs
         panel.Children.Add(removeUnavailable);
         var probeMode = Button("", () => { });
         void UpdateProbeMode() => probeMode.Content = L.T(UserSettings.Current.ServerProbeMode == ServerProbeMode.Fast
-            ? "Проверка: Быстрая (TCP/HTTP)" : "Проверка: Точная (HTTPS)");
+            ? "Проверка: Быстрая" : "Проверка: Точная (HTTPS)");
         probeMode.Click += (_, _) => { vm.ToggleProbeMode(); UpdateProbeMode(); };
         UpdateProbeMode();
+        ToolTip.SetTip(probeMode, L.T("Метод быстрой проверки зависит от платформы и протокола: TCP, HTTP или TLS. Точная проверка выполняет HTTPS-запрос через профиль. Метод и время показаны в результате."));
         probeMode.HorizontalAlignment = HorizontalAlignment.Left;
         panel.Children.Add(probeMode);
         var lowest = new CheckBox { Content = L.T("Lowest: выбирать сервер с минимальной задержкой"), IsChecked = vm.IsLowestMode };

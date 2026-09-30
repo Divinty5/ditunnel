@@ -2,6 +2,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
+using DiTunnel.Core.Profiles;
 using DiTunnel.App.ViewModels;
 
 namespace DiTunnel.App.Views;
@@ -79,6 +81,36 @@ public partial class MainView : UserControl
         {
             vm.ImportMessage = $"Не удалось отсканировать QR-код: {exception.Message}";
         }
+    }
+
+    private async void ImportFileClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm || !vm.CanImport) return;
+        try
+        {
+            var provider = TopLevel.GetTopLevel(this)?.StorageProvider;
+            if (provider is null) { vm.ImportMessage = "Не удалось открыть файл конфигурации."; return; }
+            var files = await provider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = L.T("Импорт конфигурации"), AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType(L.T("Конфигурации VPN")) { Patterns = ["*.conf", "*.txt", "*.json"] }, FilePickerFileTypes.All]
+            });
+            if (files.Count == 0 || !vm.CanImport || !vm.IsImportOpen) return;
+            await using var stream = await files[0].OpenReadAsync();
+            using var buffer = new MemoryStream();
+            var block = new byte[8192];
+            int read;
+            while ((read = await stream.ReadAsync(block)) != 0)
+            {
+                if (buffer.Length + read > ProfileParser.MaximumBytes) throw new FormatException("Не удалось импортировать: конфигурация превышает 2 МБ.");
+                buffer.Write(block, 0, read);
+            }
+            vm.ImportText = System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+            vm.ImportName = Path.GetFileNameWithoutExtension(files[0].Name);
+            await ImportAndUpdateNavigationAsync(vm);
+        }
+        catch (FormatException error) { vm.ImportMessage = error.Message; }
+        catch { vm.ImportMessage = "Не удалось открыть файл конфигурации."; }
     }
 
     private void ManualImportClick(object? sender, RoutedEventArgs e)
