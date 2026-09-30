@@ -5,7 +5,18 @@ namespace DiTunnel.Core.Profiles;
 
 public sealed record ImportedProfile(string Name, string Kind, string Content, string SourceId = "legacy", string SourceName = "Ранее импортированные", string? SourceUrl = null, SubscriptionUsage? Usage = null)
 {
-    public string Summary => Kind == "Xray JSON" ? "Конфигурация Xray" : $"{Kind} · конфигурация сервера";
+    public string? ProtocolVersion { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ProtocolName
+    {
+        get
+        {
+            if (!Kind.Equals(AmneziaWgConfiguration.ProfileKind, StringComparison.OrdinalIgnoreCase)) return Kind;
+            try { return $"AmneziaWG {AmneziaVpnLink.NormalizeVersion(ProtocolVersion) ?? AmneziaWgConfiguration.Parse(Content).ProtocolVersion}"; }
+            catch (FormatException) { return Kind; }
+        }
+    }
+    public string Summary => Kind == "Xray JSON" ? "Конфигурация Xray" : $"{ProtocolName} · конфигурация сервера";
 }
 
 public static class ProfileParser
@@ -19,6 +30,9 @@ public static class ProfileParser
         input = input.Trim().TrimStart('\uFEFF');
         if (string.IsNullOrWhiteSpace(input)) throw new FormatException("Не удалось импортировать: данные отсутствуют.");
         skippedEntries = 0;
+        if (input.StartsWith("vpn://", StringComparison.OrdinalIgnoreCase)) return AmneziaVpnLink.Parse(input);
+        if (AmneziaWgConfiguration.LooksLikeConfiguration(input)) return ParseAmneziaWg(input);
+
         if (input.StartsWith('{')) return ParseJson(input);
 
         if (!input.Contains("://", StringComparison.Ordinal) && input.Contains('%'))
@@ -31,6 +45,11 @@ public static class ProfileParser
             try { input = Encoding.UTF8.GetString(Convert.FromBase64String(PadBase64(string.Concat(input.Where(c => !char.IsWhiteSpace(c)))))); }
             catch (FormatException) { throw new FormatException("Не удалось импортировать: формат подписки не распознан."); }
         }
+
+        if (Encoding.UTF8.GetByteCount(input) > MaximumBytes) throw new FormatException("Не удалось импортировать: конфигурация превышает 2 МБ.");
+        if (AmneziaWgConfiguration.LooksLikeConfiguration(input)) return ParseAmneziaWg(input);
+        if (input.StartsWith("vpn://", StringComparison.OrdinalIgnoreCase)) return AmneziaVpnLink.Parse(input);
+        if (input.StartsWith('{')) return ParseJson(input);
 
         var result = new List<ImportedProfile>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -45,6 +64,12 @@ public static class ProfileParser
         }
         if (result.Count == 0) throw new FormatException("Не удалось импортировать: поддерживаемые серверы не найдены.");
         return result;
+    }
+
+    private static IReadOnlyList<ImportedProfile> ParseAmneziaWg(string input)
+    {
+        var configuration = AmneziaWgConfiguration.Parse(input);
+        return [new(NormalizeProfileName($"AmneziaWG · {configuration.EndpointHost}"), AmneziaWgConfiguration.ProfileKind, input)];
     }
 
     private static IEnumerable<string> SplitServerEntries(string input)
@@ -70,6 +95,8 @@ public static class ProfileParser
         try
         {
             using var json = JsonDocument.Parse(input);
+            if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("containers", out _))
+                return AmneziaVpnLink.ParseJson(Encoding.UTF8.GetBytes(input));
             if (!json.RootElement.TryGetProperty("outbounds", out var outbounds) || outbounds.ValueKind != JsonValueKind.Array || outbounds.GetArrayLength() == 0)
                 throw new FormatException("Не удалось импортировать: JSON должен содержать непустой массив outbounds Xray.");
             return [new("Конфигурация Xray", "Xray JSON", input)];
