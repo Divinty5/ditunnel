@@ -7,6 +7,13 @@ namespace DiTunnel.Infrastructure.Xray.Tests;
 
 public sealed class XrayProfileConverterTests
 {
+    [Fact]
+    public void AmneziaWgRequiresSeparateRuntime()
+    {
+        var error = Assert.Throws<NotSupportedException>(() => XrayProfileConverter.Convert(new("AWG", "AmneziaWG", "synthetic")));
+        Assert.Contains("отдельного ядра AmneziaWG", error.Message);
+    }
+
     [Fact] public void HysteriaPreservesAuthAndSniWhilePinningUpstream()
     {
         var profile = new ImportedProfile("Test", "Hysteria 2", "hy2://a%3Ab@example.com:443?sni=cert.example.com#Test");

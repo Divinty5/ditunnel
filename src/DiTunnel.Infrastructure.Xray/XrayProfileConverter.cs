@@ -7,17 +7,22 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPort, KillSwitchTransportProtocol ServerTransport, JsonObject Outbound)
 {
-    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false)
+    // The endpoint metadata refers to the encrypted server; the SOCKS hop stays on loopback.
+    public bool IsLocalProxy { get; init; }
+    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false, IReadOnlyList<string>? dnsServers = null, bool enableSocksUdp = true)
     {
         var outbound = (JsonObject)Outbound.DeepClone();
         var settings = outbound["settings"]!.AsObject();
-        if (outbound["protocol"]!.GetValue<string>() == "hysteria") settings["address"] = serverAddress;
-        else if (settings["vnext"] is JsonArray vnext) vnext[0]!["address"] = serverAddress;
-        else settings["servers"]![0]!["address"] = serverAddress;
+        if (!IsLocalProxy)
+        {
+            if (outbound["protocol"]!.GetValue<string>() == "hysteria") settings["address"] = serverAddress;
+            else if (settings["vnext"] is JsonArray vnext) vnext[0]!["address"] = serverAddress;
+            else settings["servers"]![0]!["address"] = serverAddress;
+        }
         splitTunnel ??= SplitTunnelPolicy.Default;
         var inbound = tun
             ? new JsonObject { ["protocol"] = "tun", ["tag"] = "tun", ["port"] = 0, ["settings"] = new JsonObject { ["name"] = tunnelName ?? "DiTunnel", ["MTU"] = 1400, ["autoOutboundsInterface"] = "auto" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = new JsonArray("http", "tls", "quic"), ["routeOnly"] = true } }
-            : new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = proxyPort, ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = true } };
+            : new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = proxyPort, ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = enableSocksUdp } };
         var outbounds = new JsonArray();
         JsonObject DirectOutbound() => new() { ["tag"] = "direct", ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = "UseIPv4" } };
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(DirectOutbound());
@@ -25,7 +30,8 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         if (splitTunnel.Mode == SplitTunnelMode.BypassSelected) outbounds.Add(DirectOutbound());
         if (blockAds) outbounds.Add(new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" });
         if (!string.IsNullOrWhiteSpace(outboundSourceAddress))
-            foreach (var item in outbounds.OfType<JsonObject>()) item["sendThrough"] = outboundSourceAddress;
+            foreach (var item in outbounds.OfType<JsonObject>())
+                if (!IsLocalProxy || item["tag"]?.GetValue<string>() != "proxy") item["sendThrough"] = outboundSourceAddress;
         var rules = new JsonArray();
         if (blockAds)
         {
@@ -61,8 +67,8 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
                 ["outboundTag"] = "block"
             });
         }
-        if (splitTunnel.Mode == SplitTunnelMode.ProxySelected)
-            rules.Add(new JsonObject { ["ip"] = new JsonArray("1.1.1.1", "1.0.0.1"), ["outboundTag"] = "proxy" });
+        if (IsLocalProxy || splitTunnel.Mode == SplitTunnelMode.ProxySelected)
+            rules.Add(new JsonObject { ["ip"] = new JsonArray((dnsServers ?? ["1.1.1.1", "1.0.0.1"]).Select(value => (JsonNode?)value).ToArray()), ["outboundTag"] = "proxy" });
         var destinations = splitTunnel.Domains.Where(d => !string.IsNullOrWhiteSpace(d)).Select(SplitTunnelPolicy.NormalizeDomain).Where(d => d.Length > 0).ToArray();
         var domains = destinations.Where(d => !IPAddress.TryParse(d, out _)).Select(d => (JsonNode?)$"domain:{d}").ToArray();
         var addresses = destinations.Where(d => IPAddress.TryParse(d, out _)).Select(d => (JsonNode?)d).ToArray();
@@ -85,6 +91,9 @@ public static class XrayProfileConverter
 {
     public static XrayProfileConfiguration Convert(ImportedProfile profile)
     {
+        if (profile.Kind.Equals(AmneziaWgConfiguration.ProfileKind, StringComparison.OrdinalIgnoreCase) ||
+            AmneziaWgConfiguration.LooksLikeConfiguration(profile.Content))
+            throw new NotSupportedException("AmneziaWG требует отдельного ядра AmneziaWG. Подключение и проверка реализованы в Windows-клиенте; на Android пока доступен только импорт.");
         if (!Uri.TryCreate(profile.Content, UriKind.Absolute, out var uri) || uri.Scheme is not ("hy2" or "hysteria2" or "vless" or "trojan" or "ss"))
             throw new NotSupportedException("Подключение доступно для Hysteria 2, VLESS, Trojan и Shadowsocks. VMess и произвольный JSON пока доступны только для хранения.");
         var query = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
