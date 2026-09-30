@@ -1,0 +1,11 @@
+{
+  "bridgeVersion": "1",
+  "module": "github.com/amnezia-vpn/amneziawg-go/v3",
+  "moduleVersion": "v3.0.0-20260828154827-b5928efb6ca1",
+  "moduleSum": "h1:8jZeE7vxwv7Pcf4KVZvIc+EaKdL9NON53BvTibfwXew=",
+  "commit": "b5928efb6ca19f0153958460c3d141f04abc5c2e",
+  "goVersion": "go1.27.1",
+  "goArchive": "go1.27.1.windows-amd64.zip",
+  "goUrl": "https://go.dev/dl/go1.27.1.windows-amd64.zip",
+  "goSha256": "a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d"
+}
