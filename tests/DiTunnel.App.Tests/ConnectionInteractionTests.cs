@@ -13,7 +13,7 @@ public sealed class ConnectionInteractionTests
     }
     private sealed class Engine : IProfileVpnEngine
     {
-        public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
+        public VpnStatus Status { get; set; } = VpnStatus.Disconnected;
         public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
         public bool RequiresAdministrator => false;
         public bool IsNetworkProtectionActive => Status.State == VpnConnectionState.Connected;
@@ -55,6 +55,26 @@ public sealed class ConnectionInteractionTests
         public int Calls;
         public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
         { Calls++; return Task.FromResult(new ServerProbeResult(42, "HTTPS · 42 мс")); }
+    }
+    [Fact]
+    public async Task SuccessfulProfileProbeDoesNotOverwriteTunnelWarning()
+    {
+        const string warning = "Туннель активен. Сервер доступен, но контрольный запрос через TUN не выполнен.";
+        var engine = new Engine { Status = new(VpnConnectionState.Connected, warning) };
+        var probe = new Probe();
+        var vm = new MainViewModel(engine, new Store(), probe);
+        try
+        {
+            vm.Notice = warning;
+            vm.ConnectionState = VpnConnectionState.Connected;
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (vm.Profiles[0].ProbeMilliseconds is null || vm.IsProbing)
+                await Task.Delay(20, deadline.Token);
+            Assert.True(probe.Calls > 0);
+            Assert.Equal(42d, vm.Profiles[0].ProbeMilliseconds);
+            Assert.Equal(warning, vm.Notice);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
     [Fact] public async Task ProbeUpdatesRowAndReenablesControls()
     {

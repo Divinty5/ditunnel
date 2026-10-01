@@ -19,6 +19,7 @@
     <ProjectReference Include="..\DiTunnel.Infrastructure.Xray\DiTunnel.Infrastructure.Xray.csproj" />
     <ProjectReference Include="..\DiTunnel.Platform.Windows\DiTunnel.Platform.Windows.csproj" />
   </ItemGroup>
+    <ProjectReference Include="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" ReferenceOutputAssembly="false" />
 
   <ItemGroup>
     <Content Include="..\..\.tools\amneziawg\1\windows-x64\*" Link="Runtime\AmneziaWG\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
@@ -29,3 +30,16 @@
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\LICENSE*" Link="Runtime\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
+  <Target Name="CopyNetworkHost" AfterTargets="Build">
+    <MSBuild Projects="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="NetworkHostAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <NetworkHostFiles Include="@(NetworkHostAssembly);@(NetworkHostAssembly->'%(RootDir)%(Directory)Di-Tunnel.NetworkHost.exe');@(NetworkHostAssembly->'%(RootDir)%(Directory)Di-Tunnel.NetworkHost.deps.json');@(NetworkHostAssembly->'%(RootDir)%(Directory)Di-Tunnel.NetworkHost.runtimeconfig.json')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NetworkHostFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishNetworkHost" AfterTargets="Publish">
+    <MSBuild Projects="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" Targets="Publish"
+             Properties="PublishDir=$(PublishDir);Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained)" />
+  </Target>

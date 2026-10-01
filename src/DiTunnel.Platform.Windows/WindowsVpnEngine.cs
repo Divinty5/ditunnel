@@ -6,6 +6,7 @@ using System.Security.Principal;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using DiTunnel.Infrastructure.Xray;
+using DiTunnel.Platform.Windows.Network;
 
 namespace DiTunnel.Platform.Windows;
 
@@ -17,7 +18,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     private readonly Func<bool> strictAdBlocking;
     private readonly WindowsKillSwitchController killSwitch;
     private readonly SemaphoreSlim gate = new(1, 1);
-    private Process? host;
+    private WindowsTunnelHost? host;
     private Task? monitor;
     private string? sessionDirectory;
     private bool stopping;
@@ -155,10 +156,6 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             if (connection.KillSwitchEnabled && policy.Mode == SplitTunnelMode.BypassSelected && policy.Processes.Count > 0)
                 throw new InvalidOperationException("Kill switch с режимом «Обход выбранных» пока поддерживает домены, но не приложения. Удалите приложения из списка или выберите другой режим.");
             var runtime = WindowsRuntime.Find();
-            var script = Path.Combine(AppContext.BaseDirectory, "Network", "Run-Tunnel.ps1");
-            if (!File.Exists(script)) throw new InvalidOperationException("Сетевой модуль не найден. Пересоберите Windows-клиент.");
-            var cleanupExecutable = Path.Combine(AppContext.BaseDirectory, "Di-Tunnel.exe");
-            if (!File.Exists(cleanupExecutable)) throw new InvalidOperationException("Модуль очистки WFP не найден. Пересоберите Windows-клиент.");
             Publish(VpnConnectionState.Connecting, awg is null ? "Запускаем Xray и настраиваем системный туннель…" : "Запускаем AmneziaWG и настраиваем системный туннель…");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(75));
@@ -193,22 +190,12 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             // short-lived Wintun adapter. Starting the real host immediately afterwards can race
             // that adapter's removal. The SOCKS probe above already validates the profile and
             // outbound; let the single network host create and own the TUN adapter.
-            var start = new ProcessStartInfo
-            {
-                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
-                UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true
-            };
-            var splitDomains = policy.Domains.Where(domain => !string.IsNullOrWhiteSpace(domain)).Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => domain.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase);
-            foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-RuntimePath", runtime, "-ConfigurationPath", configPath, "-ServerAddress", address.ToString(), "-OwnerProcessId", Environment.ProcessId.ToString(), "-TunnelName", tunnelName, "-SplitTunnelMode", policy.Mode.ToString(), "-SplitAddresses", string.Join(',', splitAddresses.Select(ip => ip.ToString())), "-SplitDomains", string.Join(';', splitDomains), "-KillSwitchReadyPath", connection.KillSwitchEnabled ? killSwitchReadyPath : "", "-CleanupExecutablePath", cleanupExecutable }) start.ArgumentList.Add(argument);
-            if (awg is not null)
-            {
-                start.ArgumentList.Add("-AmneziaRuntimePath"); start.ArgumentList.Add(WindowsAmneziaWgRuntime.Find());
-                start.ArgumentList.Add("-TunnelDnsServers"); start.ArgumentList.Add(string.Join(',', awg.DnsServers));
-            }
+            var splitDomains = policy.Domains.Where(domain => !string.IsNullOrWhiteSpace(domain)).Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => domain.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             stopping = false;
             cleanupFailed = false;
-            host = Process.Start(start) ?? throw new InvalidOperationException("Не удалось запустить сетевой модуль.");
+            host = new WindowsTunnelHost(new(runtime, configPath, address, tunnelName, policy.Mode, splitAddresses,
+                splitDomains, connection.KillSwitchEnabled ? killSwitchReadyPath : null,
+                awg is null ? null : WindowsAmneziaWgRuntime.Find(), awg?.DnsServers.ToArray() ?? ["1.1.1.1", "1.0.0.1"]));
             var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var directAddresses = policy.Mode == SplitTunnelMode.BypassSelected ? splitAddresses : [];
             var protection = connection.KillSwitchEnabled ? KillSwitchConfiguration.Create([address], configuration.ServerPort, configuration.ServerTransport, connection.AllowLocalNetwork, directAddresses) : null;
@@ -257,9 +244,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         return addresses.Distinct().ToArray();
     }
 
-    private async Task MonitorAsync(Process process, TaskCompletionSource ready, KillSwitchConfiguration? protection, string killSwitchReadyPath, bool permitDynamicDirectAddresses)
+    private async Task MonitorAsync(WindowsTunnelHost process, TaskCompletionSource ready, KillSwitchConfiguration? protection, string killSwitchReadyPath, bool permitDynamicDirectAddresses)
     {
-        var stderr = process.StandardError.ReadToEndAsync();
         string? line;
         string? error = null;
         var rollbackConfirmed = false;
@@ -277,9 +263,9 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
-        while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
+        while ((line = await process.ReadLineAsync()) is not null)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|PROBE_WARNING|CONNECTED|STOPPED|CANCELLED)$"))
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|PROBE_WARNING|PROBE_EXCEPTION_[A-Za-z0-9_]+|PROBE_SOCKET_[0-9]+|CONNECTED|STOPPED|CANCELLED)$"))
                 await AppendDiagnosticAsync(logPath, line);
             if (line.StartsWith("PHYSICAL_INTERFACE_", StringComparison.Ordinal) && int.TryParse(line[19..], out var physicalIndex))
                 physicalInterfaceIndex = physicalIndex;
@@ -296,7 +282,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 {
                     error = $"Не удалось включить kill switch: {activationError.Message}";
                     ready.TrySetException(new InvalidOperationException(error, activationError));
-                    try { await File.WriteAllTextAsync(Path.Combine(sessionDirectory!, "config.json.stop"), "stop"); } catch (IOException) { }
+                    host?.RequestStop();
                 }
             }
             if (permitDynamicDirectAddresses && protection is not null && line.StartsWith("SPLIT_ADDRESS_", StringComparison.Ordinal)
@@ -306,7 +292,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 catch (Exception updateError)
                 {
                     error = $"Не удалось обновить исключения kill switch: {updateError.Message}";
-                    try { await File.WriteAllTextAsync(Path.Combine(sessionDirectory!, "config.json.stop"), "stop"); } catch (IOException) { }
+                    host?.RequestStop();
                 }
             }
             if (line.StartsWith("STAGE_", StringComparison.Ordinal))
@@ -328,32 +314,20 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             }
             if (line.StartsWith("ERROR_STAGE_", StringComparison.Ordinal))
                 error ??= $"Сбой настройки Windows на этапе {line[12..]}. Маршруты будут восстановлены.";
-            if (line.StartsWith("ERROR_COMMAND_", StringComparison.Ordinal)) error += $" Команда: {line[14..]}.";
             if (line.StartsWith("ERROR_NATIVE_", StringComparison.Ordinal)) error += $" Код Windows: {line[13..]}.";
-            if (line.StartsWith("ERROR_ROUTE_CODE_", StringComparison.Ordinal)) error += $" Код route.exe: {line[17..]}.";
+            if (line.StartsWith("ERROR_HRESULT_", StringComparison.Ordinal)) error += $" HRESULT Windows: 0x{line[14..]}.";
             if (line.StartsWith("ERROR_XRAY_EXIT_", StringComparison.Ordinal)) error = $"Xray-core завершился во время работы туннеля. Код: {line[16..]}.";
             if (line.StartsWith("ERROR_AWG_EXIT_", StringComparison.Ordinal))
             {
                 error = "Ядро AmneziaWG завершилось во время работы туннеля.";
                 recoveryReason = VpnRecoveryReason.TunnelProcessExited;
             }
-            if (line.StartsWith("ERROR_ROUTE_", StringComparison.Ordinal))
-                error += $" Маршрут: {line[12..] switch { "IPV4_LOW" => "IPv4 0.0.0.0/1", "IPV4_HIGH" => "IPv4 128.0.0.0/1", "IPV6_LOW" => "IPv6 ::/1", "IPV6_HIGH" => "IPv6 8000::/1", _ => "к адресу сервера" }}.";
-            if (line.StartsWith("ERROR_ROUTE_REASON_", StringComparison.Ordinal))
-                error += $" Причина: {line[19..] switch { "DUPLICATE" => "такой маршрут уже существует", "NOT_FOUND" => "Windows не нашла интерфейс или маршрут", "ACCESS_DENIED" => "недостаточно прав для изменения маршрута", "INVALID_PARAMETER" => "Windows отклонила параметры маршрута", _ => "Windows не расшифровала ответ route.exe" }}.";
-            if (line.StartsWith("ERROR_ROUTE_DETAIL_", StringComparison.Ordinal))
-            {
-                try
-                {
-                    var encoded = line[19..].Replace('-', '+').Replace('_', '/');
-                    encoded = encoded.PadRight(encoded.Length + (4 - encoded.Length % 4) % 4, '=');
-                    var detail = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)).Trim();
-                    if (!string.IsNullOrWhiteSpace(detail)) error += $" Ответ route.exe: {detail}.";
-                }
-                catch (FormatException) { }
-            }
             switch (line)
             {
+                case "ERROR_PRECHECK_DNS": error = "Не удалось выполнить проверку DNS Windows."; break;
+                case "ERROR_PRECHECK_UPLINK": error = "Не удалось определить физическое подключение к интернету."; break;
+                case "ERROR_PRECHECK_SERVER_ROUTE": error = "Не удалось подготовить физический маршрут к VPN-серверу."; break;
+                case "ERROR_PRECHECK_OUTBOUND": error = "Не удалось подготовить исходящее соединение VPN."; break;
                 case "TAKEOVER_OTHER_VPN": Publish(VpnConnectionState.Connecting, "Обнаружен другой VPN. Переключаем маршруты на Di-Tunnel…"); break;
                 case "PROBE_WARNING": probeWarning = true; break;
                 case "STOPPED": rollbackConfirmed = true; break;
@@ -365,6 +339,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                     break;
                 case "ERROR_DNS_POLICY": error = "Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их."; break;
                 case "ERROR_VPN_TAKEOVER": error = "Другой VPN блокирует прямой маршрут к серверу. Отключите в нём kill switch или режим блокировки соединений вне VPN."; break;
+                case "ERROR_NETWORK_ACCESS_DENIED": error = "Windows блокирует трафик через Di-Tunnel (код 10013). Проверьте kill switch другого VPN и правила сетевой защиты. Подключение отменено; маршруты будут восстановлены."; break;
+                case "ERROR_PROBE_ROUTE": error = "Контрольный маршрут проходит вне Di-Tunnel. Подключение отменено; маршруты будут восстановлены."; break;
                 case "ERROR_NO_PHYSICAL_UPSTREAM": error = "Не найден активный физический интернет-интерфейс для переключения с другого VPN."; break;
                 case "ERROR_NETWORK_CHANGED": recoveryReason = VpnRecoveryReason.NetworkChanged; error = "Сетевой адаптер отключён. Ожидаем восстановления сети."; break;
                 case "ERROR_CLEANUP": cleanupFailed = true; error = "Не удалось полностью восстановить сеть. Запустите scripts/Repair-DiTunnelNetwork.ps1 от администратора."; break;
@@ -373,7 +349,6 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         }
         await process.WaitForExitAsync();
         await AppendDiagnosticAsync(logPath, $"EXIT_{process.ExitCode}");
-        await stderr; // Raw core/PowerShell errors can contain secrets; never show them in UI.
         if (!rollbackConfirmed)
         {
             if (recoveryReason != VpnRecoveryReason.None && IsNetworkProtectionActive)
@@ -539,6 +514,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             if (host is not null) Publish(VpnConnectionState.Disconnecting, "Восстанавливаем маршруты и DNS…");
             await StopCoreAsync();
             if (cleanupFailed) throw new InvalidOperationException("Не удалось полностью восстановить сеть. Запустите scripts/Repair-DiTunnelNetwork.ps1 от администратора.");
+            await killSwitch.DeactivateAsync(CancellationToken.None);
             Publish(VpnConnectionState.Disconnected, "VPN отключён. Маршруты и DNS освобождены.");
         }
         finally { gate.Release(); }
@@ -550,8 +526,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         {
             if (!host.HasExited)
             {
-                try { await File.WriteAllTextAsync(Path.Combine(sessionDirectory!, "config.json.stop"), "stop"); }
-                catch (IOException) { }
+                host.RequestStop();
             }
             if (monitor is not null)
             {
@@ -596,7 +571,14 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     {
         NetworkChange.NetworkAvailabilityChanged -= OnNetworkChanged;
         NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
-        await DisconnectAsync();
+        try { await DisconnectAsync(); }
+        catch (TimeoutException)
+        {
+            // This engine lives in the independent broker. Exiting it would close the job
+            // and stop the cores before a slow rollback finishes, so keep waiting here.
+            if (monitor is not null) await monitor;
+            await DisconnectAsync();
+        }
         await killSwitch.DisposeAsync();
         reconnectCancellation.Dispose();
         physicalNetworkAvailable.Dispose();

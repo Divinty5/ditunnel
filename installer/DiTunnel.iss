@@ -46,32 +46,49 @@ Name: "{group}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"
 Name: "{autodesktop}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [UninstallRun]
-Filename: "{app}\Di-Tunnel.exe"; Parameters: "--cleanup-wfp"; Flags: runhidden waituntilterminated; RunOnceId: "CleanupDiTunnelWfp"
+Filename: "{app}\Di-Tunnel.NetworkHost.exe"; Parameters: "--cleanup-wfp"; Flags: runhidden waituntilterminated; RunOnceId: "CleanupDiTunnelWfp"
 
 [Run]
-Filename: "{app}\Di-Tunnel.exe"; Description: "{cm:LaunchProgram,Di-Tunnel}"; Verb: "runas"; Flags: shellexec nowait postinstall skipifsilent
+Filename: "{app}\Di-Tunnel.exe"; Description: "{cm:LaunchProgram,Di-Tunnel}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
+  CleanupPath: String;
+  Attempt: Integer;
 begin
   Result := '';
   { Avoid the Restart Manager confirmation page: the independent network host restores }
   { routes/WFP after the UI is terminated, and cleanup below also removes stale objects. }
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Di-Tunnel.exe', '', SW_HIDE,
     ewWaitUntilTerminated, ResultCode);
-  { Leave the independent network host alive long enough to restore routes and DNS. }
-  Sleep(3000);
-  if FileExists(ExpandConstant('{app}\Di-Tunnel.exe')) then
-    Exec(ExpandConstant('{app}\Di-Tunnel.exe'), '--cleanup-wfp', '', SW_HIDE,
-      ewWaitUntilTerminated, ResultCode);
+  { Wait for the independent host's rollback before replacing its files. }
+  CleanupPath := '';
+  if FileExists(ExpandConstant('{app}\Di-Tunnel.NetworkHost.exe')) then
+    CleanupPath := ExpandConstant('{app}\Di-Tunnel.NetworkHost.exe')
+  else if FileExists(ExpandConstant('{app}\Di-Tunnel.exe')) then
+    CleanupPath := ExpandConstant('{app}\Di-Tunnel.exe');
+  if CleanupPath <> '' then
+    for Attempt := 1 to 60 do
+    begin
+      if not Exec(CleanupPath, '--cleanup-wfp', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      begin
+        Result := 'Di-Tunnel: could not start network cleanup.';
+        Exit;
+      end;
+      if ResultCode = 0 then Exit;
+      if ResultCode <> 4 then Break;
+      Sleep(1000);
+    end;
+  if (CleanupPath <> '') and (ResultCode <> 0) then
+    Result := 'Di-Tunnel: network cleanup is not complete. Wait for the network host to exit before updating.';
 end;
 
 function InitializeUninstall(): Boolean;
 begin
-  Result := not CheckForMutexes('DiTunnel.Desktop');
+  Result := not CheckForMutexes('DiTunnel.Desktop,Global\DiTunnel.NetworkHost.v1');
   if not Result then
-    MsgBox('Di-Tunnel: please exit the application from the tray before uninstalling.' + #13#10 +
-      'Di-Tunnel: выйдите из приложения через трей перед удалением.', mbError, MB_OK);
+    MsgBox('Di-Tunnel: exit the application from the tray and wait for network cleanup before uninstalling.' + #13#10 +
+      'Di-Tunnel: выйдите из приложения через трей и дождитесь восстановления сети перед удалением.', mbError, MB_OK);
 end;

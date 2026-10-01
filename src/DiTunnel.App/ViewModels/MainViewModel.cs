@@ -886,7 +886,10 @@ public sealed partial class MainViewModel : ViewModelBase
                     OnPropertyChanged(nameof(ConnectionHint));
                     OnPropertyChanged(nameof(DelayBrush));
                     OnPropertyChanged(nameof(ConnectionHintBrush));
-                    Notice = result.Milliseconds is not null
+                    // Profile probes bypass the system tunnel; they cannot clear its health warning.
+                    Notice = engine?.Status is { State: VpnConnectionState.Connected, Message: { } networkMessage }
+                        ? networkMessage
+                        : result.Milliseconds is not null
                         ? $"Туннель активен. Контрольная проверка профиля {server.Name} выполнена: {result.Message}."
                         : $"Туннель активен, но контрольный запрос через профиль {server.Name} не выполнен.";
                     if (result.Milliseconds is null && IsLowestMode)

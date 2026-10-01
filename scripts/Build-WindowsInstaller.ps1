@@ -17,7 +17,7 @@ if (-not $CompilerPath) { throw 'Install Inno Setup (https://jrsoftware.org/isdl
 & (Join-Path $PSScriptRoot 'Build-AmneziaWG.ps1')
 dotnet publish (Join-Path $repositoryRoot 'src\DiTunnel.Desktop\DiTunnel.Desktop.csproj') -c Release -r win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'Windows publish failed.' }
-foreach ($required in @('Di-Tunnel.exe', 'Runtime\xray.exe', 'Runtime\wintun.dll', 'Runtime\geoip.dat', 'Runtime\geosite.dat', 'Runtime\AmneziaWG\ditunnel-awg.exe', 'Runtime\AmneziaWG\ditunnel-awg.exe.sha256', 'Runtime\AmneziaWG\THIRD-PARTY-NOTICES.txt', 'Network\Run-Tunnel.ps1')) {
+foreach ($required in @('Di-Tunnel.exe', 'Di-Tunnel.NetworkHost.exe', 'Di-Tunnel.NetworkHost.dll', 'Di-Tunnel.NetworkHost.deps.json', 'Di-Tunnel.NetworkHost.runtimeconfig.json', 'Runtime\xray.exe', 'Runtime\wintun.dll', 'Runtime\geoip.dat', 'Runtime\geosite.dat', 'Runtime\AmneziaWG\ditunnel-awg.exe', 'Runtime\AmneziaWG\ditunnel-awg.exe.sha256', 'Runtime\AmneziaWG\THIRD-PARTY-NOTICES.txt')) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishDir $required))) { throw "Missing published file: $required" }
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Repair-DiTunnelNetwork.ps1') -Destination $publishDir

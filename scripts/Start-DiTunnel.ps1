@@ -15,4 +15,4 @@ if (Get-Process -Name 'Di-Tunnel' -ErrorAction SilentlyContinue) {
     throw 'Another Di-Tunnel instance started during the build. Exit it from the system tray and run this script again.'
 }
 Write-Output "Starting Di-Tunnel $version`: $clientPath"
-Start-Process -FilePath $clientPath -WorkingDirectory $repositoryRoot -Verb RunAs
+Start-Process -FilePath $clientPath -WorkingDirectory $repositoryRoot

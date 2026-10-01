@@ -1,5 +1,4 @@
 using Avalonia;
-using System.Text.Json;
 
 namespace DiTunnel.Desktop;
 
@@ -8,14 +7,17 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        if (args.Contains("--wfp-self-test", StringComparer.OrdinalIgnoreCase))
+        if (args.Contains("--wfp-self-test", StringComparer.OrdinalIgnoreCase) || args.Contains("--cleanup-wfp", StringComparer.OrdinalIgnoreCase))
         {
-            Environment.ExitCode = RunWfpSelfTest();
-            return;
-        }
-        if (args.Contains("--cleanup-wfp", StringComparer.OrdinalIgnoreCase))
-        {
-            try { Platform.Windows.WindowsKillSwitchController.CleanupStaleFilters(); }
+            try
+            {
+                var start = new System.Diagnostics.ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "Di-Tunnel.NetworkHost.exe"))
+                { UseShellExecute = true, Verb = "runas", WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden };
+                start.ArgumentList.Add(args.Contains("--cleanup-wfp", StringComparer.OrdinalIgnoreCase) ? "--cleanup-wfp" : "--wfp-self-test");
+                using var helper = System.Diagnostics.Process.Start(start)!;
+                helper.WaitForExit();
+                Environment.ExitCode = helper.ExitCode;
+            }
             catch { Environment.ExitCode = 3; }
             return;
         }
@@ -25,8 +27,8 @@ internal static class Program
             Environment.ExitCode = 1;
             try
             {
-                File.WriteAllText(Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+                Directory.CreateDirectory(App.UserSettings.DataDirectory);
+                File.WriteAllText(Path.Combine(App.UserSettings.DataDirectory,
                     "Di-Tunnel-Startup-Error.txt"), error.ToString());
             }
             catch { }
@@ -52,43 +54,17 @@ internal static class Program
         App.App.UpdateInstaller = new WindowsUpdateInstaller();
         App.App.CreateMainViewModel = () =>
         {
-            var killSwitch = new Platform.Windows.WindowsKillSwitchController();
-            var engine = new Platform.Windows.WindowsVpnEngine(
+            var engine = new Platform.Windows.WindowsNetworkClient(
                 () => App.UserSettings.Current.GetSplitTunnelPolicy(),
-                () => App.UserSettings.Current.GetConnectionPolicy(), killSwitch,
+                () => App.UserSettings.Current.GetConnectionPolicy(),
                 () => App.UserSettings.Current.BlockAdsEnabled,
                 () => App.UserSettings.Current.StrictAdBlockingEnabled);
             return new App.ViewModels.MainViewModel(engine,
-                probe: new Platform.Windows.WindowsServerProbe(killSwitch, engine), countryResolver: new Platform.Windows.WindowsServerCountryResolver());
+                probe: engine, countryResolver: new Platform.Windows.WindowsServerCountryResolver());
         };
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         timer.Stop();
         instance.ReleaseMutex();
-    }
-
-    private static int RunWfpSelfTest()
-    {
-        var reportPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
-            "Di-Tunnel-Wfp-Self-Test.json");
-        using var output = new StringWriter();
-        int exitCode;
-        try
-        {
-            exitCode = Platform.Windows.WindowsKillSwitchSelfTest.RunAsync(output).GetAwaiter().GetResult();
-        }
-        catch (Exception error)
-        {
-            exitCode = 1;
-            output.WriteLine(JsonSerializer.Serialize(new
-            {
-                passed = false,
-                error = error.ToString()
-            }));
-        }
-
-        File.WriteAllText(reportPath, output.ToString());
-        return exitCode;
     }
 
     public static AppBuilder BuildAvaloniaApp()
