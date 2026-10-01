@@ -34,4 +34,29 @@ public sealed class WindowsProbeRouteBypassTests
         using var second = await pending.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
+
+    [Fact]
+    public async Task OrdinaryProxyProbesDoNotQueueBehindTheSameEndpoint()
+    {
+        var address = IPAddress.Parse("192.0.2.123");
+        using var awg = await WindowsProbeRouteBypass.AcquireEndpointAsync(address, default);
+        var first = WindowsProbeRouteBypass.AcquireEndpointAsync(address, default, serializeEndpoint: false);
+        var second = WindowsProbeRouteBypass.AcquireEndpointAsync(address, default, serializeEndpoint: false);
+        using var firstLease = await first.WaitAsync(TimeSpan.FromSeconds(2));
+        using var secondLease = await second.WaitAsync(TimeSpan.FromSeconds(2));
+        var queuedAwg = WindowsProbeRouteBypass.AcquireEndpointAsync(address, default);
+        Assert.False(queuedAwg.IsCompleted);
+        awg.Dispose();
+        using var next = await queuedAwg.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task DisabledKillSwitchDoesNotSerializeProbeLifetimes()
+    {
+        var controller = new WindowsKillSwitchController();
+        await using var first = await controller.PermitProbeEndpointAsync(IPAddress.Parse("192.0.2.124"), 443, DiTunnel.Core.Connection.KillSwitchTransportProtocol.Tcp);
+        var pending = controller.PermitProbeEndpointAsync(IPAddress.Parse("192.0.2.125"), 443, DiTunnel.Core.Connection.KillSwitchTransportProtocol.Tcp);
+        await using var second = await pending.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(DiTunnel.Core.Connection.NetworkProtectionState.Inactive, controller.Status.State);
+    }
 }

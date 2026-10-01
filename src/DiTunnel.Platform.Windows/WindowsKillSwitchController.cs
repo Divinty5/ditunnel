@@ -139,6 +139,11 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
 
     public async Task<IAsyncDisposable> PermitProbeEndpointAsync(IPAddress address, ushort port, KillSwitchTransportProtocol transport, CancellationToken cancellationToken = default)
     {
+        // Without active WFP rules there is no filter slot to reserve. Keeping the
+        // lease gate here serialized every server even with kill switch disabled.
+        await gate.WaitAsync(cancellationToken);
+        try { if (!installed) return NoopProbePermit.Instance; }
+        finally { gate.Release(); }
         var key = address.AddressFamily == AddressFamily.InterNetwork ? ProbeV4Key : ProbeV6Key;
         return await probeLeases.AcquireAsync(async () =>
         {
@@ -156,6 +161,12 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
             }
             finally { gate.Release(); }
         }, () => RemoveProbePermitAsync(key), cancellationToken);
+    }
+
+    private sealed class NoopProbePermit : IAsyncDisposable
+    {
+        internal static readonly NoopProbePermit Instance = new();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private async ValueTask RemoveProbePermitAsync(Guid key)

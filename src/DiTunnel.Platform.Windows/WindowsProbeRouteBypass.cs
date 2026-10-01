@@ -16,9 +16,9 @@ internal sealed class WindowsProbeRouteBypass(EndpointRouteLeases.Lease lease, I
             return new(WindowsNetworkApi.AddRoute(route) ? route : null, uplink.SourceAddress);
         }, token, requiresRoute: true);
 
-    public static async Task<WindowsProbeRouteBypass> CreateAsync(IPAddress server, string sessionDirectory, CancellationToken token)
+    public static async Task<WindowsProbeRouteBypass> CreateAsync(IPAddress server, string sessionDirectory, CancellationToken token, bool serializeEndpoint = true)
     {
-        var probe = await AcquireEndpointAsync(server, token);
+        var probe = await AcquireEndpointAsync(server, token, serializeEndpoint);
         try
         {
             var acquired = await Routes.AcquireAsync(server, () =>
@@ -38,8 +38,10 @@ internal sealed class WindowsProbeRouteBypass(EndpointRouteLeases.Lease lease, I
         try { await lease.DisposeAsync(); } finally { probeLease.Dispose(); }
     }
 
-    internal static async Task<IDisposable> AcquireEndpointAsync(IPAddress address, CancellationToken token)
+    internal static async Task<IDisposable> AcquireEndpointAsync(IPAddress address, CancellationToken token, bool serializeEndpoint = true)
     {
+        token.ThrowIfCancellationRequested();
+        if (!serializeEndpoint) return NoopProbeLease.Instance;
         EndpointGate gate;
         lock (endpointGates)
         {
@@ -54,6 +56,11 @@ internal sealed class WindowsProbeRouteBypass(EndpointRouteLeases.Lease lease, I
     {
         lock (endpointGates)
             if (--gate.Users == 0) { endpointGates.Remove(address); gate.Semaphore.Dispose(); }
+    }
+    private sealed class NoopProbeLease : IDisposable
+    {
+        internal static readonly NoopProbeLease Instance = new();
+        public void Dispose() { }
     }
     private sealed class EndpointGate { internal readonly SemaphoreSlim Semaphore = new(1); internal int Users; }
     private sealed class ProbeLease(IPAddress address, EndpointGate gate) : IDisposable

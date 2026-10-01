@@ -833,7 +833,7 @@ public sealed partial class MainViewModel : ViewModelBase
             return completed.ToArray();
         }
         var results = new ServerProbeResult[servers.Length];
-        using var concurrency = new SemaphoreSlim(mode == ServerProbeMode.Fast ? 6 : 2);
+        using var concurrency = new SemaphoreSlim(mode == ServerProbeMode.Fast ? 8 : 2);
         await Task.WhenAll(servers.Select(async (server, index) =>
         {
             await concurrency.WaitAsync(cancellationToken);
