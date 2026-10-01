@@ -64,4 +64,38 @@ public sealed class ProfileImporterTests
         var profile = Assert.Single(ProfileParser.Parse("vless://00000000-0000-0000-0000-000000000001@example.com:443?security=tls#WS-8080-TestDiTunnel%7C%F0%9F%93%8A99.78GB"));
         Assert.Equal("WS-8080-TestDiTunnel", profile.Name);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ImportsLongVmessBase64AuthorityWithoutUriParsing(bool urlSafe)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            v = "2", ps = "VMess " + new string('я', 300), add = "example.com", port = 443,
+            id = "00000000-0000-0000-0000-000000000001", aid = "0", net = "ws", path = "/proxy"
+        });
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        if (urlSafe) encoded = encoded.Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var profiles = ProfileParser.Parse(Link + "\nvmess://" + encoded, out var skipped);
+        Assert.Equal(2, profiles.Count);
+        Assert.Equal(0, skipped);
+        Assert.Equal("VMESS", profiles[1].Kind);
+        Assert.Equal(120, profiles[1].Name.Length);
+        var parsed = ProfileParser.ParseVmessConfiguration(profiles[1].Content);
+        Assert.Equal((ushort)443, parsed.Port);
+        Assert.Equal("example.com", parsed.Host);
+        Assert.DoesNotContain(parsed.Id, parsed.ToString());
+    }
+
+    [Theory]
+    [InlineData("{\"add\":\"example.com\",\"id\":\"bad\",\"port\":443}")]
+    [InlineData("{\"add\":\"example.com\",\"id\":\"00000000-0000-0000-0000-000000000001\",\"port\":0}")]
+    [InlineData("{\"add\":\"example.com\",\"id\":\"00000000-0000-0000-0000-000000000001\",\"port\":65536}")]
+    [InlineData("[]")]
+    public void RejectsInvalidVmessConfiguration(string json)
+    {
+        var link = "vmess://" + Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        Assert.Throws<FormatException>(() => ProfileParser.Parse(link));
+    }
 }

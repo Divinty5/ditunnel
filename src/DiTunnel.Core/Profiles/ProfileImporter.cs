@@ -19,6 +19,11 @@ public sealed record ImportedProfile(string Name, string Kind, string Content, s
     public string Summary => Kind == "Xray JSON" ? "Конфигурация Xray" : $"{ProtocolName} · конфигурация сервера";
 }
 
+public sealed record VmessProfileConfiguration(string Host, ushort Port, string Id, string Name, IReadOnlyDictionary<string, string> Fields)
+{
+    public override string ToString() => "VMess configuration (secrets omitted)";
+}
+
 public static class ProfileParser
 {
     public const int MaximumBytes = 2 * 1024 * 1024;
@@ -112,29 +117,53 @@ public static class ProfileParser
 
     private static ImportedProfile ParseServerUri(string line)
     {
-        if (!Uri.TryCreate(line, UriKind.Absolute, out var uri)) throw new FormatException();
-        var kind = uri.Scheme.ToLowerInvariant();
+        // VMess carries Base64 JSON, not a URI authority. Decode it before URI validation.
+        var kind = line[..line.IndexOf("://", StringComparison.Ordinal)].ToLowerInvariant();
         string name;
         if (kind == "vmess")
         {
-            try
-            {
-                using var vmess = JsonDocument.Parse(Convert.FromBase64String(PadBase64(line[8..].Split('#')[0])));
-                if (!vmess.RootElement.TryGetProperty("add", out var address) || string.IsNullOrWhiteSpace(address.GetString()) ||
-                    !vmess.RootElement.TryGetProperty("id", out var id) || !Guid.TryParse(id.GetString(), out _) ||
-                    !vmess.RootElement.TryGetProperty("port", out var port) || !int.TryParse(port.ToString(), out var p) || p is < 1 or > 65535) throw new FormatException();
-                name = vmess.RootElement.TryGetProperty("ps", out var ps) ? ps.GetString() ?? "VMess" : "VMess";
-            }
-            catch (Exception e) when (e is JsonException or FormatException or InvalidOperationException) { throw new FormatException(); }
+            name = ParseVmessConfiguration(line).Name;
         }
         else
         {
+            if (!Uri.TryCreate(line, UriKind.Absolute, out var uri)) throw new FormatException();
             if (string.IsNullOrWhiteSpace(uri.Host) || uri.Port is < 1 or > 65535 || string.IsNullOrEmpty(uri.UserInfo)) throw new FormatException();
             if (kind == "vless" && !Guid.TryParse(uri.UserInfo, out _)) throw new FormatException();
             name = string.IsNullOrEmpty(uri.Fragment) ? kind.ToUpperInvariant() : Uri.UnescapeDataString(uri.Fragment[1..].Replace('+', ' '));
         }
         name = NormalizeProfileName(name);
         return new(string.IsNullOrWhiteSpace(name) ? kind.ToUpperInvariant() : name, kind is "hy2" or "hysteria2" ? "Hysteria 2" : kind.ToUpperInvariant(), line);
+    }
+
+    public static VmessProfileConfiguration ParseVmessConfiguration(string input)
+    {
+        try
+        {
+            if (!input.StartsWith("vmess://", StringComparison.OrdinalIgnoreCase) || Encoding.UTF8.GetByteCount(input) > MaximumBytes)
+                throw new FormatException();
+            using var json = JsonDocument.Parse(Convert.FromBase64String(PadBase64(input[8..].Split('#')[0])));
+            if (json.RootElement.ValueKind != JsonValueKind.Object) throw new FormatException();
+            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var field in json.RootElement.EnumerateObject())
+            {
+                var value = field.Value.ValueKind switch
+                {
+                    JsonValueKind.String => field.Value.GetString() ?? "",
+                    JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => field.Value.ToString(),
+                    JsonValueKind.Null => "",
+                    _ => throw new FormatException()
+                };
+                if (!fields.TryAdd(field.Name, value)) throw new FormatException();
+            }
+            var host = fields.GetValueOrDefault("add", "");
+            var id = fields.GetValueOrDefault("id", "");
+            if (string.IsNullOrWhiteSpace(host) || (Uri.CheckHostName(host) == UriHostNameType.Unknown && !System.Net.IPAddress.TryParse(host, out _)) ||
+                !Guid.TryParse(id, out _) || !ushort.TryParse(fields.GetValueOrDefault("port"), out var port) || port == 0)
+                throw new FormatException();
+            return new(host, port, id, fields.GetValueOrDefault("ps", "VMess"), fields);
+        }
+        catch (Exception error) when (error is JsonException or FormatException or InvalidOperationException)
+        { throw new FormatException("Не удалось импортировать: некорректная конфигурация VMess."); }
     }
 
     private static string NormalizeProfileName(string name)

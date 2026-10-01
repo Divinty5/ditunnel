@@ -94,8 +94,12 @@ public static class XrayProfileConverter
         if (profile.Kind.Equals(AmneziaWgConfiguration.ProfileKind, StringComparison.OrdinalIgnoreCase) ||
             AmneziaWgConfiguration.LooksLikeConfiguration(profile.Content))
             throw new NotSupportedException("AmneziaWG требует отдельного ядра AmneziaWG. Подключение и проверка реализованы в Windows-клиенте; на Android пока доступен только импорт.");
-        if (!Uri.TryCreate(profile.Content, UriKind.Absolute, out var uri) || uri.Scheme is not ("hy2" or "hysteria2" or "vless" or "trojan" or "ss"))
-            throw new NotSupportedException("Подключение доступно для Hysteria 2, VLESS, Trojan и Shadowsocks. VMess и произвольный JSON пока доступны только для хранения.");
+        var vmess = profile.Content.StartsWith("vmess://", StringComparison.OrdinalIgnoreCase)
+            ? ProfileParser.ParseVmessConfiguration(profile.Content) : null;
+        Uri uri;
+        if (vmess is not null) uri = new UriBuilder("vmess", vmess.Host, vmess.Port).Uri;
+        else if (!Uri.TryCreate(profile.Content, UriKind.Absolute, out uri!) || uri.Scheme is not ("hy2" or "hysteria2" or "vless" or "trojan" or "ss"))
+            throw new NotSupportedException("Подключение доступно для Hysteria 2, VLESS, VMess, Trojan и Shadowsocks. Произвольный JSON пока доступен только для хранения.");
         var query = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -103,8 +107,16 @@ public static class XrayProfileConverter
             if (!query.TryAdd(Uri.UnescapeDataString(pair[0]), pair.Length == 2 ? Uri.UnescapeDataString(pair[1]) : ""))
                 throw new FormatException("Повторяющийся параметр ссылки.");
         }
+        if (vmess is not null)
+        {
+            foreach (var (field, key) in new[] { ("net", "type"), ("tls", "security"), ("sni", "sni"), ("alpn", "alpn"), ("fp", "fp"), ("host", "host"), ("path", "path"), ("insecure", "insecure"), ("allowInsecure", "allowInsecure") })
+                if (vmess.Fields.TryGetValue(field, out var value) && !string.IsNullOrWhiteSpace(value)) query[key] = field is "net" or "tls" ? value.ToLowerInvariant() : value;
+            if (!query.ContainsKey("sni") && query.TryGetValue("host", out var hostHeader)) query["sni"] = hostHeader.Split(',')[0].Trim();
+            if (vmess.Fields.TryGetValue("aid", out var alterId) && alterId is not ("" or "0"))
+                throw new NotSupportedException("VMess с ненулевым alterId устарел. Нужна конфигурация VMess AEAD с aid=0.");
+        }
         string Get(string key, string fallback = "") => query.GetValueOrDefault(key, fallback);
-        if (Get("insecure") is "1" or "true" || Get("allowInsecure") is "1" or "true")
+        if (Get("insecure").ToLowerInvariant() is "1" or "true" || Get("allowInsecure").ToLowerInvariant() is "1" or "true")
             throw new NotSupportedException("Профиль отключает проверку TLS. Для подключения используйте сертификат сервера с корректным SNI.");
         if (Get("obfs") != "" || Get("mport") != "" || Get("plugin") != "")
             throw new NotSupportedException("Obfs, смена портов и плагины пока не поддерживаются.");
@@ -113,17 +125,27 @@ public static class XrayProfileConverter
         if (uri.Port is <= 0 or > ushort.MaxValue) throw new FormatException("В профиле должен быть указан корректный порт сервера.");
         var stream = new JsonObject();
         var outbound = new JsonObject { ["tag"] = "proxy", ["protocol"] = hy2 ? "hysteria" : scheme == "ss" ? "shadowsocks" : scheme };
-        var credential = Uri.UnescapeDataString(uri.UserInfo);
+        var credential = vmess?.Id ?? Uri.UnescapeDataString(uri.UserInfo);
         if (hy2)
         {
             outbound["settings"] = new JsonObject { ["version"] = 2, ["address"] = uri.Host, ["port"] = uri.Port };
             stream["network"] = "hysteria";
             stream["hysteriaSettings"] = new JsonObject { ["version"] = 2, ["auth"] = credential };
         }
-        else if (scheme == "vless")
+        else if (scheme is "vless" or "vmess")
         {
+            var user = new JsonObject { ["id"] = credential };
+            if (vmess is not null)
+            {
+                var cipher = vmess.Fields.GetValueOrDefault("scy", "auto").ToLowerInvariant();
+                if (cipher.Length == 0) cipher = "auto";
+                if (cipher is not ("auto" or "aes-128-gcm" or "chacha20-poly1305" or "none" or "zero"))
+                    throw new NotSupportedException("Метод шифрования VMess не поддерживается.");
+                user["security"] = cipher;
+            }
+            else { user["encryption"] = Get("encryption", "none"); user["flow"] = Get("flow"); }
             outbound["settings"] = new JsonObject { ["vnext"] = new JsonArray(new JsonObject { ["address"] = uri.Host, ["port"] = uri.Port,
-                ["users"] = new JsonArray(new JsonObject { ["id"] = credential, ["encryption"] = Get("encryption", "none"), ["flow"] = Get("flow") }) }) };
+                ["users"] = new JsonArray(user) }) };
         }
         else
         {
@@ -175,9 +197,20 @@ public static class XrayProfileConverter
         if (!hy2)
         {
             var transport = Get("type", "tcp");
-            if (transport is not ("tcp" or "raw" or "ws" or "httpupgrade")) throw new NotSupportedException("Транспорт этого профиля ещё не поддерживается.");
+            if (transport is not ("tcp" or "raw" or "ws" or "httpupgrade" or "grpc")) throw new NotSupportedException("Транспорт этого профиля ещё не поддерживается.");
             stream["network"] = transport;
             if (transport is "ws" or "httpupgrade") stream[transport == "ws" ? "wsSettings" : "httpupgradeSettings"] = new JsonObject { ["path"] = Get("path", "/"), ["host"] = Get("host") };
+            if (transport == "grpc") stream["grpcSettings"] = new JsonObject { ["serviceName"] = vmess is null ? Get("serviceName") : Get("path").TrimStart('/'), ["multiMode"] = vmess?.Fields.GetValueOrDefault("type") == "multi" || Get("mode") == "multi" };
+            if (vmess is not null && transport is ("tcp" or "raw"))
+            {
+                var header = vmess.Fields.GetValueOrDefault("type", "none");
+                if (header is not ("" or "none" or "http")) throw new NotSupportedException("Заголовок TCP VMess не поддерживается.");
+                if (header == "http") stream["tcpSettings"] = new JsonObject { ["header"] = new JsonObject { ["type"] = "http", ["request"] = new JsonObject
+                {
+                    ["path"] = new JsonArray(Get("path", "/").Split(',').Select(value => (JsonNode?)value).ToArray()),
+                    ["headers"] = new JsonObject { ["Host"] = new JsonArray(Get("host", uri.Host).Split(',').Select(value => (JsonNode?)value).ToArray()) }
+                } } };
+            }
         }
         outbound["streamSettings"] = stream;
         return new(uri.Host, checked((ushort)uri.Port), hy2 ? KillSwitchTransportProtocol.Udp : scheme == "ss" ? KillSwitchTransportProtocol.TcpAndUdp : KillSwitchTransportProtocol.Tcp, outbound);

@@ -43,7 +43,6 @@ public sealed class XrayProfileConverterTests
     [Theory]
     [InlineData("hy2://pass@example.com:443?insecure=1")]
     [InlineData("hy2://pass@example.com:443?obfs=salamander")]
-    [InlineData("vmess://e30=")]
     public void UnsupportedSettingsAreNotSilentlyDropped(string link) => Assert.Throws<NotSupportedException>(() => XrayProfileConverter.Convert(new("Test", "Test", link)));
     [Fact]
     public void VlessPreservesRealitySettings()
@@ -152,4 +151,68 @@ public sealed class XrayProfileConverterTests
         Assert.Contains(domains.EnumerateArray(), item => item.GetString() == "domain:yastatic.net");
         Assert.DoesNotContain(domains.EnumerateArray(), item => item.GetString() == "domain:www.google.com");
     }
+
+    private static ImportedProfile Vmess(string transport = "ws", string tls = "tls", string cipher = "auto", string aid = "0", string insecure = "0")
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            v = "2", ps = "Test VMess", add = "example.com", port = "443",
+            id = "00000000-0000-0000-0000-000000000001", aid, scy = cipher, net = transport,
+            tls, sni = "tls.example.com", host = "ws.example.com", path = "/proxy", alpn = "h2,http/1.1", fp = "chrome", insecure
+        });
+        return Assert.Single(ProfileParser.Parse("vmess://" + System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json))));
+    }
+
+    [Theory]
+    [InlineData("tcp")]
+    [InlineData("raw")]
+    [InlineData("ws")]
+    [InlineData("httpupgrade")]
+    [InlineData("grpc")]
+    public void ConvertsVmessAndPreservesTransportAndTlsWhenResolvingEndpoint(string transport)
+    {
+        var profile = XrayProfileConverter.Convert(Vmess(transport));
+        using var document = JsonDocument.Parse(profile.Build("192.0.2.1", false));
+        var outbound = document.RootElement.GetProperty("outbounds")[0];
+        Assert.Equal("vmess", outbound.GetProperty("protocol").GetString());
+        var receiver = outbound.GetProperty("settings").GetProperty("vnext")[0];
+        Assert.Equal("192.0.2.1", receiver.GetProperty("address").GetString());
+        Assert.Equal("auto", receiver.GetProperty("users")[0].GetProperty("security").GetString());
+        var stream = outbound.GetProperty("streamSettings");
+        Assert.Equal(transport, stream.GetProperty("network").GetString());
+        var tls = stream.GetProperty("tlsSettings");
+        Assert.Equal("tls.example.com", tls.GetProperty("serverName").GetString());
+        Assert.False(tls.GetProperty("allowInsecure").GetBoolean());
+        Assert.Equal("chrome", tls.GetProperty("fingerprint").GetString());
+        Assert.Equal(2, tls.GetProperty("alpn").GetArrayLength());
+        if (transport is "ws" or "httpupgrade")
+        {
+            var settings = stream.GetProperty(transport == "ws" ? "wsSettings" : "httpupgradeSettings");
+            Assert.Equal("ws.example.com", settings.GetProperty("host").GetString());
+            Assert.Equal("/proxy", settings.GetProperty("path").GetString());
+        }
+        if (transport == "grpc") Assert.Equal("proxy", stream.GetProperty("grpcSettings").GetProperty("serviceName").GetString());
+    }
+
+    [Fact]
+    public void VmessDefaultsToTcpWithoutTlsAndUsesSelectedCipher()
+    {
+        var profile = XrayProfileConverter.Convert(Vmess("tcp", "", "chacha20-poly1305"));
+        using var document = JsonDocument.Parse(profile.Build("192.0.2.1", false));
+        var outbound = document.RootElement.GetProperty("outbounds")[0];
+        Assert.Equal("none", outbound.GetProperty("streamSettings").GetProperty("security").GetString());
+        Assert.Equal("chacha20-poly1305", outbound.GetProperty("settings").GetProperty("vnext")[0].GetProperty("users")[0].GetProperty("security").GetString());
+    }
+
+    [Theory]
+    [InlineData("kcp", "auto", "0", "0")]
+    [InlineData("tcp", "unknown", "0", "0")]
+    [InlineData("tcp", "auto", "1", "0")]
+    [InlineData("ws", "auto", "0", "1")]
+    [InlineData("ws", "auto", "0", "true")]
+    public void RejectsUnsupportedOrInsecureVmess(string transport, string cipher, string aid, string insecure)
+        => Assert.Throws<NotSupportedException>(() => XrayProfileConverter.Convert(Vmess(transport, "tls", cipher, aid, insecure)));
+    [Fact]
+    public void InvalidVmessIsReportedAsMalformedInsteadOfUnsupported()
+        => Assert.Throws<FormatException>(() => XrayProfileConverter.Convert(new("Test", "VMESS", "vmess://e30=")));
 }

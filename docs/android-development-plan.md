@@ -208,7 +208,7 @@ Android не даёт обычному VPN-приложению программ
 - Реализовать connect/cancel/disconnect/switch/delete-active и статусную модель.
 - Поддержать IPv4+IPv6 и DNS через туннель.
 
-**Gate:** HY2, VLESS TCP/WS/HTTPUpgrade, Trojan и Shadowsocks проходят protocol matrix на реальном arm64-устройстве; VMess/произвольный JSON не рекламируются как подключаемые, пока общий converter их не поддерживает.
+**Gate:** HY2, VLESS TCP/WS/HTTPUpgrade, Trojan и Shadowsocks проходят protocol matrix на реальном arm64-устройстве; VMess AEAD поддержан общим converter; его системная проверка на Android входит в protocol matrix. Произвольный JSON доступен только для хранения.
 
 ### A5. Lifecycle и восстановление
 
@@ -241,7 +241,7 @@ Android не даёт обычному VPN-приложению программ
 | Функция Windows | Android target | Комментарий |
 | --- | --- | --- |
 | HY2, VLESS TCP/WS/HTTPUpgrade, Trojan, SS | Да, A4 | Общий converter, Android libXray runtime |
-| VMess/произвольный JSON — хранение | Да, A3 | Подключение остаётся общим будущим улучшением |
+| VMess AEAD / произвольный JSON | Общий converter / хранение | VMess требует проверки на Android-устройстве; произвольный JSON не подключается |
 | Подписки, обновление, группы, удаление | Да, A2–A3 | Общие сценарии и ViewModels |
 | Безопасное переключение активного сервера | Да, A4 | Service-owned transition |
 | Lowest и периодическая задержка | Да, A6 | С учётом single-instance ограничений libXray |

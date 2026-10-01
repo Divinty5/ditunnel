@@ -6,10 +6,11 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public static class XrayServerProbe
 {
-    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true, string? outboundSourceAddress = null, bool tcpOnly = false)
+    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true, string? outboundSourceAddress = null, bool tcpOnly = false, TimeSpan? probeTimeout = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(12));
+        var budget = probeTimeout ?? TimeSpan.FromSeconds(12);
+        timeout.CancelAfter(budget);
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -63,7 +64,7 @@ public static class XrayServerProbe
         catch (System.Security.Authentication.AuthenticationException) { throw new InvalidOperationException("Не удалось подтвердить TLS-соединение с контрольным узлом через туннель."); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException("Проверка сервера превысила 12 секунд.");
+            throw new TimeoutException($"Проверка сервера превысила {budget.TotalSeconds:F0} секунд.");
         }
     }
 }
