@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Reflection;
 using Avalonia;
 using Avalonia.Styling;
 using DiTunnel.Core.Connection;
@@ -63,7 +64,10 @@ public sealed class UserSettings
     public string? SkippedUpdateVersion { get; set; }
     public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect).Normalize();
     public WindowPlacement? Window { get; set; }
-    public static string Version => typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.5.6";
+    public static string Version => typeof(UserSettings).Assembly
+        .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
+        .FirstOrDefault(item => item.Key == (OperatingSystem.IsAndroid() ? "AndroidVersion" : "WindowsVersion"))?.Value
+        ?? typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.5.6";
 
     public static UserSettings Load(string path)
     {

@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>Di-Tunnel</AssemblyName>
+    <Version>$(WindowsVersion)</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
@@ -18,8 +19,8 @@
     <ProjectReference Include="..\DiTunnel.App\DiTunnel.App.csproj" />
     <ProjectReference Include="..\DiTunnel.Infrastructure.Xray\DiTunnel.Infrastructure.Xray.csproj" />
     <ProjectReference Include="..\DiTunnel.Platform.Windows\DiTunnel.Platform.Windows.csproj" />
-  </ItemGroup>
     <ProjectReference Include="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
 
   <ItemGroup>
     <Content Include="..\..\.tools\amneziawg\1\windows-x64\*" Link="Runtime\AmneziaWG\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
@@ -29,7 +30,6 @@
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\wintun.dll" Link="Runtime\wintun.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\wintun.dll')" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\LICENSE*" Link="Runtime\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-</Project>
   <Target Name="CopyNetworkHost" AfterTargets="Build">
     <MSBuild Projects="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" Targets="GetTargetPath">
       <Output TaskParameter="TargetOutputs" ItemName="NetworkHostAssembly" />
@@ -43,3 +43,4 @@
     <MSBuild Projects="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" Targets="Publish"
              Properties="PublishDir=$(PublishDir);Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained)" />
   </Target>
+</Project>

@@ -5,6 +5,54 @@ namespace DiTunnel.App.Tests;
 
 public sealed class ReleaseCheckerTests
 {
+    private static object Release(string version, bool android, bool checksum = true, bool draft = false, bool prerelease = false)
+    {
+        var name = android ? $"Di-Tunnel-{version}-arm64.apk" : $"Di-Tunnel-{version}-Setup-x64.exe";
+        var assets = new List<object> { new { name, browser_download_url = $"https://github.com/Divinty5/ditunnel/releases/download/v{version}/{name}" } };
+        if (checksum) assets.Add(new { name = name + ".sha256", browser_download_url = $"https://github.com/Divinty5/ditunnel/releases/download/v{version}/{name}.sha256" });
+        return new { tag_name = "v" + version, assets, draft, prerelease };
+    }
+
+    [Fact]
+    public void WindowsOnlyReleaseDoesNotOfferAndroidAnUpdate()
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(Release("0.5.7", false)));
+        Assert.Equal(new Version(0, 5, 7), ReleaseChecker.Parse(json.RootElement, new(0, 5, 6)).Release?.Version);
+        var android = ReleaseChecker.Parse(json.RootElement, new(0, 4, 33), android: true);
+        Assert.Null(android.Release);
+        Assert.Equal("Установлена актуальная версия.", android.Message);
+    }
+
+    [Fact]
+    public void FindsLatestReleaseForEachPlatformRegardlessOfPublicationOrder()
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new[] {
+            Release("0.5.8", true), Release("0.5.7", false), Release("0.4.33", true), Release("0.5.6", false)
+        }));
+        Assert.Equal(new Version(0, 5, 7), ReleaseChecker.ParseReleases(json.RootElement, new(0, 4, 33)).Release?.Version);
+        Assert.Equal(new Version(0, 5, 8), ReleaseChecker.ParseReleases(json.RootElement, new(0, 4, 33), android: true).Release?.Version);
+    }
+
+    [Fact]
+    public void WindowsOnlyReleasesDoNotHideThePreviousAndroidRelease()
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new[] {
+            Release("0.5.7", false), Release("0.4.33", true)
+        }));
+        Assert.Null(ReleaseChecker.ParseReleases(json.RootElement, new(0, 4, 33), android: true).Release);
+        Assert.Equal(new Version(0, 4, 33), ReleaseChecker.ParseReleases(json.RootElement, new(0, 4, 29), android: true).Release?.Version);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public void IncompleteDraftAndPrereleaseBuildsAreNotOffered(bool checksum, bool draft, bool prerelease)
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(Release("0.5.7", false, checksum, draft, prerelease)));
+        Assert.Null(ReleaseChecker.Parse(json.RootElement, new(0, 5, 6)).Release);
+    }
+
     [Fact]
     public void ParseFindsMatchingWindowsInstallerAndChecksum()
     {

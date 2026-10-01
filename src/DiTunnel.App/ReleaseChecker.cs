@@ -8,7 +8,7 @@ public sealed record ReleaseCheckResult(string Message, AppRelease? Release = nu
 
 public static class ReleaseChecker
 {
-    private const string LatestReleaseApi = "https://api.github.com/repos/Divinty5/ditunnel/releases/latest";
+    private const string ReleasesApi = "https://api.github.com/repos/Divinty5/ditunnel/releases";
     private const string LatestReleasePage = "https://github.com/Divinty5/ditunnel/releases/latest";
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromSeconds(12) };
 
@@ -16,14 +16,26 @@ public static class ReleaseChecker
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseApi);
-            request.Headers.UserAgent.ParseAdd("DiTunnel/" + UserSettings.Version);
-            using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.NotFound) return new("Опубликованных релизов пока нет.");
-            response.EnsureSuccessStatusCode();
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            return Parse(json.RootElement, Version.Parse(UserSettings.Version), OperatingSystem.IsAndroid());
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(30));
+            var currentVersion = Version.Parse(UserSettings.Version);
+            AppRelease? latest = null;
+            // A platform's latest installer can be on a later page when only the other platform ships.
+            // Search published stable releases instead of GitHub's one global latest marker.
+            for (var page = 1; ; page++)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{ReleasesApi}?per_page=100&page={page}");
+                request.Headers.UserAgent.ParseAdd("DiTunnel/" + UserSettings.Version);
+                using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+                if (response.StatusCode == HttpStatusCode.NotFound) return new("Опубликованных релизов пока нет.");
+                response.EnsureSuccessStatusCode();
+                await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                using var json = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token);
+                var result = ParseReleases(json.RootElement, currentVersion, OperatingSystem.IsAndroid());
+                if (result.Release is { } candidate && (latest is null || candidate.Version > latest.Version)) latest = candidate;
+                if (json.RootElement.GetArrayLength() < 100) break;
+            }
+            return latest is null ? new("Установлена актуальная версия.") : Available(latest);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { return new("Не удалось проверить обновления. Попробуйте позже."); }
@@ -31,6 +43,9 @@ public static class ReleaseChecker
 
     public static ReleaseCheckResult Parse(JsonElement release, Version currentVersion, bool android = false)
     {
+        if (release.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True
+            || release.TryGetProperty("prerelease", out var prerelease) && prerelease.ValueKind == JsonValueKind.True)
+            return new("Установлена актуальная версия.");
         var tag = release.TryGetProperty("tag_name", out var tagElement) ? tagElement.GetString() ?? "" : "";
         if (!Version.TryParse(tag.TrimStart('v', 'V'), out var remote)) return new("Не удалось определить версию релиза.");
         if (remote <= currentVersion) return new("Установлена актуальная версия.");
@@ -57,8 +72,24 @@ public static class ReleaseChecker
                 if (string.Equals(name, installerName + ".sha256", StringComparison.OrdinalIgnoreCase)) checksumUrl = uri.AbsoluteUri;
             }
         }
-        return new($"Доступна новая версия: {displayVersion}", new(remote, pageUrl, installerUrl, checksumUrl));
+        // Missing platform assets must never trigger an update dialog (including partially uploaded releases).
+        return installerUrl is null || checksumUrl is null
+            ? new("Установлена актуальная версия.")
+            : Available(new(remote, pageUrl, installerUrl, checksumUrl));
     }
+
+    public static ReleaseCheckResult ParseReleases(JsonElement releases, Version currentVersion, bool android = false)
+    {
+        if (releases.ValueKind != JsonValueKind.Array) throw new FormatException("Ожидался список релизов.");
+        AppRelease? latest = null;
+        foreach (var release in releases.EnumerateArray())
+            if (Parse(release, currentVersion, android).Release is { } candidate
+                && (latest is null || candidate.Version > latest.Version)) latest = candidate;
+        return latest is null ? new("Установлена актуальная версия.") : Available(latest);
+    }
+
+    private static ReleaseCheckResult Available(AppRelease release) =>
+        new($"Доступна новая версия: {FormatVersion(release.Version)}", release);
 
     public static string FormatVersion(Version version) => version.Build >= 0 ? version.ToString(3) : version.ToString();
 }

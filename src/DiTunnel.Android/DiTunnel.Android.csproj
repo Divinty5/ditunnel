@@ -6,7 +6,8 @@
     <SupportedOSPlatformVersion>29.0</SupportedOSPlatformVersion>
     <ApplicationId>com.divintyinteractive.ditunnel</ApplicationId>
     <ApplicationTitle>Di-Tunnel</ApplicationTitle>
-    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <Version>$(AndroidVersion)</Version>
+    <ApplicationDisplayVersion>$(AndroidVersion)</ApplicationDisplayVersion>
     <ApplicationVersion>50006</ApplicationVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>

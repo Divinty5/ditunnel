@@ -2,10 +2,10 @@
 param([string]$CompilerPath)
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$versionNode = ([xml](Get-Content -Raw (Join-Path $repositoryRoot 'Directory.Build.props'))).Project.PropertyGroup.Version |
+$versionNode = ([xml](Get-Content -Raw (Join-Path $repositoryRoot 'Directory.Build.props'))).Project.PropertyGroup.WindowsVersion |
     Where-Object { $_ } |
     Select-Object -First 1
-if (-not $versionNode) { throw 'Version is missing from Directory.Build.props.' }
+if (-not $versionNode) { throw 'WindowsVersion is missing from Directory.Build.props.' }
 $version = $versionNode.Trim()
 $publishDir = Join-Path $repositoryRoot "artifacts\windows\$version\client"
 if (-not $CompilerPath) {

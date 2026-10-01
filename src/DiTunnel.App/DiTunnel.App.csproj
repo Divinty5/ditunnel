@@ -5,10 +5,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyMetadata Include="WindowsVersion" Value="$(WindowsVersion)" />
+    <AssemblyMetadata Include="AndroidVersion" Value="$(AndroidVersion)" />
     <EmbeddedResource Include="Translations.json" />
+    <EmbeddedResource Include="Translations.extra.json" />
     <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
     <AvaloniaResource Include="Assets\Flags\*.png" />
-    <EmbeddedResource Include="Translations.extra.json" />
     <AvaloniaResource Include="Assets\world-map.svg" />
     <AvaloniaResource Include="Assets\world-map-lights-*.svg" />
     <AvaloniaResource Include="Assets\world-map-light-*.svg" />

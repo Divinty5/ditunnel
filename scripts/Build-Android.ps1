@@ -25,9 +25,9 @@ if (-not (Test-Path -LiteralPath $JavaSdkDirectory -PathType Container)) {
 }
 
 [xml]$props = Get-Content -LiteralPath $propsPath -Raw
-$version = [string]($props.Project.PropertyGroup.Version | Select-Object -First 1)
+$version = [string]($props.Project.PropertyGroup.AndroidVersion | Select-Object -First 1)
 if ([string]::IsNullOrWhiteSpace($version)) {
-    throw "Не удалось определить Version из $propsPath"
+    throw "Не удалось определить AndroidVersion из $propsPath"
 }
 
 $architecture = switch ($RuntimeIdentifier) {
