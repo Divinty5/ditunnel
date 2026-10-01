@@ -70,7 +70,7 @@ public sealed class UserSettings
         try
         {
             var settings = JsonSerializer.Deserialize(File.ReadAllText(path), AppJsonContext.Default.UserSettings) ?? new();
-            if (settings.Language is not ("ru" or "en")) settings.Language = "ru";
+            if (settings.Language is not ("ru" or "en" or "es" or "zh-Hans")) settings.Language = "ru";
             if (settings.Theme is not ("system" or "dark" or "light")) settings.Theme = "system";
             if (settings.CloseAction is not ("ask" or "hide" or "exit")) settings.CloseAction = "ask";
             if (!Enum.IsDefined(settings.ServerProbeMode)) settings.ServerProbeMode = ServerProbeMode.Fast;

@@ -1,0 +1,1618 @@
+{
+  "Language": {
+    "es": "Idioma",
+    "zh-Hans": "语言"
+  },
+  "← Back": {
+    "es": "← Atrás",
+    "zh-Hans": "← 返回"
+  },
+  "＋ Add": {
+    "es": "＋ Añadir",
+    "zh-Hans": "＋ 添加"
+  },
+  "ACTIVE PROFILE": {
+    "es": "PERFIL ACTIVO",
+    "zh-Hans": "当前配置"
+  },
+  "Add profile": {
+    "es": "Añadir perfil",
+    "zh-Hans": "添加配置"
+  },
+  "Ask every time": {
+    "es": "Preguntar siempre",
+    "zh-Hans": "每次询问"
+  },
+  "Auto-select": {
+    "es": "Selección automática",
+    "zh-Hans": "自动选择"
+  },
+  "Block ads and trackers": {
+    "es": "Bloquear anuncios y rastreadores",
+    "zh-Hans": "屏蔽广告和跟踪器"
+  },
+  "Bypass selected": {
+    "es": "Excluir seleccionados",
+    "zh-Hans": "所选项目绕过 VPN"
+  },
+  "Cancel": {
+    "es": "Cancelar",
+    "zh-Hans": "取消"
+  },
+  "Cancel test": {
+    "es": "Cancelar prueba",
+    "zh-Hans": "取消测试"
+  },
+  "Check for updates": {
+    "es": "Buscar actualizaciones",
+    "zh-Hans": "检查更新"
+  },
+  "Check for updates automatically": {
+    "es": "Buscar actualizaciones automáticamente",
+    "zh-Hans": "自动检查更新"
+  },
+  "Choose how to add a profile": {
+    "es": "Elija cómo añadir un perfil",
+    "zh-Hans": "选择添加配置的方式"
+  },
+  "Click to connect": {
+    "es": "Pulse para conectar",
+    "zh-Hans": "点击连接"
+  },
+  "Clipboard": {
+    "es": "Portapapeles",
+    "zh-Hans": "剪贴板"
+  },
+  "Close Di-Tunnel?": {
+    "es": "¿Cerrar Di-Tunnel?",
+    "zh-Hans": "关闭 Di-Tunnel？"
+  },
+  "Command:": {
+    "es": "Comando:",
+    "zh-Hans": "命令："
+  },
+  "Connect": {
+    "es": "Conectar",
+    "zh-Hans": "连接"
+  },
+  "Connection protection": {
+    "es": "Protección de la conexión",
+    "zh-Hans": "连接保护"
+  },
+  "Copied": {
+    "es": "Copiado",
+    "zh-Hans": "已复制"
+  },
+  "Copy": {
+    "es": "Copiar",
+    "zh-Hans": "复制"
+  },
+  "Dark": {
+    "es": "Oscuro",
+    "zh-Hans": "深色"
+  },
+  "days remaining": {
+    "es": "días restantes",
+    "zh-Hans": "天剩余"
+  },
+  "Delete": {
+    "es": "Eliminar",
+    "zh-Hans": "删除"
+  },
+  "Delete entire subscription": {
+    "es": "Eliminar toda la suscripción",
+    "zh-Hans": "删除整个订阅"
+  },
+  "Delete entire subscription / profile": {
+    "es": "Eliminar toda la suscripción / perfil",
+    "zh-Hans": "删除整个订阅／配置"
+  },
+  "Delete profile?": {
+    "es": "¿Eliminar el perfil?",
+    "zh-Hans": "删除配置？"
+  },
+  "Delete selected server": {
+    "es": "Eliminar servidor seleccionado",
+    "zh-Hans": "删除所选服务器"
+  },
+  "Delete the selected subscription and all its servers?": {
+    "es": "¿Eliminar la suscripción seleccionada y todos sus servidores?",
+    "zh-Hans": "删除所选订阅及其所有服务器？"
+  },
+  "Diagnostics": {
+    "es": "Diagnóstico",
+    "zh-Hans": "诊断"
+  },
+  "Disconnect": {
+    "es": "Desconectar",
+    "zh-Hans": "断开连接"
+  },
+  "Domains and IP addresses": {
+    "es": "Dominios y direcciones IP",
+    "zh-Hans": "域名和 IP 地址"
+  },
+  "Domains or IPv4 addresses, one per line": {
+    "es": "Dominios o direcciones IPv4, uno por línea",
+    "zh-Hans": "域名或 IPv4 地址，每行一个"
+  },
+  "Domains, one per line": {
+    "es": "Dominios, uno por línea",
+    "zh-Hans": "域名，每行一个"
+  },
+  "Download and install": {
+    "es": "Descargar e instalar",
+    "zh-Hans": "下载并安装"
+  },
+  "Downloading update:": {
+    "es": "Descargando actualización:",
+    "zh-Hans": "正在下载更新："
+  },
+  "Enter manually": {
+    "es": "Introducir manualmente",
+    "zh-Hans": "手动输入"
+  },
+  "Everything through VPN": {
+    "es": "Todo por VPN",
+    "zh-Hans": "所有流量通过 VPN"
+  },
+  "Exit": {
+    "es": "Salir",
+    "zh-Hans": "退出"
+  },
+  "Export logs…": {
+    "es": "Exportar registros…",
+    "zh-Hans": "导出日志…"
+  },
+  "Fast": {
+    "es": "Rápida",
+    "zh-Hans": "快速"
+  },
+  "Filter unavailable": {
+    "es": "Filtrar no disponibles",
+    "zh-Hans": "过滤不可用服务器"
+  },
+  "From file": {
+    "es": "Desde un archivo",
+    "zh-Hans": "从文件导入"
+  },
+  "GB remaining": {
+    "es": "GB restantes",
+    "zh-Hans": "GB 剩余"
+  },
+  "Hide to tray": {
+    "es": "Ocultar en la bandeja",
+    "zh-Hans": "隐藏到托盘"
+  },
+  "HTTPS (more accurate)": {
+    "es": "HTTPS (más precisa)",
+    "zh-Hans": "HTTPS（更精确）"
+  },
+  "Import": {
+    "es": "Importar",
+    "zh-Hans": "导入"
+  },
+  "Import configuration": {
+    "es": "Importar configuración",
+    "zh-Hans": "导入配置"
+  },
+  "Import your first subscription": {
+    "es": "Importe su primera suscripción",
+    "zh-Hans": "导入您的第一个订阅"
+  },
+  "Installed version:": {
+    "es": "Versión instalada:",
+    "zh-Hans": "已安装版本："
+  },
+  "Last test:": {
+    "es": "Última prueba:",
+    "zh-Hans": "上次测试："
+  },
+  "Latency test": {
+    "es": "Prueba de latencia",
+    "zh-Hans": "延迟测试"
+  },
+  "Light": {
+    "es": "Claro",
+    "zh-Hans": "浅色"
+  },
+  "Lowest: choose the server with the lowest latency": {
+    "es": "Lowest: elegir el servidor con menor latencia",
+    "zh-Hans": "Lowest：选择延迟最低的服务器"
+  },
+  "Manual": {
+    "es": "Manual",
+    "zh-Hans": "手动"
+  },
+  "Manual entry": {
+    "es": "Entrada manual",
+    "zh-Hans": "手动输入"
+  },
+  "Manual profile": {
+    "es": "Perfil manual",
+    "zh-Hans": "手动配置"
+  },
+  "My servers": {
+    "es": "Mis servidores",
+    "zh-Hans": "我的服务器"
+  },
+  "Network error": {
+    "es": "Error de red",
+    "zh-Hans": "网络错误"
+  },
+  "New version available:": {
+    "es": "Nueva versión disponible:",
+    "zh-Hans": "有新版本："
+  },
+  "No server selected": {
+    "es": "Ningún servidor seleccionado",
+    "zh-Hans": "未选择服务器"
+  },
+  "Not tested": {
+    "es": "Sin probar",
+    "zh-Hans": "未测试"
+  },
+  "Only selected through VPN": {
+    "es": "Solo seleccionados por VPN",
+    "zh-Hans": "仅所选项目通过 VPN"
+  },
+  "Open Di-Tunnel": {
+    "es": "Abrir Di-Tunnel",
+    "zh-Hans": "打开 Di-Tunnel"
+  },
+  "Open logs folder": {
+    "es": "Abrir carpeta de registros",
+    "zh-Hans": "打开日志文件夹"
+  },
+  "Open release on GitHub": {
+    "es": "Abrir versión en GitHub",
+    "zh-Hans": "在 GitHub 上查看版本"
+  },
+  "Paste from clipboard": {
+    "es": "Pegar del portapapeles",
+    "zh-Hans": "从剪贴板粘贴"
+  },
+  "Previously imported": {
+    "es": "Importados anteriormente",
+    "zh-Hans": "以前导入的配置"
+  },
+  "Profile name (optional)": {
+    "es": "Nombre del perfil (opcional)",
+    "zh-Hans": "配置名称（可选）"
+  },
+  "QR code": {
+    "es": "Código QR",
+    "zh-Hans": "二维码"
+  },
+  "Refresh subscriptions": {
+    "es": "Actualizar suscripciones",
+    "zh-Hans": "刷新订阅"
+  },
+  "Refreshed:": {
+    "es": "Actualizado:",
+    "zh-Hans": "已刷新："
+  },
+  "Remind me for the next version": {
+    "es": "Recordármelo en la próxima versión",
+    "zh-Hans": "下个版本再提醒"
+  },
+  "Save split tunneling rules": {
+    "es": "Guardar reglas del túnel dividido",
+    "zh-Hans": "保存分流规则"
+  },
+  "Scan QR code": {
+    "es": "Escanear código QR",
+    "zh-Hans": "扫描二维码"
+  },
+  "Search applications": {
+    "es": "Buscar aplicaciones",
+    "zh-Hans": "搜索应用"
+  },
+  "server configuration": {
+    "es": "configuración del servidor",
+    "zh-Hans": "服务器配置"
+  },
+  "Servers added:": {
+    "es": "Servidores añadidos:",
+    "zh-Hans": "已添加服务器："
+  },
+  "Servers:": {
+    "es": "Servidores:",
+    "zh-Hans": "服务器："
+  },
+  "Settings": {
+    "es": "Ajustes",
+    "zh-Hans": "设置"
+  },
+  "Share": {
+    "es": "Compartir",
+    "zh-Hans": "分享"
+  },
+  "Share server": {
+    "es": "Compartir servidor",
+    "zh-Hans": "分享服务器"
+  },
+  "Share subscription": {
+    "es": "Compartir suscripción",
+    "zh-Hans": "分享订阅"
+  },
+  "Split tunneling": {
+    "es": "Túnel dividido",
+    "zh-Hans": "分流"
+  },
+  "Strict ad blocking": {
+    "es": "Bloqueo estricto de anuncios",
+    "zh-Hans": "严格屏蔽广告"
+  },
+  "Subscription": {
+    "es": "Suscripción",
+    "zh-Hans": "订阅"
+  },
+  "Subscriptions": {
+    "es": "Suscripciones",
+    "zh-Hans": "订阅"
+  },
+  "Subscriptions and profiles": {
+    "es": "Suscripciones y perfiles",
+    "zh-Hans": "订阅和配置"
+  },
+  "Subscriptions refreshed:": {
+    "es": "Suscripciones actualizadas:",
+    "zh-Hans": "已刷新订阅："
+  },
+  "System": {
+    "es": "Sistema",
+    "zh-Hans": "跟随系统"
+  },
+  "Test all": {
+    "es": "Probar todos",
+    "zh-Hans": "测试全部"
+  },
+  "Test server": {
+    "es": "Probar servidor",
+    "zh-Hans": "测试服务器"
+  },
+  "Test: Accurate (HTTPS)": {
+    "es": "Prueba: precisa (HTTPS)",
+    "zh-Hans": "测试：精确（HTTPS）"
+  },
+  "Test: Fast": {
+    "es": "Prueba: rápida",
+    "zh-Hans": "测试：快速"
+  },
+  "Theme": {
+    "es": "Tema",
+    "zh-Hans": "主题"
+  },
+  "Timeout": {
+    "es": "Tiempo agotado",
+    "zh-Hans": "超时"
+  },
+  "Update available": {
+    "es": "Actualización disponible",
+    "zh-Hans": "有可用更新"
+  },
+  "Updates": {
+    "es": "Actualizaciones",
+    "zh-Hans": "更新"
+  },
+  "URL or configuration": {
+    "es": "Enlace o configuración",
+    "zh-Hans": "链接或配置"
+  },
+  "URL or configuration to import": {
+    "es": "Enlace o configuración para importar",
+    "zh-Hans": "要导入的链接或配置"
+  },
+  "Version available": {
+    "es": "Versión disponible",
+    "zh-Hans": "可用版本"
+  },
+  "VPN configurations": {
+    "es": "Configuraciones VPN",
+    "zh-Hans": "VPN 配置"
+  },
+  "VPN connected": {
+    "es": "VPN conectada",
+    "zh-Hans": "VPN 已连接"
+  },
+  "VPN disconnected": {
+    "es": "VPN desconectada",
+    "zh-Hans": "VPN 已断开"
+  },
+  "When closing the window": {
+    "es": "Al cerrar la ventana",
+    "zh-Hans": "关闭窗口时"
+  },
+  "Windows code:": {
+    "es": "Código de Windows:",
+    "zh-Hans": "Windows 错误代码："
+  },
+  "Xray configuration": {
+    "es": "Configuración de Xray",
+    "zh-Hans": "Xray 配置"
+  },
+  "Your space. Your network.": {
+    "es": "Tu espacio. Tu red.",
+    "zh-Hans": "您的空间。您的网络。"
+  },
+  "Your VPN. Your choice.": {
+    "es": "Tu VPN. Tu elección.",
+    "zh-Hans": "您的 VPN。您的选择。"
+  },
+  "Kill switch: block traffic outside the VPN": {
+    "es": "Kill switch: bloquear tráfico fuera de la VPN",
+    "zh-Hans": "Kill switch：阻止 VPN 以外的流量"
+  },
+  "Allow local network while the kill switch is active": {
+    "es": "Permitir la red local con el kill switch activo",
+    "zh-Hans": "启用 kill switch 时允许访问局域网"
+  },
+  "Kill switch active": {
+    "es": "Kill switch activo",
+    "zh-Hans": "Kill switch 已启用"
+  },
+  "Network changes apply automatically when you return to the main screen. The kill switch uses dedicated Windows Filtering Platform rules.": {
+    "es": "Los cambios de red se aplican automáticamente al volver a la pantalla principal. El kill switch utiliza reglas específicas de Windows Filtering Platform.",
+    "zh-Hans": "返回主界面时会自动应用网络更改。Kill switch 使用专用的 Windows Filtering Platform 规则。"
+  },
+  "Known advertising domains are blocked across all VPN traffic. YouTube ads may not be blocked because they are delivered from the same domains as videos.": {
+    "es": "Se bloquean los dominios publicitarios conocidos en todo el tráfico VPN. Es posible que los anuncios de YouTube no se bloqueen porque se sirven desde los mismos dominios que los vídeos.",
+    "zh-Hans": "在所有 VPN 流量中屏蔽已知广告域名。YouTube 广告可能无法屏蔽，因为它们与视频使用相同的域名。"
+  },
+  "Also blocks shared domains that mobile advertising SDKs may use to load ads. Some Yandex services may stop working until strict mode is disabled and the VPN is reconnected.": {
+    "es": "También bloquea dominios compartidos que los SDK de publicidad móvil pueden usar para cargar anuncios. Algunos servicios de Yandex pueden dejar de funcionar hasta desactivar el modo estricto y reconectar la VPN.",
+    "zh-Hans": "同时屏蔽移动广告 SDK 可能用于加载广告的共用域名。部分 Yandex 服务可能无法使用，直到关闭严格模式并重新连接 VPN。"
+  },
+  "For complete traffic blocking outside the VPN, use Android system settings: Always-on VPN and Block connections without VPN. The Windows kill switch is unavailable on Android.": {
+    "es": "Para bloquear todo el tráfico fuera de la VPN, use los ajustes de Android: VPN siempre activa y bloquear conexiones sin VPN. El kill switch de Windows no está disponible en Android.",
+    "zh-Hans": "要完全阻止 VPN 以外的流量，请使用 Android 系统设置中的“始终开启 VPN”和“阻止未使用 VPN 的连接”。Windows 的 kill switch 不适用于 Android。"
+  },
+  "Hide the app and keep VPN running, or exit and disconnect VPN?": {
+    "es": "¿Ocultar la aplicación y mantener la VPN activa, o salir y desconectarla?",
+    "zh-Hans": "隐藏应用并保持 VPN 运行，还是退出并断开 VPN？"
+  },
+  "Checks after 5, then 10, then every 15 minutes. VPN reconnects when the server changes.": {
+    "es": "Comprueba a los 5 minutos, luego a los 10 y después cada 15. La VPN se reconecta al cambiar de servidor.",
+    "zh-Hans": "首次在 5 分钟后检查，再过 10 分钟检查，此后每 15 分钟检查一次。更换服务器时会重新连接 VPN。"
+  },
+  "The fast test uses TCP, HTTP or TLS depending on the platform and protocol. The precise test sends an HTTPS request through the profile. The result shows the method and time.": {
+    "es": "La prueba rápida usa TCP, HTTP o TLS según la plataforma y el protocolo. La prueba precisa envía una solicitud HTTPS a través del perfil. El resultado muestra el método y el tiempo.",
+    "zh-Hans": "快速测试根据平台和协议使用 TCP、HTTP 或 TLS。精确测试通过该配置发送 HTTPS 请求。结果会显示测试方式和耗时。"
+  },
+  "Profiles are stored on this computer and protected by your Windows account.": {
+    "es": "Los perfiles se guardan en este equipo y están protegidos por su cuenta de Windows.",
+    "zh-Hans": "配置保存在此计算机上，并受您的 Windows 账户保护。"
+  },
+  "Applications added automatically:": {
+    "es": "Aplicaciones añadidas automáticamente:",
+    "zh-Hans": "自动添加的应用："
+  },
+  "Android applications (multiple selection allowed)": {
+    "es": "Aplicaciones Android (selección múltiple)",
+    "zh-Hans": "Android 应用（可多选）"
+  },
+  "Apps: process name or .exe path, one per line": {
+    "es": "Aplicaciones: nombre del proceso o ruta .exe, uno por línea",
+    "zh-Hans": "应用：进程名称或 .exe 路径，每行一个"
+  },
+  "Select a profile and server to connect.": {
+    "es": "Seleccione un perfil y un servidor para conectar.",
+    "zh-Hans": "请选择要连接的配置和服务器。"
+  },
+  "Add a subscription or configuration to select a server.": {
+    "es": "Añada una suscripción o configuración para seleccionar un servidor.",
+    "zh-Hans": "添加订阅或配置后即可选择服务器。"
+  },
+  "Rules apply on the next VPN connection.": {
+    "es": "Las reglas se aplicarán en la próxima conexión VPN.",
+    "zh-Hans": "规则将在下次连接 VPN 时应用。"
+  },
+  "Selecting another server reconnects the active VPN automatically.": {
+    "es": "Al seleccionar otro servidor, la VPN activa se reconecta automáticamente.",
+    "zh-Hans": "选择其他服务器时，当前 VPN 会自动重新连接。"
+  },
+  "The export contains network events only, without subscriptions or keys.": {
+    "es": "La exportación solo contiene eventos de red, sin suscripciones ni claves.",
+    "zh-Hans": "导出内容仅包含网络事件，不包含订阅或密钥。"
+  },
+  "The installer will be downloaded and verified with SHA-256. The VPN will be disconnected before it starts.": {
+    "es": "Se descargará el instalador y se verificará con SHA-256. La VPN se desconectará antes de ejecutarlo.",
+    "zh-Hans": "安装程序将被下载并通过 SHA-256 验证。启动安装程序前会断开 VPN。"
+  },
+  " completed: ": {
+    "es": " completada: ",
+    "zh-Hans": " 已完成："
+  },
+  " did not complete.": {
+    "es": " no se completó.",
+    "zh-Hans": " 未完成。"
+  },
+  " ms": {
+    "es": " ms",
+    "zh-Hans": " 毫秒"
+  },
+  " of ": {
+    "es": " de ",
+    "zh-Hans": " / "
+  },
+  "Assigning TUN adapter addresses…": {
+    "es": "Asignando direcciones al adaptador TUN…",
+    "zh-Hans": "正在为 TUN 适配器分配地址…"
+  },
+  "Cancelling connection and restoring the network…": {
+    "es": "Cancelando la conexión y restaurando la red…",
+    "zh-Hans": "正在取消连接并恢复网络…"
+  },
+  "Checking configuration…": {
+    "es": "Comprobando la configuración…",
+    "zh-Hans": "正在检查配置…"
+  },
+  "Checking for updates…": {
+    "es": "Buscando actualizaciones…",
+    "zh-Hans": "正在检查更新…"
+  },
+  "Checking Windows routes and settings…": {
+    "es": "Comprobando rutas y ajustes de Windows…",
+    "zh-Hans": "正在检查 Windows 路由和设置…"
+  },
+  "Configuring IPv4 and IPv6 routes…": {
+    "es": "Configurando rutas IPv4 e IPv6…",
+    "zh-Hans": "正在配置 IPv4 和 IPv6 路由…"
+  },
+  "Connecting VPN…": {
+    "es": "Conectando la VPN…",
+    "zh-Hans": "正在连接 VPN…"
+  },
+  "Connection cancelled.": {
+    "es": "Conexión cancelada.",
+    "zh-Hans": "已取消连接。"
+  },
+  "Connection failed. Check the profile and server availability.": {
+    "es": "La conexión falló. Compruebe el perfil y la disponibilidad del servidor.",
+    "zh-Hans": "连接失败。请检查配置和服务器是否可用。"
+  },
+  "Connection lost. Attempt ": {
+    "es": "Conexión perdida. Intento ",
+    "zh-Hans": "连接已断开。尝试次数："
+  },
+  "Creating the TUN adapter (up to 20 seconds)…": {
+    "es": "Creando el adaptador TUN (hasta 20 segundos)…",
+    "zh-Hans": "正在创建 TUN 适配器（最多 20 秒）…"
+  },
+  "Creating the tunnel DNS rule…": {
+    "es": "Creando la regla DNS del túnel…",
+    "zh-Hans": "正在创建隧道 DNS 规则…"
+  },
+  "Disconnecting VPN…": {
+    "es": "Desconectando la VPN…",
+    "zh-Hans": "正在断开 VPN…"
+  },
+  "Loading applications…": {
+    "es": "Cargando aplicaciones…",
+    "zh-Hans": "正在加载应用列表…"
+  },
+  "Network restoration continues in the background. You can close the window.": {
+    "es": "La restauración de la red continúa en segundo plano. Puede cerrar la ventana.",
+    "zh-Hans": "网络正在后台恢复。您可以关闭窗口。"
+  },
+  "Network restored. Reconnecting VPN, attempt ": {
+    "es": "Red restaurada. Reconectando la VPN, intento ",
+    "zh-Hans": "网络已恢复。正在重新连接 VPN，尝试次数："
+  },
+  "Performing a network operation…": {
+    "es": "Realizando una operación de red…",
+    "zh-Hans": "正在执行网络操作…"
+  },
+  "Physical network is available. Reconnecting VPN…": {
+    "es": "La red física está disponible. Reconectando la VPN…",
+    "zh-Hans": "物理网络已可用。正在重新连接 VPN…"
+  },
+  "Refreshing subscriptions…": {
+    "es": "Actualizando suscripciones…",
+    "zh-Hans": "正在刷新订阅…"
+  },
+  "Refreshing the DNS cache…": {
+    "es": "Actualizando la caché DNS…",
+    "zh-Hans": "正在刷新 DNS 缓存…"
+  },
+  "Requesting Android VPN permission…": {
+    "es": "Solicitando permiso de VPN en Android…",
+    "zh-Hans": "正在请求 Android VPN 权限…"
+  },
+  "Restarting VPN through ": {
+    "es": "Reiniciando la VPN mediante ",
+    "zh-Hans": "正在重启 VPN，使用 "
+  },
+  "Restoring routes and DNS…": {
+    "es": "Restaurando rutas y DNS…",
+    "zh-Hans": "正在恢复路由和 DNS…"
+  },
+  "Restoring VPN…": {
+    "es": "Restaurando la VPN…",
+    "zh-Hans": "正在恢复 VPN…"
+  },
+  "Starting a new tunnel through ": {
+    "es": "Iniciando un nuevo túnel mediante ",
+    "zh-Hans": "正在启动新隧道，使用 "
+  },
+  "Starting AmneziaWG and configuring the system tunnel…": {
+    "es": "Iniciando AmneziaWG y configurando el túnel del sistema…",
+    "zh-Hans": "正在启动 AmneziaWG 并配置系统隧道…"
+  },
+  "Starting Android VpnService and Xray-core for server ": {
+    "es": "Iniciando Android VpnService y Xray-core para el servidor ",
+    "zh-Hans": "正在为服务器启动 Android VpnService 和 Xray-core："
+  },
+  "Starting Android VpnService and Xray-core…": {
+    "es": "Iniciando Android VpnService y Xray-core…",
+    "zh-Hans": "正在启动 Android VpnService 和 Xray-core…"
+  },
+  "Starting the AmneziaWG runtime…": {
+    "es": "Iniciando el motor AmneziaWG…",
+    "zh-Hans": "正在启动 AmneziaWG 内核…"
+  },
+  "Starting the Windows network module…": {
+    "es": "Iniciando el módulo de red de Windows…",
+    "zh-Hans": "正在启动 Windows 网络模块…"
+  },
+  "Starting Xray and configuring the system tunnel…": {
+    "es": "Iniciando Xray y configurando el túnel del sistema…",
+    "zh-Hans": "正在启动 Xray 并配置系统隧道…"
+  },
+  "Stopping the current tunnel before switching to ": {
+    "es": "Deteniendo el túnel actual antes de cambiar a ",
+    "zh-Hans": "正在停止当前隧道，以切换到 "
+  },
+  "Stopping VPN…": {
+    "es": "Deteniendo la VPN…",
+    "zh-Hans": "正在停止 VPN…"
+  },
+  "Testing ": {
+    "es": "Probando ",
+    "zh-Hans": "正在测试 "
+  },
+  "Testing internet access through TUN (up to 15 seconds)…": {
+    "es": "Probando el acceso a Internet mediante TUN (hasta 15 segundos)…",
+    "zh-Hans": "正在测试 TUN 互联网连接（最多 15 秒）…"
+  },
+  "Testing the server through AmneziaWG (up to 12 seconds)…": {
+    "es": "Probando el servidor mediante AmneziaWG (hasta 12 segundos)…",
+    "zh-Hans": "正在通过 AmneziaWG 测试服务器（最多 12 秒）…"
+  },
+  "Testing the server through Xray (up to 12 seconds)…": {
+    "es": "Probando el servidor mediante Xray (hasta 12 segundos)…",
+    "zh-Hans": "正在通过 Xray 测试服务器（最多 12 秒）…"
+  },
+  "Testing…": {
+    "es": "Probando…",
+    "zh-Hans": "正在测试…"
+  },
+  "Waiting for the TUN address (up to 10 seconds)…": {
+    "es": "Esperando la dirección TUN (hasta 10 segundos)…",
+    "zh-Hans": "正在等待 TUN 地址（最多 10 秒）…"
+  },
+  "Waiting for the TUN route (up to 5 seconds)…": {
+    "es": "Esperando la ruta TUN (hasta 5 segundos)…",
+    "zh-Hans": "正在等待 TUN 路由（最多 5 秒）…"
+  },
+  "Kill switch active. Configuring routes…": {
+    "es": "Kill switch activo. Configurando rutas…",
+    "zh-Hans": "Kill switch 已启用。正在配置路由…"
+  },
+  "Could not enable the kill switch:": {
+    "es": "No se pudo activar el kill switch:",
+    "zh-Hans": "无法启用 kill switch："
+  },
+  "Could not update kill switch exceptions:": {
+    "es": "No se pudieron actualizar las excepciones del kill switch:",
+    "zh-Hans": "无法更新 kill switch 例外："
+  },
+  "Could not remove kill switch rules:": {
+    "es": "No se pudieron eliminar las reglas del kill switch:",
+    "zh-Hans": "无法删除 kill switch 规则："
+  },
+  "Server deleted.": {
+    "es": "Servidor eliminado.",
+    "zh-Hans": "服务器已删除。"
+  },
+  "Settings saved.": {
+    "es": "Ajustes guardados.",
+    "zh-Hans": "设置已保存。"
+  },
+  "Subscriptions refreshed successfully": {
+    "es": "Suscripciones actualizadas correctamente",
+    "zh-Hans": "订阅已成功刷新"
+  },
+  "Profile refreshed successfully": {
+    "es": "Perfil actualizado correctamente",
+    "zh-Hans": "配置已成功刷新"
+  },
+  "Profile and all its servers deleted.": {
+    "es": "Perfil y todos sus servidores eliminados.",
+    "zh-Hans": "配置及其所有服务器已删除。"
+  },
+  "Previous servers were preserved.": {
+    "es": "Se conservaron los servidores anteriores.",
+    "zh-Hans": "已保留原有服务器。"
+  },
+  "Test cancelled.": {
+    "es": "Prueba cancelada.",
+    "zh-Hans": "测试已取消。"
+  },
+  "Test complete. Results measure an HTTPS request through the server, not ICMP ping. Windows routes were unchanged.": {
+    "es": "Prueba completada. Los resultados miden una solicitud HTTPS a través del servidor, no un ping ICMP. Las rutas de Windows no se modificaron.",
+    "zh-Hans": "测试已完成。结果测量的是通过服务器发送 HTTPS 请求的耗时，而非 ICMP ping。Windows 路由未改变。"
+  },
+  "The window is closing; the independent network host will continue restoring the network.": {
+    "es": "La ventana se está cerrando; el módulo de red independiente continuará restaurando la red.",
+    "zh-Hans": "窗口正在关闭；独立网络模块将继续恢复网络。"
+  },
+  "Routes will be restored.": {
+    "es": "Se restaurarán las rutas.",
+    "zh-Hans": "将恢复路由。"
+  },
+  "VPN disconnected.": {
+    "es": "VPN desconectada.",
+    "zh-Hans": "VPN 已断开。"
+  },
+  "VPN disconnected. Routes and DNS were released.": {
+    "es": "VPN desconectada. Se liberaron las rutas y el DNS.",
+    "zh-Hans": "VPN 已断开。路由和 DNS 已恢复。"
+  },
+  "VPN disconnected. The network module confirmed restoration.": {
+    "es": "VPN desconectada. El módulo de red confirmó la restauración.",
+    "zh-Hans": "VPN 已断开。网络模块已确认恢复完成。"
+  },
+  "VPN connected through Android VpnService.": {
+    "es": "VPN conectada mediante Android VpnService.",
+    "zh-Hans": "VPN 已通过 Android VpnService 连接。"
+  },
+  "Tunnel active, but the verification request through profile ": {
+    "es": "Túnel activo, pero la solicitud de comprobación mediante el perfil ",
+    "zh-Hans": "隧道已启用，但通过配置进行的验证请求 "
+  },
+  "Tunnel active. Profile check for ": {
+    "es": "Túnel activo. Comprobación del perfil para ",
+    "zh-Hans": "隧道已启用。配置验证："
+  },
+  "Tunnel active. Android VpnService and Xray-core are running; server availability is checked separately.": {
+    "es": "Túnel activo. Android VpnService y Xray-core están en ejecución; la disponibilidad del servidor se comprueba por separado.",
+    "zh-Hans": "隧道已启用。Android VpnService 和 Xray-core 正在运行；服务器可用性会单独检查。"
+  },
+  "Tunnel active. The automatic route check did not succeed.": {
+    "es": "Túnel activo. La comprobación automática de la ruta falló.",
+    "zh-Hans": "隧道已启用。自动路由检查未通过。"
+  },
+  "Tunnel active. The control connection through TUN succeeded.": {
+    "es": "Túnel activo. La conexión de control mediante TUN se completó.",
+    "zh-Hans": "隧道已启用。通过 TUN 的验证连接成功。"
+  },
+  "Tunnel active. The HTTPS request through TUN succeeded.": {
+    "es": "Túnel activo. La solicitud HTTPS mediante TUN se completó.",
+    "zh-Hans": "隧道已启用。通过 TUN 的 HTTPS 请求成功。"
+  },
+  "Tunnel active. The server is reachable, but the verification request through TUN did not complete.": {
+    "es": "Túnel activo. El servidor está disponible, pero la solicitud de comprobación mediante TUN no se completó.",
+    "zh-Hans": "隧道已启用。服务器可访问，但通过 TUN 的验证请求未完成。"
+  },
+  "The tunnel stopped. Reconnect.": {
+    "es": "El túnel se detuvo. Vuelva a conectar.",
+    "zh-Hans": "隧道已停止。请重新连接。"
+  },
+  "Logs exported.": {
+    "es": "Registros exportados.",
+    "zh-Hans": "日志已导出。"
+  },
+  "Link copied to clipboard.": {
+    "es": "Enlace copiado al portapapeles.",
+    "zh-Hans": "链接已复制到剪贴板。"
+  },
+  "QR code scanned. Check the contents and click Import.": {
+    "es": "Código QR escaneado. Compruebe el contenido y pulse Importar.",
+    "zh-Hans": "二维码已扫描。请检查内容，然后点击“导入”。"
+  },
+  "QR code scanning was cancelled.": {
+    "es": "Escaneo del código QR cancelado.",
+    "zh-Hans": "二维码扫描已取消。"
+  },
+  "Paste a URL or configuration.": {
+    "es": "Pegue un enlace o una configuración.",
+    "zh-Hans": "请粘贴链接或配置。"
+  },
+  "Paste an HTTPS subscription URL, server links, or an Xray JSON configuration.": {
+    "es": "Pegue un enlace HTTPS de suscripción, enlaces de servidores o una configuración JSON de Xray.",
+    "zh-Hans": "请粘贴 HTTPS 订阅链接、服务器链接或 Xray JSON 配置。"
+  },
+  "Check the contents and click Import.": {
+    "es": "Compruebe el contenido y pulse Importar.",
+    "zh-Hans": "请检查内容，然后点击“导入”。"
+  },
+  "Disconnect the active tunnel first.": {
+    "es": "Desconecte primero el túnel activo.",
+    "zh-Hans": "请先断开当前隧道。"
+  },
+  "Disconnect VPN to change the profile.": {
+    "es": "Desconecte la VPN para cambiar el perfil.",
+    "zh-Hans": "请断开 VPN 后再更改配置。"
+  },
+  "Select a server first.": {
+    "es": "Seleccione primero un servidor.",
+    "zh-Hans": "请先选择服务器。"
+  },
+  "All servers in the selected profile will be deleted.": {
+    "es": "Se eliminarán todos los servidores del perfil seleccionado.",
+    "zh-Hans": "所选配置中的所有服务器将被删除。"
+  },
+  "These servers are already in the subscription.": {
+    "es": "Estos servidores ya están en la suscripción.",
+    "zh-Hans": "这些服务器已存在于订阅中。"
+  },
+  "No releases have been published yet.": {
+    "es": "Todavía no se han publicado versiones.",
+    "zh-Hans": "尚未发布任何版本。"
+  },
+  "You have the latest version.": {
+    "es": "Tiene la versión más reciente.",
+    "zh-Hans": "已安装最新版本。"
+  },
+  "Update downloaded. Disconnecting VPN…": {
+    "es": "Actualización descargada. Desconectando la VPN…",
+    "zh-Hans": "更新已下载。正在断开 VPN…"
+  },
+  "The update installer has started.": {
+    "es": "El instalador de la actualización se ha iniciado.",
+    "zh-Hans": "更新安装程序已启动。"
+  },
+  "This update will be skipped until the next version.": {
+    "es": "Esta actualización se omitirá hasta la próxima versión.",
+    "zh-Hans": "将在下个版本发布前跳过此更新。"
+  },
+  "A subscription can contain at most 1000 servers.": {
+    "es": "Una suscripción puede contener como máximo 1000 servidores.",
+    "zh-Hans": "每个订阅最多可包含 1000 个服务器。"
+  },
+  "AmneziaWG exited.": {
+    "es": "AmneziaWG se cerró.",
+    "zh-Hans": "AmneziaWG 已退出。"
+  },
+  "AmneziaWG on Windows currently requires an IPv4 endpoint.": {
+    "es": "AmneziaWG en Windows requiere actualmente un endpoint IPv4.",
+    "zh-Hans": "Windows 上的 AmneziaWG 目前需要 IPv4 端点。"
+  },
+  "AmneziaWG requires a separate AmneziaWG runtime. Connection and testing are implemented in the Windows client; Android currently supports import only.": {
+    "es": "AmneziaWG requiere un motor independiente. La conexión y las pruebas están implementadas en el cliente de Windows; Android solo permite importar por ahora.",
+    "zh-Hans": "AmneziaWG 需要独立的内核。Windows 客户端已支持连接和测试；Android 目前仅支持导入。"
+  },
+  "Another VPN was detected. Switching routes to Di-Tunnel…": {
+    "es": "Se detectó otra VPN. Cambiando las rutas a Di-Tunnel…",
+    "zh-Hans": "检测到其他 VPN。正在将路由切换到 Di-Tunnel…"
+  },
+  "Automatic attempts were paused after 10 failures. The kill switch remains active; the VPN will resume when the network returns.": {
+    "es": "Los intentos automáticos se pausaron tras 10 fallos. El kill switch sigue activo; la VPN se reanudará cuando vuelva la red.",
+    "zh-Hans": "自动重试在 10 次失败后已暂停。Kill switch 仍保持启用；网络恢复时 VPN 将自动恢复。"
+  },
+  "Automatic attempts were paused after 10 failures. The VPN will resume when the network returns.": {
+    "es": "Los intentos automáticos se pausaron tras 10 fallos. La VPN se reanudará cuando vuelva la red.",
+    "zh-Hans": "自动重试在 10 次失败后已暂停。网络恢复时 VPN 将自动恢复。"
+  },
+  "Automatic recovery stopped after 10 attempts. Try connecting manually.": {
+    "es": "La recuperación automática se detuvo tras 10 intentos. Intente conectar manualmente.",
+    "zh-Hans": "自动恢复在 10 次尝试后已停止。请尝试手动连接。"
+  },
+  "Automatic updates are unavailable on this platform.": {
+    "es": "Las actualizaciones automáticas no están disponibles en esta plataforma.",
+    "zh-Hans": "此平台不支持自动更新。"
+  },
+  "Close Di-Tunnel and run it as administrator. TUN, routing and DNS require elevated permissions.": {
+    "es": "Cierre Di-Tunnel y ejecútelo como administrador. TUN, las rutas y el DNS requieren permisos elevados.",
+    "zh-Hans": "请关闭 Di-Tunnel 并以管理员身份运行。TUN、路由和 DNS 操作需要管理员权限。"
+  },
+  "Connection to the network module was lost. Network restoration has not been confirmed.": {
+    "es": "Se perdió la conexión con el módulo de red. La restauración de la red no se ha confirmado.",
+    "zh-Hans": "与网络模块的连接已断开。尚未确认网络恢复完成。"
+  },
+  "Connection to the network module was lost. Wait for network restoration before reconnecting.": {
+    "es": "Se perdió la conexión con el módulo de red. Espere a que se restaure la red antes de reconectar.",
+    "zh-Hans": "与网络模块的连接已断开。请等待网络恢复后再重新连接。"
+  },
+  "Connections support Hysteria 2, VLESS, Trojan and Shadowsocks. VMess and custom JSON can currently only be stored.": {
+    "es": "Las conexiones admiten Hysteria 2, VLESS, Trojan y Shadowsocks. Por ahora, VMess y JSON personalizado solo se pueden guardar.",
+    "zh-Hans": "连接支持 Hysteria 2、VLESS、Trojan 和 Shadowsocks。VMess 和自定义 JSON 目前仅支持保存。"
+  },
+  "Could not authenticate the network connection owner.": {
+    "es": "No se pudo autenticar al propietario de la conexión de red.",
+    "zh-Hans": "无法验证网络连接的所有者。"
+  },
+  "Could not change VPN state. Network changes were rolled back; check permissions and server availability.": {
+    "es": "No se pudo cambiar el estado de la VPN. Se revirtieron los cambios de red; compruebe los permisos y la disponibilidad del servidor.",
+    "zh-Hans": "无法更改 VPN 状态。网络更改已回滚；请检查权限和服务器是否可用。"
+  },
+  "Could not check for updates. Try again later.": {
+    "es": "No se pudieron buscar actualizaciones. Inténtelo más tarde.",
+    "zh-Hans": "无法检查更新。请稍后重试。"
+  },
+  "Could not configure TUN or verify the server connection.": {
+    "es": "No se pudo configurar TUN o comprobar la conexión al servidor.",
+    "zh-Hans": "无法配置 TUN 或验证服务器连接。"
+  },
+  "Could not connect": {
+    "es": "No se pudo conectar",
+    "zh-Hans": "无法连接"
+  },
+  "Could not copy": {
+    "es": "No se pudo copiar",
+    "zh-Hans": "无法复制"
+  },
+  "Could not create QR code.": {
+    "es": "No se pudo crear el código QR.",
+    "zh-Hans": "无法生成二维码。"
+  },
+  "Could not determine the release version.": {
+    "es": "No se pudo determinar la versión publicada.",
+    "zh-Hans": "无法确定发布版本。"
+  },
+  "Could not download or start the update. The checksum or connection validation failed.": {
+    "es": "No se pudo descargar o iniciar la actualización. Falló la verificación de la suma de comprobación o de la conexión.",
+    "zh-Hans": "无法下载或启动更新。校验和或连接验证失败。"
+  },
+  "Could not download the subscription. Check the URL, server availability and HTTPS certificate.": {
+    "es": "No se pudo descargar la suscripción. Compruebe el enlace, la disponibilidad del servidor y el certificado HTTPS.",
+    "zh-Hans": "无法下载订阅。请检查链接、服务器是否可用及 HTTPS 证书。"
+  },
+  "Could not export logs.": {
+    "es": "No se pudieron exportar los registros.",
+    "zh-Hans": "无法导出日志。"
+  },
+  "Could not fully restore the network. Run Repair-DiTunnelNetwork.ps1 as administrator.": {
+    "es": "No se pudo restaurar la red por completo. Ejecute Repair-DiTunnelNetwork.ps1 como administrador.",
+    "zh-Hans": "无法完全恢复网络。请以管理员身份运行 Repair-DiTunnelNetwork.ps1。"
+  },
+  "Could not import or save profiles. Existing profiles were preserved.": {
+    "es": "No se pudieron importar o guardar los perfiles. Se conservaron los perfiles existentes.",
+    "zh-Hans": "无法导入或保存配置。现有配置已保留。"
+  },
+  "Could not open the configuration file.": {
+    "es": "No se pudo abrir el archivo de configuración.",
+    "zh-Hans": "无法打开配置文件。"
+  },
+  "Could not open the folder.": {
+    "es": "No se pudo abrir la carpeta.",
+    "zh-Hans": "无法打开文件夹。"
+  },
+  "Could not open the release page.": {
+    "es": "No se pudo abrir la página de la versión.",
+    "zh-Hans": "无法打开版本发布页面。"
+  },
+  "Could not prepare the server test route while a VPN is active.": {
+    "es": "No se pudo preparar la ruta de prueba del servidor con una VPN activa.",
+    "zh-Hans": "VPN 运行时无法准备服务器测试路由。"
+  },
+  "Could not read saved profiles. The original file was not modified.": {
+    "es": "No se pudieron leer los perfiles guardados. El archivo original no se modificó.",
+    "zh-Hans": "无法读取已保存的配置。原文件未被修改。"
+  },
+  "Could not refresh profile": {
+    "es": "No se pudo actualizar el perfil",
+    "zh-Hans": "无法刷新配置"
+  },
+  "Could not refresh subscriptions": {
+    "es": "No se pudieron actualizar las suscripciones",
+    "zh-Hans": "无法刷新订阅"
+  },
+  "Could not refresh the Windows DNS cache.": {
+    "es": "No se pudo actualizar la caché DNS de Windows.",
+    "zh-Hans": "无法刷新 Windows DNS 缓存。"
+  },
+  "Could not refresh:": {
+    "es": "No se pudo actualizar:",
+    "zh-Hans": "无法刷新："
+  },
+  "Could not resolve the address": {
+    "es": "No se pudo resolver la dirección",
+    "zh-Hans": "无法解析地址"
+  },
+  "Could not save changes. Profiles were not deleted.": {
+    "es": "No se pudieron guardar los cambios. No se eliminaron los perfiles.",
+    "zh-Hans": "无法保存更改。配置未被删除。"
+  },
+  "Could not save settings.": {
+    "es": "No se pudieron guardar los ajustes.",
+    "zh-Hans": "无法保存设置。"
+  },
+  "Could not scan the QR code: ": {
+    "es": "No se pudo escanear el código QR: ",
+    "zh-Hans": "无法扫描二维码："
+  },
+  "Could not show the update prompt. Try again later.": {
+    "es": "No se pudo mostrar el aviso de actualización. Inténtelo más tarde.",
+    "zh-Hans": "无法显示更新提示。请稍后重试。"
+  },
+  "Could not start the AmneziaWG runtime.": {
+    "es": "No se pudo iniciar el motor AmneziaWG.",
+    "zh-Hans": "无法启动 AmneziaWG 内核。"
+  },
+  "Could not start the AmneziaWG runtime. Check the configuration.": {
+    "es": "No se pudo iniciar el motor AmneziaWG. Compruebe la configuración.",
+    "zh-Hans": "无法启动 AmneziaWG 内核。请检查配置。"
+  },
+  "Could not start the network module.": {
+    "es": "No se pudo iniciar el módulo de red.",
+    "zh-Hans": "无法启动网络模块。"
+  },
+  "Could not start the tunnel runtime.": {
+    "es": "No se pudo iniciar el motor del túnel.",
+    "zh-Hans": "无法启动隧道内核。"
+  },
+  "Could not test the server.": {
+    "es": "No se pudo probar el servidor.",
+    "zh-Hans": "无法测试服务器。"
+  },
+  "Disconnect the other VPN first: it may conflict with the Di-Tunnel adapter and routes.": {
+    "es": "Desconecte primero la otra VPN: puede entrar en conflicto con el adaptador y las rutas de Di-Tunnel.",
+    "zh-Hans": "请先断开其他 VPN：它可能与 Di-Tunnel 的适配器和路由冲突。"
+  },
+  "Duplicate operation number.": {
+    "es": "Número de operación duplicado.",
+    "zh-Hans": "操作编号重复。"
+  },
+  "Duplicate URL parameter.": {
+    "es": "Parámetro de enlace duplicado.",
+    "zh-Hans": "链接参数重复。"
+  },
+  "Empty network module message.": {
+    "es": "Mensaje vacío del módulo de red.",
+    "zh-Hans": "网络模块消息为空。"
+  },
+  "Existing DNS rules were detected. Connection cancelled to preserve them.": {
+    "es": "Se detectaron reglas DNS existentes. Se canceló la conexión para conservarlas.",
+    "zh-Hans": "检测到现有 DNS 规则。为保留这些规则，已取消连接。"
+  },
+  "Expected a server URL, Base64 subscription or Xray JSON.": {
+    "es": "Se esperaba un enlace de servidor, una suscripción Base64 o JSON de Xray.",
+    "zh-Hans": "需要服务器链接、Base64 订阅或 Xray JSON。"
+  },
+  "Hysteria 2 requires TLS.": {
+    "es": "Hysteria 2 requiere TLS.",
+    "zh-Hans": "Hysteria 2 需要 TLS。"
+  },
+  "Import failed: invalid AmneziaWG configuration. Interface and Peer sections for a single server are required, without command hooks.": {
+    "es": "La importación falló: configuración AmneziaWG no válida. Se requieren secciones Interface y Peer de un solo servidor, sin comandos auxiliares.",
+    "zh-Hans": "导入失败：AmneziaWG 配置无效。需要单个服务器的 Interface 和 Peer 部分，不得包含命令钩子。"
+  },
+  "Import failed: the configuration contains no AmneziaWG parameters.": {
+    "es": "La importación falló: la configuración no contiene parámetros AmneziaWG.",
+    "zh-Hans": "导入失败：配置不包含 AmneziaWG 参数。"
+  },
+  "Invalid JSON.": {
+    "es": "JSON no válido.",
+    "zh-Hans": "JSON 无效。"
+  },
+  "Invalid network module message size.": {
+    "es": "Tamaño de mensaje del módulo de red no válido.",
+    "zh-Hans": "网络模块消息大小无效。"
+  },
+  "Invalid server URL.": {
+    "es": "Enlace de servidor no válido.",
+    "zh-Hans": "服务器链接无效。"
+  },
+  "Invalid Shadowsocks key.": {
+    "es": "Clave Shadowsocks no válida.",
+    "zh-Hans": "Shadowsocks 密钥无效。"
+  },
+  "Invalid VLESS UUID.": {
+    "es": "UUID de VLESS no válido.",
+    "zh-Hans": "VLESS UUID 无效。"
+  },
+  "Invalid VMess configuration.": {
+    "es": "Configuración VMess no válida.",
+    "zh-Hans": "VMess 配置无效。"
+  },
+  "JSON must contain a nonempty Xray outbounds array.": {
+    "es": "El JSON debe contener un array outbounds de Xray no vacío.",
+    "zh-Hans": "JSON 必须包含非空的 Xray outbounds 数组。"
+  },
+  "Language: English → Русский": {
+    "es": "Idioma: Español → Русский",
+    "zh-Hans": "语言：简体中文 → Русский"
+  },
+  "No active physical internet interface was found for switching from the other VPN.": {
+    "es": "No se encontró una interfaz física de Internet activa para cambiar desde la otra VPN.",
+    "zh-Hans": "未找到可用于从其他 VPN 切换的活动物理互联网接口。"
+  },
+  "No active physical internet interface was found.": {
+    "es": "No se encontró una interfaz física de Internet activa.",
+    "zh-Hans": "未找到活动的物理互联网接口。"
+  },
+  "No addresses were found for the selected domains.": {
+    "es": "No se encontraron direcciones para los dominios seleccionados.",
+    "zh-Hans": "未找到所选域名的地址。"
+  },
+  "No internet connection. Turn on Wi-Fi or mobile data and try again.": {
+    "es": "No hay conexión a Internet. Active el Wi-Fi o los datos móviles y vuelva a intentarlo.",
+    "zh-Hans": "没有互联网连接。请开启 Wi-Fi 或移动数据后重试。"
+  },
+  "No internet connection. Waiting for the network to return…": {
+    "es": "Sin conexión a Internet. Esperando a que se restablezca la red…",
+    "zh-Hans": "无互联网连接。正在等待网络恢复…"
+  },
+  "No IPv4 address for the server.": {
+    "es": "No hay dirección IPv4 para el servidor.",
+    "zh-Hans": "服务器没有 IPv4 地址。"
+  },
+  "No physical IPv4 address was found.": {
+    "es": "No se encontró una dirección IPv4 física.",
+    "zh-Hans": "未找到物理接口的 IPv4 地址。"
+  },
+  "No profile was supplied.": {
+    "es": "No se proporcionó ningún perfil.",
+    "zh-Hans": "未提供配置。"
+  },
+  "Obfs, port hopping and plugins are not supported yet.": {
+    "es": "Obfs, el cambio de puertos y los complementos aún no están disponibles.",
+    "zh-Hans": "尚不支持 Obfs、端口跳变和插件。"
+  },
+  "Operation cancelled.": {
+    "es": "Operación cancelada.",
+    "zh-Hans": "操作已取消。"
+  },
+  "Run the app as administrator to use TUN": {
+    "es": "Ejecute la aplicación como administrador para usar TUN",
+    "zh-Hans": "请以管理员身份运行应用以使用 TUN"
+  },
+  "Storage is unavailable. The saved file is protected from overwriting.": {
+    "es": "El almacenamiento no está disponible. El archivo guardado está protegido contra sobrescritura.",
+    "zh-Hans": "存储不可用。已保存的文件受到保护，不会被覆盖。"
+  },
+  "Subscriptions require an HTTPS URL.": {
+    "es": "Las suscripciones requieren un enlace HTTPS.",
+    "zh-Hans": "订阅需要 HTTPS 链接。"
+  },
+  "The active AmneziaWG core is recovering. Retry the test.": {
+    "es": "El motor AmneziaWG activo se está recuperando. Repita la prueba.",
+    "zh-Hans": "当前 AmneziaWG 内核正在恢复。请重试测试。"
+  },
+  "The AmneziaWG runtime checksum does not match. Reinstall Di-Tunnel.": {
+    "es": "La suma de comprobación del motor AmneziaWG no coincide. Reinstale Di-Tunnel.",
+    "zh-Hans": "AmneziaWG 内核的校验和不匹配。请重新安装 Di-Tunnel。"
+  },
+  "The AmneziaWG runtime exited while the tunnel was running.": {
+    "es": "El motor AmneziaWG se cerró mientras el túnel estaba activo.",
+    "zh-Hans": "AmneziaWG 内核在隧道运行时退出。"
+  },
+  "The AmneziaWG runtime is not installed. Run scripts/Build-AmneziaWG.ps1 and rebuild the Windows client.": {
+    "es": "El motor AmneziaWG no está instalado. Ejecute scripts/Build-AmneziaWG.ps1 y vuelva a compilar el cliente de Windows.",
+    "zh-Hans": "未安装 AmneziaWG 内核。请运行 scripts/Build-AmneziaWG.ps1 并重新编译 Windows 客户端。"
+  },
+  "The AmneziaWG runtime rejected the configuration. Check obfuscation parameters and the server protocol version.": {
+    "es": "El motor AmneziaWG rechazó la configuración. Compruebe los parámetros de ofuscación y la versión del protocolo del servidor.",
+    "zh-Hans": "AmneziaWG 内核拒绝了配置。请检查混淆参数和服务器协议版本。"
+  },
+  "The AmneziaWG runtime reported an invalid port.": {
+    "es": "El motor AmneziaWG indicó un puerto no válido.",
+    "zh-Hans": "AmneziaWG 内核返回了无效端口。"
+  },
+  "The clipboard contains no text.": {
+    "es": "El portapapeles no contiene texto.",
+    "zh-Hans": "剪贴板中没有文本。"
+  },
+  "The clipboard is unavailable. Paste the text manually.": {
+    "es": "El portapapeles no está disponible. Pegue el texto manualmente.",
+    "zh-Hans": "剪贴板不可用。请手动粘贴文本。"
+  },
+  "The configuration exceeds 2 MB.": {
+    "es": "La configuración supera los 2 MB.",
+    "zh-Hans": "配置超过 2 MB。"
+  },
+  "The kill switch is not active.": {
+    "es": "El kill switch no está activo.",
+    "zh-Hans": "Kill switch 未启用。"
+  },
+  "The network adapter disconnected. Reconnect when the network becomes available.": {
+    "es": "El adaptador de red se desconectó. Vuelva a conectar cuando la red esté disponible.",
+    "zh-Hans": "网络适配器已断开。请在网络恢复后重新连接。"
+  },
+  "The network engine is unavailable on this platform.": {
+    "es": "El motor de red no está disponible en esta plataforma.",
+    "zh-Hans": "此平台不支持该网络引擎。"
+  },
+  "The network is still unavailable. Waiting for the next recovery attempt…": {
+    "es": "La red sigue sin estar disponible. Esperando el próximo intento de recuperación…",
+    "zh-Hans": "网络仍不可用。正在等待下一次恢复尝试…"
+  },
+  "The network module did not confirm restoration. Check the DiTunnel adapter; Windows may need a restart.": {
+    "es": "El módulo de red no confirmó la restauración. Compruebe el adaptador DiTunnel; puede ser necesario reiniciar Windows.",
+    "zh-Hans": "网络模块未确认恢复完成。请检查 DiTunnel 适配器；可能需要重启 Windows。"
+  },
+  "The network module exited before connecting.": {
+    "es": "El módulo de red se cerró antes de conectar.",
+    "zh-Hans": "网络模块在连接前退出。"
+  },
+  "The network module has no valid Di-Tunnel owner.": {
+    "es": "El módulo de red no tiene un propietario Di-Tunnel válido.",
+    "zh-Hans": "网络模块没有有效的 Di-Tunnel 所有者。"
+  },
+  "The network module is missing. Rebuild or reinstall Di-Tunnel.": {
+    "es": "Falta el módulo de red. Vuelva a compilar o reinstale Di-Tunnel.",
+    "zh-Hans": "缺少网络模块。请重新编译或安装 Di-Tunnel。"
+  },
+  "The network module is missing. Rebuild the Windows client.": {
+    "es": "Falta el módulo de red. Vuelva a compilar el cliente de Windows.",
+    "zh-Hans": "缺少网络模块。请重新编译 Windows 客户端。"
+  },
+  "The network module is still restoring the network. You can close the window; wait for cleanup before reconnecting.": {
+    "es": "El módulo de red sigue restaurando la red. Puede cerrar la ventana; espere a que termine la limpieza antes de reconectar.",
+    "zh-Hans": "网络模块仍在恢复网络。您可以关闭窗口；请等待清理完成后再重新连接。"
+  },
+  "The network module returned no test result.": {
+    "es": "El módulo de red no devolvió ningún resultado de prueba.",
+    "zh-Hans": "网络模块未返回测试结果。"
+  },
+  "The network permission request was cancelled. The interface continues running without elevation.": {
+    "es": "Se canceló la solicitud de permisos de red. La interfaz sigue funcionando sin elevación de permisos.",
+    "zh-Hans": "网络权限请求已取消。界面将继续以普通权限运行。"
+  },
+  "The other VPN blocks a direct route to the server. Disable its kill switch or block-connections-outside-VPN mode.": {
+    "es": "La otra VPN bloquea la ruta directa al servidor. Desactive su kill switch o su modo de bloqueo de conexiones fuera de la VPN.",
+    "zh-Hans": "其他 VPN 阻止了到服务器的直连路由。请关闭该 VPN 的 kill switch 或阻止 VPN 外连接的模式。"
+  },
+  "The physical route to the server was not installed.": {
+    "es": "No se instaló la ruta física al servidor.",
+    "zh-Hans": "未能安装到服务器的物理路由。"
+  },
+  "The previous network module is still restoring the network. Wait for it to finish.": {
+    "es": "El módulo de red anterior sigue restaurando la red. Espere a que termine.",
+    "zh-Hans": "上一个网络模块仍在恢复网络。请等待它完成。"
+  },
+  "The profile is too large for the network module.": {
+    "es": "El perfil es demasiado grande para el módulo de red.",
+    "zh-Hans": "该配置过大，无法由网络模块处理。"
+  },
+  "The release has no Windows installer or SHA-256 file. Open the release page to install it manually.": {
+    "es": "Esta versión no incluye instalador de Windows o archivo SHA-256. Abra la página de la versión para instalarla manualmente.",
+    "zh-Hans": "此版本缺少 Windows 安装程序或 SHA-256 文件。请打开版本页面并手动安装。"
+  },
+  "The server currently requires an IPv4 address.": {
+    "es": "El servidor requiere actualmente una dirección IPv4.",
+    "zh-Hans": "服务器目前需要 IPv4 地址。"
+  },
+  "The server did not respond through Xray. Check the profile settings.": {
+    "es": "El servidor no respondió a través de Xray. Compruebe los ajustes del perfil.",
+    "zh-Hans": "服务器未通过 Xray 响应。请检查配置设置。"
+  },
+  "The server did not respond.": {
+    "es": "El servidor no respondió.",
+    "zh-Hans": "服务器未响应。"
+  },
+  "The server test exceeded 12 seconds.": {
+    "es": "La prueba del servidor superó los 12 segundos.",
+    "zh-Hans": "服务器测试超过了 12 秒。"
+  },
+  "The server timed out. Try again.": {
+    "es": "El servidor agotó el tiempo de espera. Vuelva a intentarlo.",
+    "zh-Hans": "服务器响应超时。请重试。"
+  },
+  "The subscription contains no servers.": {
+    "es": "La suscripción no contiene servidores.",
+    "zh-Hans": "订阅中没有服务器。"
+  },
+  "The subscription exceeds 2 MB.": {
+    "es": "La suscripción supera los 2 MB.",
+    "zh-Hans": "订阅超过 2 MB。"
+  },
+  "The subscription redirects the request. Paste the final HTTPS URL.": {
+    "es": "La suscripción redirige la solicitud. Pegue el enlace HTTPS final.",
+    "zh-Hans": "订阅会重定向请求。请粘贴最终的 HTTPS 链接。"
+  },
+  "The tray is unavailable. Select Exit in Settings.": {
+    "es": "La bandeja no está disponible. Seleccione Salir en Ajustes.",
+    "zh-Hans": "系统托盘不可用。请在设置中选择“退出”。"
+  },
+  "The TUN adapter address did not become available.": {
+    "es": "La dirección del adaptador TUN no quedó disponible.",
+    "zh-Hans": "TUN 适配器地址未能变为可用状态。"
+  },
+  "The TUN adapter address is already in use.": {
+    "es": "La dirección del adaptador TUN ya está en uso.",
+    "zh-Hans": "TUN 适配器地址已被占用。"
+  },
+  "The URL must include an address, port and credentials.": {
+    "es": "El enlace debe incluir dirección, puerto y credenciales.",
+    "zh-Hans": "链接必须包含地址、端口和认证信息。"
+  },
+  "The verification route is outside the tunnel.": {
+    "es": "La ruta de comprobación pasa fuera del túnel.",
+    "zh-Hans": "验证路由位于隧道之外。"
+  },
+  "This preview supports TLS and plain transport; REALITY is not implemented yet.": {
+    "es": "Esta versión preliminar admite TLS y transporte sin cifrar; REALITY aún no está implementado.",
+    "zh-Hans": "此预览版本支持 TLS 和普通传输；尚未实现 REALITY。"
+  },
+  "This profile disables TLS verification. Use a server certificate with a valid SNI to connect.": {
+    "es": "Este perfil desactiva la verificación TLS. Use un certificado del servidor con un SNI válido para conectar.",
+    "zh-Hans": "此配置禁用了 TLS 验证。请使用具有有效 SNI 的服务器证书进行连接。"
+  },
+  "This profile's transport is not supported yet.": {
+    "es": "El transporte de este perfil aún no está disponible.",
+    "zh-Hans": "尚不支持此配置的传输方式。"
+  },
+  "Too many network operations.": {
+    "es": "Demasiadas operaciones de red.",
+    "zh-Hans": "网络操作过多。"
+  },
+  "Unknown network module operation.": {
+    "es": "Operación del módulo de red desconocida.",
+    "zh-Hans": "未知的网络模块操作。"
+  },
+  "VLESS, VMess, Trojan, Shadowsocks and Hysteria 2 are supported.": {
+    "es": "Se admiten VLESS, VMess, Trojan, Shadowsocks y Hysteria 2.",
+    "zh-Hans": "支持 VLESS、VMess、Trojan、Shadowsocks 和 Hysteria 2。"
+  },
+  "VPN permission was not granted.": {
+    "es": "No se concedió el permiso de VPN.",
+    "zh-Hans": "未授予 VPN 权限。"
+  },
+  "VPN server certificate verification failed. Check the SNI and certificate.": {
+    "es": "Falló la verificación del certificado del servidor VPN. Compruebe el SNI y el certificado.",
+    "zh-Hans": "VPN 服务器证书验证失败。请检查 SNI 和证书。"
+  },
+  "Windows configuration failed at stage ": {
+    "es": "La configuración de Windows falló en la etapa ",
+    "zh-Hans": "Windows 配置失败，阶段："
+  },
+  "Windows did not become ready before the network module timed out.": {
+    "es": "Windows no quedó listo antes de que el módulo de red agotara el tiempo de espera.",
+    "zh-Hans": "Windows 未能在网络模块超时前就绪。"
+  },
+  "Windows network module failure.": {
+    "es": "Fallo del módulo de red de Windows.",
+    "zh-Hans": "Windows 网络模块发生故障。"
+  },
+  "Xray could not open the local probe port. Retry the test.": {
+    "es": "Xray no pudo abrir el puerto local de prueba. Repita la prueba.",
+    "zh-Hans": "Xray 无法打开本地测试端口。请重试测试。"
+  },
+  "Xray exited.": {
+    "es": "Xray se cerró.",
+    "zh-Hans": "Xray 已退出。"
+  },
+  "Xray rejected the profile configuration. Routes were not changed.": {
+    "es": "Xray rechazó la configuración del perfil. Las rutas no se modificaron.",
+    "zh-Hans": "Xray 拒绝了该配置。路由未被更改。"
+  },
+  "DNS for the selected domain did not become available.": {
+    "es": "El DNS del dominio seleccionado no quedó disponible.",
+    "zh-Hans": "所选域名的 DNS 未能变为可用状态。"
+  },
+  "The release has no Windows installer or SHA-256 file.": {
+    "es": "La versión no incluye el instalador de Windows o su archivo SHA-256.",
+    "zh-Hans": "该版本缺少 Windows 安装程序或 SHA-256 文件。"
+  },
+  "Add at least one domain for the selected-only VPN mode.": {
+    "es": "Añada al menos un dominio para el modo de VPN solo para elementos seleccionados.",
+    "zh-Hans": "仅所选项目使用 VPN 模式需要至少添加一个域名。"
+  },
+  "The downloaded installer's checksum does not match.": {
+    "es": "La suma de verificación del instalador descargado no coincide.",
+    "zh-Hans": "下载的安装程序校验和不匹配。"
+  },
+  "Import failed: the configuration exceeds 2 MB.": {
+    "es": "No se pudo importar: la configuración supera los 2 MB.",
+    "zh-Hans": "导入失败：配置超过 2 MB。"
+  },
+  "Import failed: the server timed out.": {
+    "es": "No se pudo importar: el servidor no respondió a tiempo.",
+    "zh-Hans": "导入失败：服务器响应超时。"
+  },
+  "Import failed. Check the subscription URL and availability.": {
+    "es": "No se pudo importar. Compruebe la URL y la disponibilidad de la suscripción.",
+    "zh-Hans": "导入失败。请检查订阅地址及其是否可用。"
+  },
+  "Could not disconnect the VPN; the profile was not deleted.": {
+    "es": "No se pudo desconectar la VPN; el perfil no se eliminó.",
+    "zh-Hans": "无法断开 VPN；配置未被删除。"
+  },
+  "Could not switch servers. The previous connection was closed; select a server and reconnect.": {
+    "es": "No se pudo cambiar de servidor. La conexión anterior se cerró; seleccione un servidor y vuelva a conectarse.",
+    "zh-Hans": "无法切换服务器。之前的连接已关闭；请选择服务器并重新连接。"
+  },
+  "Could not switch servers. The VPN is disconnected; select a profile and reconnect.": {
+    "es": "No se pudo cambiar de servidor. La VPN está desconectada; seleccione un perfil y vuelva a conectarse.",
+    "zh-Hans": "无法切换服务器。VPN 已断开；请选择配置并重新连接。"
+  },
+  "Could not resolve the selected domains. Check their spelling and your internet connection.": {
+    "es": "No se pudieron resolver los dominios seleccionados. Compruebe su escritura y la conexión a Internet.",
+    "zh-Hans": "无法解析所选域名。请检查拼写和互联网连接。"
+  },
+  "Could not apply network settings. The VPN is disconnected; reconnect.": {
+    "es": "No se pudieron aplicar los ajustes de red. La VPN está desconectada; vuelva a conectarse.",
+    "zh-Hans": "无法应用网络设置。VPN 已断开；请重新连接。"
+  },
+  "Could not save lowest mode settings.": {
+    "es": "No se pudieron guardar los ajustes del modo lowest.",
+    "zh-Hans": "无法保存 lowest 模式设置。"
+  },
+  "Could not save the test type.": {
+    "es": "No se pudo guardar el tipo de prueba.",
+    "zh-Hans": "无法保存测试类型。"
+  },
+  "Disconnecting the VPN before deleting the last profile…": {
+    "es": "Desconectando la VPN antes de eliminar el último perfil…",
+    "zh-Hans": "正在断开 VPN，以删除最后一个配置…"
+  },
+  "Server switching was cancelled.": {
+    "es": "Se canceló el cambio de servidor.",
+    "zh-Hans": "服务器切换已取消。"
+  },
+  "Recovery failed. The kill switch remains active…": {
+    "es": "Falló la recuperación. El kill switch sigue activo…",
+    "zh-Hans": "恢复失败。Kill switch 继续阻止流量…"
+  },
+  "Applying network settings was cancelled.": {
+    "es": "Se canceló la aplicación de los ajustes de red.",
+    "zh-Hans": "应用网络设置已取消。"
+  },
+  "Applying network settings and safely reconnecting the VPN…": {
+    "es": "Aplicando los ajustes de red y reconectando la VPN de forma segura…",
+    "zh-Hans": "正在应用网络设置并安全地重新连接 VPN…"
+  },
+  "The test returned an incomplete result.": {
+    "es": "La prueba devolvió un resultado incompleto.",
+    "zh-Hans": "测试返回了不完整的结果。"
+  },
+  "Profiles are stored only on this device and protected by Android Keystore.": {
+    "es": "Los perfiles se guardan solo en este dispositivo y están protegidos por Android Keystore.",
+    "zh-Hans": "配置仅保存在此设备上，并由 Android Keystore 保护。"
+  },
+  "Lowest mode is off.": {
+    "es": "El modo lowest está desactivado.",
+    "zh-Hans": "Lowest 模式已关闭。"
+  },
+  "Connection to the network module was lost.": {
+    "es": "Se perdió la conexión con el módulo de red.",
+    "zh-Hans": "与网络模块的连接已中断。"
+  },
+  "The network adapter is disconnected. Waiting for the network to return.": {
+    "es": "El adaptador de red está desconectado. Esperando a que se restablezca la red.",
+    "zh-Hans": "网络适配器已断开。正在等待网络恢复。"
+  },
+  "The network changed. Restoring the VPN…": {
+    "es": "La red cambió. Restaurando la VPN…",
+    "zh-Hans": "网络已更改。正在恢复 VPN…"
+  },
+  "Test type changed.": {
+    "es": "Se cambió el tipo de prueba.",
+    "zh-Hans": "测试类型已更改。"
+  },
+  "Removing WFP blocking rules…": {
+    "es": "Eliminando las reglas de bloqueo de WFP…",
+    "zh-Hans": "正在删除 WFP 阻止规则…"
+  },
+  "Installing WFP blocking rules…": {
+    "es": "Instalando las reglas de bloqueo de WFP…",
+    "zh-Hans": "正在安装 WFP 阻止规则…"
+  },
+  "The SHA-256 file has an unsupported format.": {
+    "es": "El archivo SHA-256 tiene un formato no compatible.",
+    "zh-Hans": "SHA-256 文件格式不受支持。"
+  },
+  "The physical network was lost. The kill switch remains active; waiting for automatic VPN recovery.": {
+    "es": "Se perdió la red física. El kill switch sigue activo; esperando la recuperación automática de la VPN.",
+    "zh-Hans": "物理网络已断开。Kill switch 继续阻止流量；正在等待 VPN 自动恢复。"
+  },
+  "Kill switch enabled · activates on connection": {
+    "es": "Kill switch habilitado · se activa al conectar",
+    "zh-Hans": "Kill switch 已启用 · 连接时生效"
+  },
+  "The kill switch is off.": {
+    "es": "El kill switch está desactivado.",
+    "zh-Hans": "Kill switch 已关闭。"
+  },
+  "Kill switch inactive": {
+    "es": "Kill switch inactivo",
+    "zh-Hans": "Kill switch 未生效"
+  },
+  "The kill switch in bypass-selected mode currently supports domains, but not applications. Remove applications from the list or choose another mode.": {
+    "es": "El kill switch en el modo de excluir elementos seleccionados admite dominios, pero aún no aplicaciones. Elimine las aplicaciones de la lista o elija otro modo.",
+    "zh-Hans": "排除所选项目模式下的 kill switch 目前支持域名，尚不支持应用程序。请从列表中移除应用程序或选择其他模式。"
+  },
+  "Lowest: could not test servers.": {
+    "es": "Lowest: no se pudieron probar los servidores.",
+    "zh-Hans": "Lowest：无法测试服务器。"
+  },
+  "Xray or Wintun is missing. Run scripts/Install-Xray.ps1 and rebuild the application.": {
+    "es": "Falta Xray o Wintun. Ejecute scripts/Install-Xray.ps1 y vuelva a compilar la aplicación.",
+    "zh-Hans": "缺少 Xray 或 Wintun。请运行 scripts/Install-Xray.ps1 并重新构建应用程序。"
+  },
+  "Xray-core exited while the tunnel was running. Code: ": {
+    "es": "Xray-core se cerró mientras el túnel estaba activo. Código: ",
+    "zh-Hans": "Xray-core 在隧道运行期间退出。代码："
+  },
+  " is unavailable. Restoring the VPN through ": {
+    "es": " no está disponible. Restaurando la VPN a través de ",
+    "zh-Hans": " 不可用。正在通过以下服务器恢复 VPN："
+  },
+  ". Skipped entries: ": {
+    "es": ". Registros omitidos: ",
+    "zh-Hans": "。已跳过的条目："
+  },
+  "Switching the VPN to server ": {
+    "es": "Cambiando la VPN al servidor ",
+    "zh-Hans": "正在将 VPN 切换到服务器："
+  },
+  " before deletion…": {
+    "es": " antes de eliminar…",
+    "zh-Hans": "，然后删除…"
+  },
+  "Switching to server ": {
+    "es": "Cambiando al servidor ",
+    "zh-Hans": "正在切换到服务器："
+  },
+  "Servers tested: ": {
+    "es": "Servidores probados: ",
+    "zh-Hans": "已测试服务器："
+  },
+  ". Available: ": {
+    "es": ". Disponibles: ",
+    "zh-Hans": "。可用："
+  },
+  "Testing server ": {
+    "es": "Probando el servidor ",
+    "zh-Hans": "正在测试服务器："
+  },
+  "Testing servers: ": {
+    "es": "Probando servidores: ",
+    "zh-Hans": "正在测试服务器："
+  },
+  "The network changed. Reconnecting in ": {
+    "es": "La red cambió. Reconectando en ",
+    "zh-Hans": "网络已更改。将在以下时间后重新连接："
+  },
+  " s…": {
+    "es": " s…",
+    "zh-Hans": " 秒…"
+  },
+  "Unavailable servers removed: ": {
+    "es": "Servidores no disponibles eliminados: ",
+    "zh-Hans": "已删除的不可用服务器："
+  },
+  "Lowest selected server ": {
+    "es": "Lowest eligió el servidor ",
+    "zh-Hans": "Lowest 已选择服务器："
+  },
+  "Lowest: next test in ": {
+    "es": "Lowest: próxima prueba en ",
+    "zh-Hans": "Lowest：下次测试将在以下时间后进行："
+  },
+  " min.": {
+    "es": " min.",
+    "zh-Hans": " 分钟。"
+  },
+  "Could not complete the Windows DNS check.": {
+    "zh-Hans": "无法完成 Windows DNS 检查。",
+    "es": "No se pudo completar la comprobación de DNS de Windows."
+  },
+  "Could not identify the physical internet connection.": {
+    "zh-Hans": "无法确定物理互联网连接。",
+    "es": "No se pudo identificar la conexión física a Internet."
+  },
+  "Could not prepare the physical route to the VPN server.": {
+    "zh-Hans": "无法准备通往 VPN 服务器的物理路由。",
+    "es": "No se pudo preparar la ruta física al servidor VPN."
+  },
+  "Could not prepare the VPN outbound connection.": {
+    "zh-Hans": "无法准备 VPN 的出站连接。",
+    "es": "No se pudo preparar la conexión saliente de la VPN."
+  },
+  "Windows did not confirm installation of the Di-Tunnel DNS rule.": {
+    "zh-Hans": "Windows 未确认 Di-Tunnel DNS 规则已安装。",
+    "es": "Windows no confirmó la instalación de la regla DNS de Di-Tunnel."
+  },
+  "Windows is blocking traffic through Di-Tunnel (code 10013). Check the other VPN's kill switch and network protection rules. Connection cancelled; routes will be restored.": {
+    "es": "Windows bloquea el tráfico a través de Di-Tunnel (código 10013). Comprueba el kill switch de la otra VPN y las reglas de protección de red. Conexión cancelada; se restaurarán las rutas.",
+    "zh-Hans": "Windows 阻止了通过 Di-Tunnel 的流量（错误代码 10013）。请检查其他 VPN 的 kill switch 和网络防护规则。连接已取消；路由将恢复。"
+  },
+  "The control route bypasses Di-Tunnel. Connection cancelled; routes will be restored.": {
+    "es": "La ruta de comprobación no pasa por Di-Tunnel. Conexión cancelada; se restaurarán las rutas.",
+    "zh-Hans": "检测流量的路由未经过 Di-Tunnel。连接已取消；路由将恢复。"
+  }
+}

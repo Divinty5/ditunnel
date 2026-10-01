@@ -8,6 +8,7 @@
     <EmbeddedResource Include="Translations.json" />
     <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
     <AvaloniaResource Include="Assets\Flags\*.png" />
+    <EmbeddedResource Include="Translations.extra.json" />
     <AvaloniaResource Include="Assets\world-map.svg" />
     <AvaloniaResource Include="Assets\world-map-lights-*.svg" />
     <AvaloniaResource Include="Assets\world-map-light-*.svg" />

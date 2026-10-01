@@ -115,14 +115,23 @@ public static class Dialogs
             var back = AsyncButton("← Назад", GoBackAsync);
             var status = Label("");
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
-            panel.Children.Add(Button("Язык: Русский → English", () =>
+            panel.Children.Add(Label("Язык"));
+            var language = new ComboBox
             {
+                ItemsSource = L.Languages.Select(item => item.Name).ToArray(),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                SelectedIndex = L.Languages.ToList().FindIndex(item => item.Code == UserSettings.Current.Language)
+            };
+            language.SelectionChanged += (_, _) =>
+            {
+                if (language.SelectedIndex < 0 || L.Languages[language.SelectedIndex].Code == UserSettings.Current.Language) return;
                 saveSplitRules?.Invoke();
-                UserSettings.Current.Language = UserSettings.Current.Language == "ru" ? "en" : "ru";
+                UserSettings.Current.Language = L.Languages[language.SelectedIndex].Code;
                 // Updating Android's application locale recreates the Activity on API 33+.
                 // The Avalonia UI has its own live translations, so refresh those in place.
                 Save(); L.Apply(); vm.RefreshLanguage(); Build();
-            }));
+            };
+            panel.Children.Add(language);
             var theme = new ComboBox { ItemsSource = new[] { L.T("Системная"), L.T("Тёмная"), L.T("Светлая") }, HorizontalAlignment = HorizontalAlignment.Stretch,
                 SelectedIndex = Array.IndexOf(new[] { "system", "dark", "light" }, UserSettings.Current.Theme) };
             theme.SelectionChanged += (_, _) => { if (theme.SelectedIndex < 0) return; UserSettings.Current.Theme = new[] { "system", "dark", "light" }[theme.SelectedIndex]; UserSettings.Current.ApplyTheme(); Save(); };
