@@ -7,7 +7,7 @@
     <ApplicationId>com.divintyinteractive.ditunnel</ApplicationId>
     <ApplicationTitle>Di-Tunnel</ApplicationTitle>
     <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
-    <ApplicationVersion>50005</ApplicationVersion>
+    <ApplicationVersion>50006</ApplicationVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <AndroidStripNativeLibraries>true</AndroidStripNativeLibraries>

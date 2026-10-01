@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using DiTunnel.App.ViewModels;
 
@@ -16,8 +18,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ActualThemeVariantChanged += (_, _) => UpdateTitleBarTheme();
         Opened += async (_, _) =>
         {
+            UpdateTitleBarTheme();
             if (ready) return;
             var saved = UserSettings.Current.Window;
             var screen = saved is null ? Screens.Primary : Screens.ScreenFromPoint(new PixelPoint(saved.X, saved.Y)) ?? Screens.Primary;
@@ -53,6 +57,21 @@ public partial class MainWindow : Window
         Closed += (_, _) => { trayTimer.Stop(); tray?.Dispose(); L.Changed -= LanguageChanged; };
         L.Changed += LanguageChanged;
     }
+    private void UpdateTitleBarTheme()
+    {
+        // Avalonia themes the native caption on Windows 11 only. Windows 10
+        // supports the same DWM attribute on the builds required by this app.
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)
+            || OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero) return;
+        const int useImmersiveDarkMode = 20;
+        var dark = ActualThemeVariant == ThemeVariant.Dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(handle, useImmersiveDarkMode, ref dark, sizeof(int));
+    }
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+
     private void LanguageChanged()
     {
         if (DataContext is MainViewModel vm) vm.RefreshLanguage();

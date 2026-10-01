@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([switch]$Test)
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
@@ -8,8 +8,31 @@ $go = Join-Path $toolRoot "$($manifest.goVersion)\go\bin\go.exe"
 if (-not (Test-Path -LiteralPath $go)) {
     New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
     $archive = Join-Path $toolRoot $manifest.goArchive
-    if (-not (Test-Path -LiteralPath $archive)) { Invoke-WebRequest -Uri $manifest.goUrl -OutFile $archive }
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.goSha256) { throw 'Go archive checksum mismatch.' }
+    $expectedHash = $manifest.goSha256.ToLowerInvariant()
+    $archiveValid = $false
+    if (Test-Path -LiteralPath $archive -PathType Leaf) {
+        $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        $archiveValid = $actualHash -eq $expectedHash
+        if (-not $archiveValid) {
+            Write-Warning "Сохранённый архив Go повреждён. Ожидалась SHA-256 $expectedHash, получена $actualHash. Архив будет загружен повторно."
+        }
+    }
+    if (-not $archiveValid) {
+        $download = Join-Path $toolRoot ("$($manifest.goArchive)." + [guid]::NewGuid().ToString('N') + '.partial')
+        try {
+            Write-Host "Загрузка Go $($manifest.goVersion)..."
+            Invoke-WebRequest -Uri $manifest.goUrl -OutFile $download
+            $actualHash = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) {
+                throw "Контрольная сумма архива Go не совпала. Ожидалась SHA-256 $expectedHash, получена $actualHash. Повторите запуск для новой загрузки."
+            }
+            Move-Item -LiteralPath $download -Destination $archive -Force
+        } finally {
+            if (Test-Path -LiteralPath $download -PathType Leaf) {
+                Remove-Item -LiteralPath $download -Force
+            }
+        }
+    }
     Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $toolRoot $manifest.goVersion) -Force
 }
 $env:GOTOOLCHAIN = 'local'
