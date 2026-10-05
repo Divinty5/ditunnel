@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DiTunnel.App.Tests" />
     <AssemblyMetadata Include="WindowsVersion" Value="$(WindowsVersion)" />
     <AssemblyMetadata Include="AndroidVersion" Value="$(AndroidVersion)" />
     <EmbeddedResource Include="Translations.json" />

@@ -51,7 +51,9 @@ public partial class MainView : UserControl
         try
         {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-            var text = clipboard is null ? null : await clipboard.TryGetTextAsync();
+            var text = App.ReadClipboardTextAsync is { } readNative
+                ? await readNative()
+                : clipboard is null ? null : await clipboard.TryGetTextAsync();
             if (string.IsNullOrWhiteSpace(text)) vm.ImportMessage = "В буфере обмена нет текста.";
             else
             {

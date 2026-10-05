@@ -1,4 +1,18 @@
 {
+  "Uncheck all": { "es": "Desmarcar todo", "zh-Hans": "取消全选" },
+  "Application selection cleared.": { "es": "Selección de aplicaciones borrada.", "zh-Hans": "已清除应用选择。" },
+  "Cancelling": { "es": "Cancelando", "zh-Hans": "取消中" },
+  "Windows applications (select multiple)": { "es": "Aplicaciones de Windows (selección múltiple)", "zh-Hans": "Windows 应用（可多选）" },
+  "Add an .exe file…": { "es": "Añadir un archivo .exe…", "zh-Hans": "添加 .exe 文件…" },
+  "Restore network access": { "es": "Restablecer el acceso a la red", "zh-Hans": "恢复网络访问" },
+  "VPN and kill switch disabled. Network access restored.": { "es": "VPN y kill switch desactivados. Acceso a la red restablecido.", "zh-Hans": "VPN 和 kill switch 已关闭。网络访问已恢复。" },
+  "Could not restore the network. Retry with administrator permissions.": { "es": "No se pudo restablecer la red. Reintente con permisos de administrador.", "zh-Hans": "无法恢复网络。请使用管理员权限重试。" },
+  "Kill switch is blocking internet access. Connect the VPN or restore network access in Settings.": { "es": "El kill switch bloquea el acceso a internet. Conecte la VPN o restablezca el acceso a la red en Ajustes.", "zh-Hans": "Kill switch 正在阻止互联网访问。请连接 VPN 或在设置中恢复网络访问。" },
+  "For Only selected through VPN, add at least one domain or application.": { "es": "Para Solo seleccionados por VPN, añada al menos un dominio o aplicación.", "zh-Hans": "使用“仅选定项通过 VPN”时，请至少添加一个域名或应用。" },
+  "The AmneziaWG profile's DNS servers cannot be reached using its configured IP address families.": {
+    "es": "No se puede acceder a los servidores DNS del perfil AmneziaWG mediante sus familias de direcciones IP configuradas.",
+    "zh-Hans": "无法通过 AmneziaWG 配置中设置的 IP 地址族访问其 DNS 服务器。"
+  },
   "Language": {
     "es": "Idioma",
     "zh-Hans": "语言"
@@ -573,7 +587,7 @@
   },
   "Connection lost. Attempt ": {
     "es": "Conexión perdida. Intento ",
-    "zh-Hans": "连接已断开。尝试次数："
+    "zh-Hans": "连接已断开。第 "
   },
   "Creating the TUN adapter (up to 20 seconds)…": {
     "es": "Creando el adaptador TUN (hasta 20 segundos)…",
@@ -1569,7 +1583,7 @@
   },
   " s…": {
     "es": " s…",
-    "zh-Hans": " 秒…"
+    "zh-Hans": " 秒后重试…"
   },
   "Unavailable servers removed: ": {
     "es": "Servidores no disponibles eliminados: ",
@@ -1614,5 +1628,429 @@
   "The control route bypasses Di-Tunnel. Connection cancelled; routes will be restored.": {
     "es": "La ruta de comprobación no pasa por Di-Tunnel. Conexión cancelada; se restaurarán las rutas.",
     "zh-Hans": "检测流量的路由未经过 Di-Tunnel。连接已取消；路由将恢复。"
+  },
+  "Expected a list of releases.": {
+    "es": "Se esperaba una lista de versiones.",
+    "zh-Hans": "应返回版本列表。"
+  },
+  "The release is missing the APK or its SHA-256 checksum.": {
+    "es": "La versión no incluye el APK o su suma SHA-256.",
+    "zh-Hans": "此版本缺少 APK 或其 SHA-256 校验值。"
+  },
+  "Point the camera at the QR code": {
+    "es": "Apunta la cámara al código QR",
+    "zh-Hans": "将摄像头对准二维码"
+  },
+  "The Android window is unavailable.": {
+    "es": "La ventana de Android no está disponible.",
+    "zh-Hans": "Android 窗口不可用。"
+  },
+  "VPN controls": {
+    "es": "Control de VPN",
+    "zh-Hans": "VPN 控制"
+  },
+  "Changing the VPN connection…": {
+    "es": "Cambiando la conexión VPN…",
+    "zh-Hans": "正在更改 VPN 连接…"
+  },
+  "The Android activity is currently unavailable.": {
+    "es": "La actividad de Android no está disponible en este momento.",
+    "zh-Hans": "Android 活动当前不可用。"
+  },
+  "Could not change the VPN connection.": {
+    "es": "No se pudo cambiar la conexión VPN.",
+    "zh-Hans": "无法更改 VPN 连接。"
+  },
+  "Connecting…": {
+    "es": "Conectando…",
+    "zh-Hans": "正在连接…"
+  },
+  "Subscription servers": {
+    "es": "Servidores de la suscripción",
+    "zh-Hans": "订阅服务器"
+  },
+  "The Android application manager is unavailable.": {
+    "es": "El gestor de aplicaciones de Android no está disponible.",
+    "zh-Hans": "Android 应用管理器不可用。"
+  },
+  "Android did not provide private storage excluded from backups.": {
+    "es": "Android no proporcionó almacenamiento privado excluido de las copias de seguridad.",
+    "zh-Hans": "Android 未提供不参与备份的私有存储空间。"
+  },
+  "Android does not support AES-GCM.": {
+    "es": "Android no admite AES-GCM.",
+    "zh-Hans": "Android 不支持 AES-GCM。"
+  },
+  "Android Keystore did not generate a nonce.": {
+    "es": "Android Keystore no generó un nonce.",
+    "zh-Hans": "Android Keystore 未生成随机数。"
+  },
+  "Android Keystore could not encrypt the profiles.": {
+    "es": "Android Keystore no pudo cifrar los perfiles.",
+    "zh-Hans": "Android Keystore 无法加密配置。"
+  },
+  "Android Keystore returned an invalid nonce.": {
+    "es": "Android Keystore devolvió un nonce no válido.",
+    "zh-Hans": "Android Keystore 返回了无效的随机数。"
+  },
+  "The profiles file has an unknown format.": {
+    "es": "El archivo de perfiles tiene un formato desconocido.",
+    "zh-Hans": "配置文件格式未知。"
+  },
+  "The profiles file is corrupted.": {
+    "es": "El archivo de perfiles está dañado.",
+    "zh-Hans": "配置文件已损坏。"
+  },
+  "Android Keystore could not decrypt the profiles.": {
+    "es": "Android Keystore no pudo descifrar los perfiles.",
+    "zh-Hans": "Android Keystore 无法解密配置。"
+  },
+  "Android Keystore is unavailable.": {
+    "es": "Android Keystore no está disponible.",
+    "zh-Hans": "Android Keystore 不可用。"
+  },
+  "Android Keystore does not support generating AES keys.": {
+    "es": "Android Keystore no admite la generación de claves AES.",
+    "zh-Hans": "Android Keystore 不支持生成 AES 密钥。"
+  },
+  "Android Keystore did not create a key for the profiles.": {
+    "es": "Android Keystore no creó una clave para los perfiles.",
+    "zh-Hans": "Android Keystore 未创建配置密钥。"
+  },
+  "The Android GeoIP database is unavailable.": {
+    "es": "La base de datos GeoIP de Android no está disponible.",
+    "zh-Hans": "Android GeoIP 数据库不可用。"
+  },
+  "Unavailable": {
+    "es": "No disponible",
+    "zh-Hans": "不可用"
+  },
+  "The Android network service is unavailable.": {
+    "es": "El servicio de red de Android no está disponible.",
+    "zh-Hans": "Android 网络服务不可用。"
+  },
+  "No physical network is available.": {
+    "es": "No hay ninguna red física disponible.",
+    "zh-Hans": "没有可用的物理网络。"
+  },
+  "Android did not create a network socket.": {
+    "es": "Android no creó un socket de red.",
+    "zh-Hans": "Android 未创建网络套接字。"
+  },
+  "Could not resolve the VPN server address.": {
+    "es": "No se pudo resolver la dirección del servidor VPN.",
+    "zh-Hans": "无法解析 VPN 服务器地址。"
+  },
+  "The Android application context is unavailable.": {
+    "es": "El contexto de la aplicación Android no está disponible.",
+    "zh-Hans": "Android 应用上下文不可用。"
+  },
+  "The VPN is already connecting or connected.": {
+    "es": "La VPN ya está conectándose o conectada.",
+    "zh-Hans": "VPN 正在连接或已连接。"
+  },
+  "Xray could not start the VPN.": {
+    "es": "Xray no pudo iniciar la VPN.",
+    "zh-Hans": "Xray 无法启动 VPN。"
+  },
+  "Could not start the Android VPN.": {
+    "es": "No se pudo iniciar la VPN en Android.",
+    "zh-Hans": "无法启动 Android VPN。"
+  },
+  "Android did not create a network monitoring request.": {
+    "es": "Android no creó una solicitud de supervisión de red.",
+    "zh-Hans": "Android 未创建网络监控请求。"
+  },
+  " of 10 in ": {
+    "es": " de 10 en ",
+    "zh-Hans": " 次尝试（最多 10 次），将在 "
+  },
+  "The Android VPN state storage is unavailable.": {
+    "es": "El almacenamiento del estado de la VPN de Android no está disponible.",
+    "zh-Hans": "Android VPN 状态存储不可用。"
+  },
+  "Server unavailable": {
+    "es": "Servidor no disponible",
+    "zh-Hans": "服务器不可用"
+  },
+  "The SOCKS server rejected the connection.": {
+    "es": "El servidor SOCKS rechazó la conexión.",
+    "zh-Hans": "SOCKS 服务器拒绝了连接。"
+  },
+  "SOCKS connection failed": {
+    "es": "Falló la conexión SOCKS",
+    "zh-Hans": "SOCKS 连接失败"
+  },
+  "Invalid SOCKS server response.": {
+    "es": "Respuesta no válida del servidor SOCKS.",
+    "zh-Hans": "SOCKS 服务器响应无效。"
+  },
+  "The test server did not respond.": {
+    "es": "El servidor de prueba no respondió.",
+    "zh-Hans": "测试服务器没有响应。"
+  },
+  "No VPN profile was passed to the service.": {
+    "es": "No se proporcionó ningún perfil VPN al servicio.",
+    "zh-Hans": "未向服务传入 VPN 配置。"
+  },
+  "Could not resolve the VPN server IP address.": {
+    "es": "No se pudo resolver la dirección IP del servidor VPN.",
+    "zh-Hans": "无法解析 VPN 服务器的 IP 地址。"
+  },
+  "Android did not create a TUN interface.": {
+    "es": "Android no creó una interfaz TUN.",
+    "zh-Hans": "Android 未创建 TUN 接口。"
+  },
+  "AmneziaWG on Android supports split tunneling by app. For domain rules and ad blocking, select an Xray protocol or turn these settings off.": {
+    "es": "AmneziaWG en Android admite el túnel dividido por aplicación. Para usar reglas de dominios y bloqueo de anuncios, selecciona un protocolo Xray o desactiva estos ajustes.",
+    "zh-Hans": "Android 上的 AmneziaWG 支持按应用分流。如需域名规则和广告拦截，请选择 Xray 协议或关闭这些设置。"
+  },
+  "AmneziaWG could not start the tunnel. Check the profile settings.": {
+    "es": "AmneziaWG no pudo iniciar el túnel. Comprueba los ajustes del perfil.",
+    "zh-Hans": "AmneziaWG 无法启动隧道。请检查配置参数。"
+  },
+  "Android could not exclude the AmneziaWG socket from the VPN.": {
+    "es": "Android no pudo excluir el socket de AmneziaWG de la VPN.",
+    "zh-Hans": "Android 无法将 AmneziaWG 套接字排除在 VPN 之外。"
+  },
+  "AmneziaWG: the server did not complete a handshake within 18 seconds.": {
+    "es": "AmneziaWG: el servidor no completó el handshake en 18 segundos.",
+    "zh-Hans": "AmneziaWG：服务器未在 18 秒内完成握手。"
+  },
+  "AmneziaWG: test after connecting": {
+    "es": "AmneziaWG: comprobar tras conectar",
+    "zh-Hans": "AmneziaWG：连接后检测"
+  },
+  "VPN tunnel unavailable": {
+    "es": "Túnel VPN no disponible",
+    "zh-Hans": "VPN 隧道不可用"
+  },
+  "Preparing the VPN": {
+    "es": "Preparando la VPN",
+    "zh-Hans": "正在准备 VPN"
+  },
+  "Android did not create the VPN disconnect action.": {
+    "es": "Android no creó la acción para desconectar la VPN.",
+    "zh-Hans": "Android 未创建断开 VPN 的操作。"
+  },
+  "The Android application directory is unavailable.": {
+    "es": "El directorio de la aplicación Android no está disponible.",
+    "zh-Hans": "Android 应用目录不可用。"
+  },
+  "Xray asset ": {
+    "es": "Recurso de Xray ",
+    "zh-Hans": "Xray 资源 "
+  },
+  " is missing.": {
+    "es": " no está disponible.",
+    "zh-Hans": " 不存在。"
+  },
+  "Xray returned an empty configuration.": {
+    "es": "Xray devolvió una configuración vacía.",
+    "zh-Hans": "Xray 返回了空配置。"
+  },
+  "The Xray configuration is missing a TUN inbound.": {
+    "es": "La configuración de Xray no incluye una entrada TUN.",
+    "zh-Hans": "Xray 配置缺少 TUN 入站。"
+  },
+  "libXray did not return a response.": {
+    "es": "libXray no devolvió ninguna respuesta.",
+    "zh-Hans": "libXray 未返回响应。"
+  },
+  "libXray could not start the VPN.": {
+    "es": "libXray no pudo iniciar la VPN.",
+    "zh-Hans": "libXray 无法启动 VPN。"
+  },
+  "The Android notification manager is unavailable.": {
+    "es": "El gestor de notificaciones de Android no está disponible.",
+    "zh-Hans": "Android 通知管理器不可用。"
+  },
+  "VPN connection": {
+    "es": "Conexión VPN",
+    "zh-Hans": "VPN 连接"
+  },
+  "VPN status and safe disconnection of Di-Tunnel": {
+    "es": "Estado de la VPN y desconexión segura de Di-Tunnel",
+    "zh-Hans": "VPN 状态及安全断开 Di-Tunnel"
+  },
+  "Starting Android VPN for server ": {
+    "es": "Iniciando la VPN de Android para el servidor ",
+    "zh-Hans": "正在为服务器启动 Android VPN："
+  },
+  "Starting Android VPN…": {
+    "es": "Iniciando la VPN de Android…",
+    "zh-Hans": "正在启动 Android VPN…"
+  },
+  "The Android VPN tunnel is active; internet access is checked separately.": {
+    "es": "El túnel VPN de Android está activo; el acceso a Internet se comprueba por separado.",
+    "zh-Hans": "Android VPN 隧道已启用；互联网可用性将另行检测。"
+  },
+  "The endpoint must be an IP address.": {
+    "es": "El endpoint debe ser una dirección IP.",
+    "zh-Hans": "端点必须为 IP 地址。"
+  },
+  "Import failed: the AmneziaVPN link is corrupted or contains an invalid AWG configuration.": {
+    "es": "No se pudo importar: el enlace de AmneziaVPN está dañado o contiene una configuración AWG no válida.",
+    "zh-Hans": "导入失败：AmneziaVPN 链接已损坏或包含无效的 AWG 配置。"
+  },
+  "The AmneziaVPN link does not contain a ready-to-use AWG client configuration. Export an AmneziaWG connection configuration from AmneziaVPN, rather than server management or API access.": {
+    "es": "El enlace de AmneziaVPN no contiene una configuración de cliente AWG lista para usar. Exporta una configuración de conexión AmneziaWG desde AmneziaVPN, en lugar del acceso de administración del servidor o a la API.",
+    "zh-Hans": "AmneziaVPN 链接不包含可直接使用的 AWG 客户端配置。请从 AmneziaVPN 导出用于连接的 AmneziaWG 配置，而非服务器管理或 API 访问权限。"
+  },
+  "AmneziaVPN link": {
+    "es": "Enlace de AmneziaVPN",
+    "zh-Hans": "AmneziaVPN 链接"
+  },
+  "Import failed: no data provided.": {
+    "es": "No se pudo importar: no se proporcionaron datos.",
+    "zh-Hans": "导入失败：未提供数据。"
+  },
+  "Import failed: unrecognized subscription format.": {
+    "es": "No se pudo importar: formato de suscripción no reconocido.",
+    "zh-Hans": "导入失败：无法识别订阅格式。"
+  },
+  "Import failed: no supported servers found.": {
+    "es": "No se pudo importar: no se encontraron servidores compatibles.",
+    "zh-Hans": "导入失败：未找到支持的服务器。"
+  },
+  "Import failed: the JSON must contain a non-empty Xray outbounds array.": {
+    "es": "No se pudo importar: el JSON debe contener un array outbounds de Xray no vacío.",
+    "zh-Hans": "导入失败：JSON 必须包含非空的 Xray outbounds 数组。"
+  },
+  "Import failed: invalid JSON.": {
+    "es": "No se pudo importar: JSON no válido.",
+    "zh-Hans": "导入失败：JSON 无效。"
+  },
+  "Import failed: invalid VMess configuration.": {
+    "es": "No se pudo importar: configuración de VMess no válida.",
+    "zh-Hans": "导入失败：VMess 配置无效。"
+  },
+  "Import failed: subscriptions require an HTTPS link.": {
+    "es": "No se pudo importar: las suscripciones requieren un enlace HTTPS.",
+    "zh-Hans": "导入失败：订阅需要 HTTPS 链接。"
+  },
+  "Import failed: the subscription exceeds 2 MB.": {
+    "es": "No se pudo importar: la suscripción supera los 2 MB.",
+    "zh-Hans": "导入失败：订阅大小超过 2 MB。"
+  },
+  "Import failed: the redirect has no destination address.": {
+    "es": "No se pudo importar: la redirección no incluye una dirección de destino.",
+    "zh-Hans": "导入失败：重定向未包含目标地址。"
+  },
+  "Import failed: the redirect leads to an insecure address.": {
+    "es": "No se pudo importar: la redirección lleva a una dirección no segura.",
+    "zh-Hans": "导入失败：重定向指向不安全的地址。"
+  },
+  "Import failed: too many redirects.": {
+    "es": "No se pudo importar: demasiadas redirecciones.",
+    "zh-Hans": "导入失败：重定向次数过多。"
+  },
+  "Connection is supported for Hysteria 2, VLESS, VMess, Trojan and Shadowsocks. Custom JSON can currently only be stored.": {
+    "es": "Se puede conectar con Hysteria 2, VLESS, VMess, Trojan y Shadowsocks. Por ahora, el JSON personalizado solo se puede guardar.",
+    "zh-Hans": "支持 Hysteria 2、VLESS、VMess、Trojan 和 Shadowsocks 连接。自定义 JSON 目前仅支持保存。"
+  },
+  "VMess with a non-zero alterId is obsolete. A VMess AEAD configuration with aid=0 is required.": {
+    "es": "VMess con alterId distinto de cero está obsoleto. Se necesita una configuración VMess AEAD con aid=0.",
+    "zh-Hans": "非零 alterId 的 VMess 已过时。需要 aid=0 的 VMess AEAD 配置。"
+  },
+  "The profile must specify a valid server port.": {
+    "es": "El perfil debe indicar un puerto de servidor válido.",
+    "zh-Hans": "配置必须指定有效的服务器端口。"
+  },
+  "The VMess encryption method is not supported.": {
+    "es": "El método de cifrado de VMess no es compatible.",
+    "zh-Hans": "不支持此 VMess 加密方式。"
+  },
+  "The profile security type is not supported.": {
+    "es": "El tipo de seguridad del perfil no es compatible.",
+    "zh-Hans": "不支持此配置的安全类型。"
+  },
+  "REALITY requires the sni and pbk parameters.": {
+    "es": "REALITY requiere los parámetros sni y pbk.",
+    "zh-Hans": "REALITY 需要 sni 和 pbk 参数。"
+  },
+  "The VMess TCP header is not supported.": {
+    "es": "La cabecera TCP de VMess no es compatible.",
+    "zh-Hans": "不支持此 VMess TCP 头部。"
+  },
+  "AmneziaWG AllowedIPs contains no remote address for testing the handshake.": {
+    "es": "AllowedIPs de AmneziaWG no contiene ninguna dirección remota para comprobar el handshake.",
+    "zh-Hans": "AmneziaWG 的 AllowedIPs 中没有可用于检测握手的远程地址。"
+  },
+  "Cancel connection": {
+    "es": "Cancelar conexión",
+    "zh-Hans": "取消连接"
+  },
+  "Could not disconnect the VPN; try disconnecting again.": {
+    "es": "No se pudo desconectar la VPN; inténtelo de nuevo.",
+    "zh-Hans": "无法断开 VPN；请重试。"
+  },
+  "Android VPN did not confirm startup within 30 seconds.": {
+    "es": "Android VPN no confirmó el inicio en 30 segundos.",
+    "zh-Hans": "Android VPN 未在 30 秒内确认启动。"
+  },
+  "AmneziaWG: Android could not protect the UDP socket from VPN routing.": {
+    "es": "AmneziaWG: Android no pudo excluir el socket UDP del enrutamiento VPN.",
+    "zh-Hans": "AmneziaWG：Android 无法将 UDP 套接字排除在 VPN 路由之外。"
+  },
+  "AmneziaWG: the previous runtime is still running.": {
+    "es": "AmneziaWG: el núcleo anterior sigue en ejecución.",
+    "zh-Hans": "AmneziaWG：之前的内核仍在运行。"
+  },
+  "AmneziaWG: invalid configuration parameters.": {
+    "es": "AmneziaWG: parámetros de configuración incorrectos.",
+    "zh-Hans": "AmneziaWG：配置参数无效。"
+  },
+  "AmneziaWG: could not create the virtual network stack.": {
+    "es": "AmneziaWG: no se pudo crear la pila de red virtual.",
+    "zh-Hans": "AmneziaWG：无法创建虚拟网络栈。"
+  },
+  "AmneziaWG: could not open the protected UDP transport.": {
+    "es": "AmneziaWG: no se pudo abrir el transporte UDP protegido.",
+    "zh-Hans": "AmneziaWG：无法打开受保护的 UDP 传输。"
+  },
+  "AmneziaWG: could not start the local SOCKS proxy.": {
+    "es": "AmneziaWG: no se pudo iniciar el proxy SOCKS local.",
+    "zh-Hans": "AmneziaWG：无法启动本地 SOCKS 代理。"
+  },
+  "AmneziaWG: the protected UDP socket is unavailable.": {
+    "es": "AmneziaWG: el socket UDP protegido no está disponible.",
+    "zh-Hans": "AmneziaWG：受保护的 UDP 套接字不可用。"
+  },
+  "Could not start the AmneziaWG helper process.": {
+    "es": "No se pudo iniciar el proceso auxiliar de AmneziaWG.",
+    "zh-Hans": "无法启动 AmneziaWG 辅助进程。"
+  },
+  "Could not pass settings to the AmneziaWG helper process.": {
+    "es": "No se pudieron enviar los ajustes al proceso auxiliar de AmneziaWG.",
+    "zh-Hans": "无法向 AmneziaWG 辅助进程发送设置。"
+  },
+  "The AmneziaWG helper process exited.": {
+    "es": "El proceso auxiliar de AmneziaWG se cerró.",
+    "zh-Hans": "AmneziaWG 辅助进程已退出。"
+  },
+  "AmneziaWG must run in a separate helper process.": {
+    "es": "AmneziaWG debe ejecutarse en un proceso auxiliar independiente.",
+    "zh-Hans": "AmneziaWG 必须在单独的辅助进程中运行。"
+  },
+  "AmneziaWG: grant VPN permission first": {
+    "es": "AmneziaWG: conceda primero el permiso de VPN",
+    "zh-Hans": "AmneziaWG：请先授予 VPN 权限"
+  },
+  "Cancelling the connection…": {
+    "es": "Cancelando la conexión…",
+    "zh-Hans": "正在取消连接…"
+  },
+  "The AmneziaWG profile's DNS servers are not reachable through Address and AllowedIPs.": {
+    "es": "No se puede acceder a los servidores DNS del perfil AmneziaWG mediante Address y AllowedIPs.",
+    "zh-Hans": "无法通过 Address 和 AllowedIPs 访问 AmneziaWG 配置的 DNS 服务器。"
+  },
+  "Connect the VPN manually first to save a profile for Always-on VPN.": {
+    "es": "Primero conecte la VPN manualmente para guardar un perfil para la VPN siempre activa.",
+    "zh-Hans": "请先手动连接 VPN，以保存始终开启的 VPN 所需的配置。"
+  },
+  "AmneziaWG requires its own runtime. Use the AmneziaWG engine to connect and test the profile.": {
+    "es": "AmneziaWG requiere su propio motor. Utilice el motor AmneziaWG para conectarse y comprobar el perfil.",
+    "zh-Hans": "AmneziaWG 需要独立内核。请使用 AmneziaWG 引擎连接和测试配置。"
   }
 }

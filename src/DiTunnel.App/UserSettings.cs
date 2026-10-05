@@ -26,18 +26,28 @@ public sealed class UserSettings
     public List<string> BypassSplitTunnelProcesses { get; set; } = [];
     public List<string> ProxySelectedSplitTunnelDomains { get; set; } = [];
     public List<string> ProxySelectedSplitTunnelProcesses { get; set; } = [];
-    // On Android these values are package names. Windows keeps them serialized for a future
-    // process-aware routing implementation, but does not apply them yet.
+    // Android uses package names; Windows uses executable paths for Xray process routing.
     public SplitTunnelPolicy GetSplitTunnelPolicy()
     {
         var domains = SplitTunnelMode == SplitTunnelMode.ProxySelected ? ProxySelectedSplitTunnelDomains : BypassSplitTunnelDomains;
         var processes = SplitTunnelMode == SplitTunnelMode.ProxySelected ? ProxySelectedSplitTunnelProcesses : BypassSplitTunnelProcesses;
-        return new(SplitTunnelMode, domains, OperatingSystem.IsAndroid() ? processes : []);
+        return new(SplitTunnelMode, domains.ToArray(), processes.ToArray());
     }
 
     public (List<string> Domains, List<string> Processes) GetSplitTunnelRules(SplitTunnelMode mode) => mode == SplitTunnelMode.ProxySelected
         ? (ProxySelectedSplitTunnelDomains, ProxySelectedSplitTunnelProcesses)
         : (BypassSplitTunnelDomains, BypassSplitTunnelProcesses);
+
+    public string NetworkSettingsFingerprint()
+    {
+        static string Canonical(IEnumerable<string> values) => string.Join('\n', values
+            .Select(value => value.Trim().ToLowerInvariant()).Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal));
+        var protection = string.Join('|', KillSwitchEnabled, AllowLocalNetwork, BlockAdsEnabled, StrictAdBlockingEnabled, (int)SplitTunnelMode);
+        var rules = GetSplitTunnelPolicy();
+        return SplitTunnelMode == SplitTunnelMode.ProxyAll ? protection
+            : string.Join('|', protection, Canonical(rules.Domains), Canonical(rules.Processes));
+    }
 
     public void SetSplitTunnelRules(SplitTunnelMode mode, IEnumerable<string> domains, IEnumerable<string> processes)
     {

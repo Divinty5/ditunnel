@@ -106,19 +106,91 @@ public sealed class SettingsAndRefreshTests
         finally { Directory.Delete(dir, true); }
     }
 
+    [Theory]
+    [InlineData(SplitTunnelMode.BypassSelected)]
+    [InlineData(SplitTunnelMode.ProxySelected)]
+    public void ExecutableSelectionReachesPolicyAndTriggersNetworkSettingsChange(SplitTunnelMode mode)
+    {
+        var settings = new UserSettings { SplitTunnelMode = mode };
+        settings.SetSplitTunnelRules(mode, ["example.com"], []);
+        var before = settings.NetworkSettingsFingerprint();
+        const string executable = @"C:\Users\tester\AppData\Local\Vivaldi\Application\vivaldi.exe";
+        settings.SetSplitTunnelRules(mode, ["example.com"], [executable]);
+
+        var policy = settings.GetSplitTunnelPolicy();
+        Assert.Equal(mode, policy.Mode);
+        Assert.Equal([executable], policy.Processes);
+        Assert.NotEqual(before, settings.NetworkSettingsFingerprint());
+        // A policy passed to a running operation must remain a snapshot of its settings.
+        settings.GetSplitTunnelRules(mode).Processes.Clear();
+        Assert.Equal([executable], policy.Processes);
+        Assert.Equal(before, settings.NetworkSettingsFingerprint());
+    }
+
+    [Fact] public void ChatGptAndCodexHelpersAreAutoSelectedTogether()
+    {
+        InstalledApplication[] installed =
+        [
+            new(@"C:\Program Files\WindowsApps\OpenAI.Codex_26.930.2377.0_x64__publisher\app\ChatGPT.exe", "Codex"),
+            new(@"C:\Users\tester\AppData\Local\OpenAI\Codex\bin\version\codex.exe", "Codex CLI"),
+            new(@"C:\Tools\codex.exe", "codex"),
+            new(@"C:\Program Files\nodejs\node.exe", "Node.js"),
+            new(@"C:\Windows\System32\cmd.exe", "Windows Command Processor")
+        ];
+        Assert.Equal(installed.Take(3).Select(app => app.Id), ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
+        Assert.Empty(ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
+    }
+
+    [Fact] public void InactiveRulesDoNotRestartProxyAllOrTheOtherSplitMode()
+    {
+        var settings = new UserSettings { SplitTunnelMode = SplitTunnelMode.ProxyAll };
+        var all = settings.NetworkSettingsFingerprint();
+        settings.SetSplitTunnelRules(SplitTunnelMode.BypassSelected, [], ["direct.exe"]);
+        Assert.Equal(all, settings.NetworkSettingsFingerprint());
+        settings.SplitTunnelMode = SplitTunnelMode.BypassSelected;
+        var bypass = settings.NetworkSettingsFingerprint();
+        settings.SetSplitTunnelRules(SplitTunnelMode.ProxySelected, [], ["proxy.exe"]);
+        Assert.Equal(bypass, settings.NetworkSettingsFingerprint());
+    }
+
+    [Fact] public void AutoSelectionRecognizesDesktopAndAndroidWorkAppsWithoutMatchingUnrelatedTeams()
+    {
+        InstalledApplication[] installed =
+        [
+            new(@"C:\Users\me\Programs\VK Teams\vkworkspace.exe", "VK WorkSpace"),
+            new(@"C:\Program Files\Yandex\YandexBrowser\Application\browser.exe", "Browser"),
+            new(@"C:\Apps\Saby\sbis.exe", "Saby"),
+            new(@"C:\Apps\2GIS\2gis.exe", "2Гис"),
+            new(@"C:\Apps\Microsoft Office\OUTLOOK.EXE", "Microsoft Outlook"),
+            new(@"C:\Apps\OpenCode\opencode.exe", "OpenCode"),
+            new("com.microsoft.office.outlook", "Outlook"),
+            new("com.doublegis.mobile", "2GIS"),
+            new(@"C:\Apps\Microsoft Teams\ms-teams.exe", "Microsoft Teams"),
+            new(@"C:\Apps\ChatGPT\ChatGPT.exe", "ChatGPT"),
+            new(@"C:\Apps\Claude\claude.exe", "Claude Code"),
+            new(@"C:\Apps\Telegram Desktop\Telegram.exe", "Telegram"),
+            new("com.google.android.youtube", "YouTube")
+        ];
+        Assert.Equal(installed.Take(8).Select(app => app.Id), ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
+        Assert.Equal(installed.Skip(9).Select(app => app.Id), ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
+    }
+
     [Fact] public void ApplicationAutoSelectionAddsExpectedPackagesWithoutInventingMissingOnes()
     {
         InstalledApplication[] installed =
         [
             new("com.google.android.youtube", "YouTube"),
             new("com.openai.chatgpt", "ChatGPT"),
+            new("com.vivaldi.browser", "Vivaldi Browser"),
+            new("com.vivaldi.browser.snapshot", "Vivaldi Snapshot"),
+            new("com.mobifitness", "Fitness"),
             new("ru.sberbankmobile", "СберБанк"),
             new("com.yandex.browser", "Яндекс Браузер"),
             new("com.example.notes", "Notes")
         ];
 
-        Assert.Equal(["com.google.android.youtube", "com.openai.chatgpt"], ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
-        Assert.Equal(["ru.sberbankmobile", "com.yandex.browser"], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
+        Assert.Equal(["com.google.android.youtube", "com.openai.chatgpt", "com.vivaldi.browser", "com.vivaldi.browser.snapshot"], ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
+        Assert.Equal(["com.mobifitness", "ru.sberbankmobile", "com.yandex.browser"], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
     }
     [Fact] public void BypassAutoSelectionAddsRussianSocialAppsAndRuStore()
     {

@@ -45,7 +45,7 @@ public static class Dialogs
         scroll.Bind(ScrollViewer.BackgroundProperty, scroll.GetResourceObservable("PageBrush"));
         return scroll;
     }
-    private static Control Page(string title, Button back, Control content)
+    private static Control Page(string title, Button back, Control content, Control? operations = null)
     {
         var heading = new TextBlock
         {
@@ -58,13 +58,14 @@ public static class Dialogs
         headerGrid.Children.Add(back); headerGrid.Children.Add(heading); Grid.SetColumn(heading, 1);
         var header = new Border { Padding = new Thickness(16, 9), Child = headerGrid };
         header.Bind(Border.BackgroundProperty, header.GetResourceObservable("PageBrush"));
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        var root = new Grid { RowDefinitions = new RowDefinitions(operations is null ? "Auto,*" : "Auto,Auto,*") };
         void UpdateCompactTitle() => heading.Text = title == "Подписки и профили" && root.Bounds.Width < 560
             ? L.T("Подписки") : L.T(title);
         root.SizeChanged += (_, _) => UpdateCompactTitle();
         root.Bind(Grid.BackgroundProperty, root.GetResourceObservable("PageBrush"));
         root.Children.Add(header);
-        var scroll = Scroll(content); root.Children.Add(scroll); Grid.SetRow(scroll, 1);
+        if (operations is not null) { root.Children.Add(operations); Grid.SetRow(operations, 1); }
+        var scroll = Scroll(content); root.Children.Add(scroll); Grid.SetRow(scroll, operations is null ? 1 : 2);
         return root;
     }
     private static Window Window(Window owner, string title, double height = 560) => new()
@@ -78,7 +79,7 @@ public static class Dialogs
     {
         var originalContent = owner.Content;
         IReadOnlyList<InstalledApplication> installedApplications = [];
-        var applicationsLoaded = !OperatingSystem.IsAndroid();
+        var applicationsLoaded = !(OperatingSystem.IsAndroid() || OperatingSystem.IsWindows());
         var draftDomains = new Dictionary<SplitTunnelMode, List<string>>();
         var draftApplications = new Dictionary<SplitTunnelMode, HashSet<string>>();
         foreach (var mode in new[] { SplitTunnelMode.BypassSelected, SplitTunnelMode.ProxySelected })
@@ -87,7 +88,7 @@ public static class Dialogs
             draftDomains[mode] = [.. rules.Domains];
             draftApplications[mode] = rules.Processes.ToHashSet(StringComparer.Ordinal);
         }
-        var originalNetworkSettings = NetworkSettingsFingerprint();
+        var originalNetworkSettings = UserSettings.Current.NetworkSettingsFingerprint();
         var networkSettingsChangedExplicitly = false;
         var isClosing = false;
         Action? saveSplitRules = null;
@@ -96,7 +97,7 @@ public static class Dialogs
             if (isClosing) return;
             isClosing = true;
             saveSplitRules?.Invoke();
-            var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != NetworkSettingsFingerprint();
+            var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != UserSettings.Current.NetworkSettingsFingerprint();
             owner.Content = originalContent;
             AppBackNavigation.Clear();
             if (owner is Window window) window.Title = "Di-Tunnel";
@@ -114,6 +115,7 @@ public static class Dialogs
             var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Center };
             var back = AsyncButton("← Назад", GoBackAsync);
             var status = Label("");
+            CheckBox? killSwitchControl = null;
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
             panel.Children.Add(Label("Язык"));
             var language = new ComboBox
@@ -171,7 +173,7 @@ public static class Dialogs
             };
             panel.Children.Add(strictAdBlocking);
             panel.Children.Add(Label("Дополнительно блокируются общие домены, через которые мобильные рекламные SDK могут загружать объявления. Некоторые сервисы Яндекса могут перестать работать до отключения строгого режима и переподключения VPN."));
-            var killSwitch = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled };
+            var killSwitch = killSwitchControl = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled };
             var allowLan = new CheckBox { Content = L.T("Разрешать локальную сеть при активном kill switch"), IsChecked = UserSettings.Current.AllowLocalNetwork, IsEnabled = UserSettings.Current.KillSwitchEnabled };
             void SaveProtection()
             {
@@ -203,9 +205,9 @@ public static class Dialogs
             Action rebuildApplicationRows = () => { };
             splitRules.Children.Add(Label("Домены и IP-адреса"));
             splitRules.Children.Add(domains);
-            if (OperatingSystem.IsAndroid())
+            if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows())
             {
-                splitRules.Children.Add(Label("Приложения Android (можно выбрать несколько)"));
+                splitRules.Children.Add(Label(OperatingSystem.IsAndroid() ? "Приложения Android (можно выбрать несколько)" : "Приложения Windows (можно выбрать несколько)"));
                 var search = new TextBox { PlaceholderText = L.T("Поиск приложений"), HorizontalAlignment = HorizontalAlignment.Stretch };
                 splitRules.Children.Add(search);
                 var autoSelectStatus = Label("");
@@ -220,6 +222,14 @@ public static class Dialogs
                 autoSelect.Margin = new Thickness(0, 0, 8, 4);
                 var autoSelectRow = new WrapPanel();
                 autoSelectRow.Children.Add(autoSelect);
+                var clearSelection = Button("Снять все галочки", () =>
+                {
+                    selectedApplications.Clear();
+                    rebuildApplicationRows();
+                    autoSelectStatus.Text = L.T("Выбор приложений очищен.");
+                });
+                clearSelection.Margin = new Thickness(0, 0, 8, 4);
+                autoSelectRow.Children.Add(clearSelection);
                 autoSelectRow.Children.Add(autoSelectStatus);
                 splitRules.Children.Add(autoSelectRow);
                 var applicationRows = new StackPanel { Spacing = 2 };
@@ -247,6 +257,21 @@ public static class Dialogs
                     }
                 }
                 rebuildApplicationRows = BuildApplicationRows;
+                if (OperatingSystem.IsWindows())
+                    splitRules.Children.Add(AsyncButton("Добавить файл .exe…", async () =>
+                    {
+                        var files = await TopLevel.GetTopLevel(owner)!.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                        {
+                            Title = L.T("Добавить файл .exe…"), AllowMultiple = true,
+                            FileTypeFilter = [new FilePickerFileType("Windows") { Patterns = ["*.exe"] }]
+                        });
+                        var additions = files.Select(file => file.TryGetLocalPath()).OfType<string>()
+                            .Where(path => path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
+                            .Select(path => new InstalledApplication(path, Path.GetFileNameWithoutExtension(path))).ToArray();
+                        installedApplications = installedApplications.Concat(additions).DistinctBy(app => app.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+                        selectedApplications.UnionWith(additions.Select(app => app.Id));
+                        rebuildApplicationRows();
+                    }));
                 search.TextChanged += (_, _) => rebuildApplicationRows();
                 rebuildApplicationRows();
                 splitRules.Children.Add(new ScrollViewer
@@ -313,6 +338,17 @@ public static class Dialogs
             {
                 panel.Children.Add(Label("Диагностика"));
                 panel.Children.Add(serviceActions);
+                if (vm.CanRestoreNetwork)
+                    panel.Children.Add(AsyncButton("Восстановить доступ к сети", async () =>
+                    {
+                        try
+                        {
+                            await vm.RestoreNetworkAsync();
+                            if (killSwitchControl is not null) killSwitchControl.IsChecked = false;
+                            status.Text = L.T("VPN и kill switch отключены. Доступ к сети восстановлен.");
+                        }
+                        catch { status.Text = L.T("Не удалось восстановить сеть. Повторите с правами администратора."); }
+                    }));
                 panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
             }
             panel.Children.Add(Label("Обновления"));
@@ -334,11 +370,21 @@ public static class Dialogs
             AppBackNavigation.Set(() => _ = GoBackAsync());
         }
         Build();
-        if (OperatingSystem.IsAndroid())
+        if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows())
         {
-            installedApplications = await vm.GetInstalledApplicationsAsync();
+            try { installedApplications = await vm.GetInstalledApplicationsAsync(); }
+            catch { installedApplications = []; }
+            if (OperatingSystem.IsWindows())
+                installedApplications = installedApplications.Concat(draftApplications.Values.SelectMany(ids => ids)
+                    .Where(File.Exists).Select(path => new InstalledApplication(path, Path.GetFileNameWithoutExtension(path))))
+                    .DistinctBy(app => app.Id, StringComparer.OrdinalIgnoreCase).ToArray();
             applicationsLoaded = true;
-            if (!isClosing) Build();
+            if (!isClosing)
+            {
+                // Preserve edits made while discovery was still running.
+                saveSplitRules?.Invoke();
+                Build();
+            }
         }
     }
 
@@ -373,22 +419,6 @@ public static class Dialogs
         return completion.Task;
     }
 
-    private static string NetworkSettingsFingerprint()
-    {
-        static string Canonical(IEnumerable<string> values) => string.Join('\n', values
-            .Select(value => value.Trim().ToLowerInvariant())
-            .Where(value => value.Length > 0)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(value => value, StringComparer.Ordinal));
-
-        var settings = UserSettings.Current;
-        var rules = settings.GetSplitTunnelPolicy();
-        return settings.SplitTunnelMode == SplitTunnelMode.ProxyAll
-            ? string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled, (int)settings.SplitTunnelMode)
-            : string.Join('|', settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled,
-                (int)settings.SplitTunnelMode, Canonical(rules.Domains), Canonical(rules.Processes));
-    }
-
     public static async Task<string?> AskClose(Window owner)
     {
         var dialog = Window(owner, "Закрыть Di-Tunnel?", 260);
@@ -414,6 +444,12 @@ public static class Dialogs
         groups.Bind(ComboBox.SelectedItemProperty, new Binding("SelectedGroup") { Mode = BindingMode.TwoWay });
         groups.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
         panel.Children.Add(groups);
+        var cancelConnection = Button("Отменить подключение", () => vm.CancelConnectionCommand.Execute(null));
+        cancelConnection.Bind(ContentControl.ContentProperty, new Binding("CancelConnectionText") { Converter = new TranslationConverter() });
+        cancelConnection.Bind(Visual.IsVisibleProperty, new Binding("HasPendingConnection"));
+        cancelConnection.Bind(Control.IsEnabledProperty, new Binding("CanCancelConnection"));
+        var operations = new WrapPanel { Margin = new Thickness(24, 0, 24, 8) };
+        operations.Children.Add(cancelConnection);
         var list = new ListBox
         {
             MinHeight = OperatingSystem.IsAndroid() ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
@@ -455,6 +491,7 @@ public static class Dialogs
             }
         });
         list.Bind(ItemsControl.ItemsSourceProperty, new Binding("Profiles"));
+        list.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
         list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.TwoWay });
         // ListBox owns the touch gesture on Android, so child Tapped handlers are not
         // reliable. SelectionChanged is raised after the gesture has selected the row.
@@ -472,7 +509,8 @@ public static class Dialogs
         var testAll = Button("Проверить все", () => vm.ProbeAllCommand.Execute(null));
         testAll.Margin = new Thickness(0, 0, 8, 4); testAll.Bind(Control.IsEnabledProperty, new Binding("CanProbeAll")); testActions.Children.Add(testAll);
         var cancelTests = Button("Отменить проверку", () => vm.CancelProbesCommand.Execute(null));
-        cancelTests.Bind(Visual.IsVisibleProperty, new Binding("IsProbing")); testActions.Children.Add(cancelTests);
+        cancelTests.Bind(Visual.IsVisibleProperty, new Binding("IsProbing")); operations.Children.Add(cancelTests);
+        operations.Bind(Visual.IsVisibleProperty, new Binding("HasPendingOperation"));
         panel.Children.Add(testActions);
         var removeUnavailable = Button("Отфильтровать недоступные", () => vm.RemoveUnavailableCommand.Execute(null));
         removeUnavailable.Margin = new Thickness(0, 0, 8, 2);
@@ -585,9 +623,10 @@ public static class Dialogs
         removeOne.Margin = new Thickness(0, 0, 8, 6); removeOne.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(removeOne);
         panel.Children.Add(management);
         var status = Label(""); status.Bind(TextBlock.TextProperty, new Binding("SubscriptionStatus") { Converter = new TranslationConverter() }); panel.Children.Add(status);
+        var operationNotice = Label(""); operationNotice.Bind(TextBlock.TextProperty, new Binding("Notice") { Converter = new TranslationConverter() }); panel.Children.Add(operationNotice);
         panel.Children.Add(Label("При выборе другого сервера активный VPN переподключится автоматически."));
-        var page = Page("Подписки и профили", back, panel);
-        var root = new Grid();
+        var page = Page("Подписки и профили", back, panel, operations);
+        var root = new Grid { DataContext = vm };
         root.Children.Add(page);
         root.Children.Add(confirmation);
         root.Children.Add(shareOverlay);

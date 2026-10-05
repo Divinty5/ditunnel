@@ -39,6 +39,39 @@ public sealed class LocalizationTests
     }
 
     [Theory]
+    [InlineData("en")]
+    [InlineData("es")]
+    [InlineData("zh-Hans")]
+    public void AndroidControlsAndDynamicErrorsContainNoRussian(string language)
+    {
+        var texts = new[]
+        {
+            "Наведите камеру на QR-код", "Сканирование QR-кода", "Подключение…",
+            "VPN подключён · AmneziaWG", "VPN отключён", "Отключить", "Сначала выберите сервер.",
+            "Серверы подписки", "Управление VPN", "Изменяем VPN-подключение…",
+            "Состояние VPN и безопасное отключение Di-Tunnel",
+            "AmneziaWG: проверка после подключения",
+            "AmneziaWG: сначала предоставьте разрешение на VPN",
+            "Не удалось запустить служебный процесс AmneziaWG.",
+            "Служебный процесс AmneziaWG завершился.",
+            "AmneziaWG: сервер не подтвердил handshake за 18 секунд.",
+            "Отменить подключение", "Снять все галочки", "Выбор приложений очищен.",
+            "Не удалось отключить VPN; повторите отключение.",
+            "Android VPN не подтвердил запуск за 30 секунд. (AwgRuntime)",
+            "AmneziaWG: не удалось открыть защищённый UDP-транспорт. (AwgRuntime; InvalidOperationException)",
+            "Не удалось импортировать: некорректная конфигурация VMess.",
+            "Соединение потеряно. Попытка 3 из 10 через 15 с…",
+            "Запускаем Android VPN для сервера Node-A…",
+            "Ресурс Xray geosite.dat отсутствует.",
+            "SOCKS-соединение не установлено (5)."
+        };
+        foreach (var text in texts)
+            Assert.DoesNotMatch("[А-Яа-яЁё]", L.Translate(text, language));
+        Assert.Contains("Node-A", L.Translate(texts[^3], language));
+        Assert.Contains("geosite.dat", L.Translate(texts[^2], language));
+    }
+
+    [Theory]
     [InlineData("ru")]
     [InlineData("en")]
     [InlineData("es")]

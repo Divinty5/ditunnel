@@ -10,6 +10,7 @@ public partial class App : Application
 {
     public static Func<MainViewModel> CreateMainViewModel { get; set; } = () => new MainViewModel();
     public static IUpdateInstaller? UpdateInstaller { get; set; }
+    public static Func<Task<string?>>? ReadClipboardTextAsync { get; set; }
 
     public override void Initialize()
     {

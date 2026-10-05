@@ -58,7 +58,7 @@
           </Button></Grid>
           <TextBlock Text="{Binding StatusText, Converter={StaticResource Translate}}" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{Binding ConnectionStateBrush}"/>
           <TextBlock Text="{Binding ConnectionHint, Converter={StaticResource Translate}}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="340" Foreground="{Binding ConnectionHintBrush}" FontSize="12" HorizontalAlignment="Center"/>
-          <TextBlock Text="{Binding KillSwitchText, Converter={StaticResource Translate}}" IsVisible="{Binding IsKillSwitchEnabled}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" Foreground="{DynamicResource AccentTextBrush}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+          <TextBlock Text="{Binding KillSwitchText, Converter={StaticResource Translate}}" IsVisible="{Binding ShowKillSwitchStatus}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" Foreground="{DynamicResource AccentTextBrush}" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center"/>
         </StackPanel>
         <Grid Grid.Row="2" ColumnDefinitions="Auto,*">
           <Button IsVisible="{Binding HasConnectionError}" Content="{Binding CopyErrorText}" ToolTip.Tip="{DynamicResource Text1ECDDF40BFEB}" Click="CopyErrorClick" Margin="0,0,8,0" Padding="12,8" FontSize="20" VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
