@@ -25,6 +25,7 @@ packages/
 .nuget/
 .store/
 .tools/
+.codex-remote-attachments/
 
 # Runtime files and logs
 logs/
@@ -50,6 +51,8 @@ profiles.local.*
 subscriptions.local.*
 *.pfx
 *.p12
+*.jks
+*.keystore
 *.key
 *.pem
 .env

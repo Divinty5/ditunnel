@@ -1,12 +1,14 @@
 # Di-Tunnel — план поддержки Android
 
-Дата: 9 сентября 2026 года. Актуализировано 13 сентября 2026 года.
+Дата: 9 сентября 2026 года. Актуализировано 5 октября 2026 года.
 
-Статус: этапы A0–A6 реализованы, версия 0.4.24 подготовлена к Android ARM64-релизу. Установка и адаптивный UI проверены на телефоне и Huawei MatePad Pro с HarmonyOS 2; финальный release gate зафиксирован в `android-release-validation.md`. Windows остаётся обязательной регрессионной платформой общего кода.
+Статус: основные этапы A0–A6 реализованы; подготовлен Android 0.5.13 для ручной проверки как локальный ARM64 APK. Поверх исходного MVP добавлены VMess AEAD, AmneziaWG, плитка, виджеты и четыре языка. На Android 16 подтверждены AWG 2.0 и исправление IPv6; результаты — в [матрице проверки](android-release-validation.md). Историческая проверка HarmonyOS 2 относится к 0.4.24 и не подтверждает новый AWG backend. Windows остаётся регрессионной платформой общего кода.
+
+План ниже сохраняет архитектурные цели исходных этапов. В 0.5.10 реализованы сервисное восстановление и запуск системного Always-on (`SUPPORTS_ALWAYS_ON=true`, Sticky, зашифрованный последний запрос). Lockdown включается пользователем в ОС. Reboot/autoconnect и полный системный прогон восстановления ещё требуют проверки на устройстве. Оставшиеся ограничения AWG перечислены в [проверке реализации](amneziawg-support-review.md).
 
 ## 1. Цель и границы
 
-Цель — выпустить rootless VPN-клиент для Android с максимально возможным паритетом с Windows: импорт профилей и подписок, подключение через Xray, переключение серверов, Lowest, доменные/IP-правила, маршрутизация по приложениям, восстановление после смены сети, безопасное хранилище и обезличенная диагностика.
+Цель — выпустить rootless VPN-клиент для Android с максимально возможным паритетом с Windows: импорт профилей и подписок, подключение через Xray и AmneziaWG, переключение серверов, Lowest, доменные/IP-правила, маршрутизация по приложениям, восстановление после смены сети, безопасное хранилище и обезличенная диагностика.
 
 Первая поддерживаемая версия — Android 10 (API 29). Сборка компилируется и публикуется с target API 36. Релизный ABI — `arm64-v8a`; `x86_64` используется для эмулятора. Совместимость API 29 подтверждена установкой на HarmonyOS 2. ARM32 можно добавить отдельным решением после проверки спроса, размера и производительности.
 
@@ -25,19 +27,19 @@
 | .NET SDK | `10.0.302` | Сохранить текущую версию из `global.json`; Android workload ставить из того же workload set |
 | Target framework | `net10.0-android36.0` | Соответствует .NET 10 и target API 36 |
 | `minSdk` | API 29, Android 10 | Покрывает Android-совместимый слой HarmonyOS 2; host и platform-проект используют одну нижнюю границу |
-| `targetSdk` / compile SDK | API 36, Android 16 | Требование Google Play для новых приложений и обновлений с 31 августа 2026 года |
+| `targetSdk` / compile SDK | API 36, Android 16 | Текущая настройка проекта; APK распространяется вручную, публикация в Google Play не выполнена |
 | Avalonia | `12.1.2` | Оставить единую версию UI-пакетов Windows и Android |
 | Avalonia.Android | `12.1.2` | Android host и `AvaloniaMainActivity` |
 | CommunityToolkit.Mvvm | `8.4.2` | Сохранить текущую общую ViewModel-библиотеку |
 | Svg.Controls.Skia.Avalonia | `12.0.0.17` | Временно сохранить; проверить Android-рендеринг и расход батареи, для проблемных фонов подготовить растровую замену |
-| Xray-core / libXray | `v26.7.28` | Одна версия ядра на Windows и Android после отдельной регрессии; Android получает закреплённый `libXray.aar` |
+| Xray-core / libXray | Android `v26.7.28`, Windows `v26.3.27` | Версии закреплены отдельно; Android получает `libXray.aar`, Windows — Xray-core |
 | libXray API | JSON `Invoke` contract из `v26.7.28` | Обернуть собственным C#-адаптером, не пропускать типы нестабильного upstream API в Core/UI |
 | Go toolchain для воспроизводимой AAR | `1.26.3` | Зафиксировать вместе с `golang.org/x/mobile` из release source; не использовать плавающий `latest` |
 | Тесты | xUnit `2.9.3`, runner `3.1.4`, Test SDK `17.14.1` | Сохранить текущие версии до отдельного обновления всего test stack |
 
 Манифест `eng/android-runtime.json` фиксирует release tag, commit, URL/имя AAR, SHA-256, ABI и версию Go. Бинарник нельзя брать по плавающему URL. В CI нужно либо воспроизводимо собирать AAR из закреплённого source tag, либо проверять хеш официального release asset.
 
-Xray-core Windows сейчас закреплён на `v26.3.27`. Переход на `v26.7.28` выполняется отдельным маленьким коммитом до Android-интеграции и только после повторной проверки HY2, VLESS TCP/WS/HTTPUpgrade, Trojan, Shadowsocks, TUN, DNS, IPv4/IPv6, split tunneling и WFP kill switch. Если регрессия не устранена, Windows временно остаётся на `v26.3.27`, а различие явно фиксируется в ADR и тестовой матрице.
+Xray-core Windows остаётся на `v26.3.27`; Android уже использует libXray `v26.7.28`. Обновление Windows требует отдельной регрессии HY2, VLESS TCP/WS/HTTPUpgrade, Trojan, Shadowsocks, TUN, DNS, IPv4/IPv6, split tunneling и WFP kill switch. Различие версий фиксируется в ADR и тестовой матрице.
 
 ## 3. Целевая структура решения
 
@@ -130,7 +132,7 @@ DiTunnel.Platform.Android
 
 - service защищён `BIND_VPN_SERVICE`, `exported=false`, intent filter — `android.net.VpnService`;
 - foreground service объявлен с подходящим для VPN типом и требуемыми разрешениями target API 36;
-- `SUPPORTS_ALWAYS_ON=true` добавляется только после прохождения reboot/restore/lockdown тестов; до этого явно `false`;
+- `SUPPORTS_ALWAYS_ON=true` включён в локальной тестовой 0.5.10 для прогона reboot/restore/lockdown; публичный выпуск требует прохождения этой матрицы;
 - профили, ключ Android Keystore, runtime configs и сетевые логи исключаются из cloud/device-transfer backup;
 - временный Xray JSON хранится только во внутреннем каталоге, не попадает в logcat/exception text и удаляется после сессии; по возможности конфигурация передаётся в память;
 - все service intents явные, входные размеры ограничены, package IDs и профили валидируются повторно на стороне сервиса.
@@ -138,6 +140,8 @@ DiTunnel.Platform.Android
 ## 7. Особенности функций Android
 
 ### Kill switch
+
+Начиная с 0.5.10 реализованы Sticky-восстановление и запуск системного Always-on из зашифрованного запроса. Возврат после потери сети подтверждён на телефоне в 0.5.12; текущая версия — 0.5.13. Без системного lockdown после закрытия TUN возможен обычный прямой доступ. Гарантии reboot/restore/lockdown требуют проверки на устройстве; следующие требования задают критерии приёмки.
 
 Android не даёт обычному VPN-приложению программно включить системный lockdown. Экран настроек должен:
 
@@ -157,7 +161,7 @@ Android не даёт обычному VPN-приложению программ
 
 ### Auto-connect и background
 
-Обычный boot receiver не считается эквивалентом Windows startup. Надёжный вариант — поддержать Android Always-on VPN. Ручное подключение запускается из видимой Activity или действия уведомления с учётом ограничений background foreground-service start.
+В тестовой 0.5.10 системный Always-on запускает сервис с последним зашифрованным запросом; запуск после reboot и восстановление без UI требуют проверки на устройстве. Обычный boot receiver не используется. Ручное подключение запускается из видимой Activity или действия уведомления с учётом ограничений background foreground-service start.
 
 ### Probe и Lowest
 
@@ -241,17 +245,19 @@ Android не даёт обычному VPN-приложению программ
 | Функция Windows | Android target | Комментарий |
 | --- | --- | --- |
 | HY2, VLESS TCP/WS/HTTPUpgrade, Trojan, SS | Да, A4 | Общий converter, Android libXray runtime |
-| VMess AEAD / произвольный JSON | Общий converter / хранение | VMess требует проверки на Android-устройстве; произвольный JSON не подключается |
+| VMess AEAD / произвольный JSON | Реализован / хранение | VMess использует общий converter; подключение произвольного JSON не реализовано |
+| AmneziaWG | Реализован, AWG 2.0 проверен на телефоне | Xray TUN + отдельный AWG netstack; ограничения — в проверке поддержки |
+| Плитка, виджеты, четыре языка | Реализованы | Синхронизация управления подтверждена пользователем |
 | Подписки, обновление, группы, удаление | Да, A2–A3 | Общие сценарии и ViewModels |
 | Безопасное переключение активного сервера | Да, A4 | Service-owned transition |
 | Lowest и периодическая задержка | Да, A6 | С учётом single-instance ограничений libXray |
 | Домены/IP: all/bypass/only selected | Да, A6 | Xray routing + отдельная leak validation |
 | Split tunneling по приложениям | Да, A6 | На Android реализуем раньше Windows через Builder package lists |
-| Kill switch | Системный, A5 | Полная гарантия только Always-on + lockdown |
-| IPv4/IPv6/DNS | Да, A4–A5 | Builder + Xray TUN, без host DNS leak |
+| Kill switch | Требует проверки | Always-on поддерживается сервисом; fail-closed требует включённого системного lockdown и прогона на устройстве |
+| IPv4/IPv6/DNS | Реализованы | AWG объявляет только поддерживаемые семейства; полный прогон утечек для нового backend ещё требуется |
 | Reconnect/network change | Да, A5 | ConnectivityManager и foreground service |
 | Tray/закрытие окна | Не применимо | Заменяет foreground notification |
-| Автозапуск | Через Always-on | Не имитировать ненадёжным Windows-подобным startup |
+| Автозапуск | Реализован, требует проверки | Системный Always-on восстанавливает последний зашифрованный профиль после reboot |
 | Диагностический ZIP | Да, A3/A6 | SAF/share sheet, тот же whitelist логов |
 | Проверка GitHub release | Sideload build | Play build следует правилам магазина |
 
@@ -306,3 +312,13 @@ Android не даёт обычному VPN-приложению программ
 - [Android: target API requirement](https://developer.android.com/google/play/requirements/target-sdk)
 - [Xray: TUN inbound and Android FD](https://xtls.github.io/en/config/inbounds/tun.html)
 - [XTLS/libXray releases](https://github.com/XTLS/libXray/releases)
+
+## 13. Реализованные расширения Android 0.5.9–0.5.13
+
+- AWG и libXray изолированы в процессах `:awg` и `:vpn`; временные проверки — в отдельных процессах без системного TUN.
+- AWG UDP защищён и привязан к физической Network до входа в Go; IPC не экспортирован, конфигурация передаётся в памяти.
+- Плитка и виджеты работают через общий движок, выбор сервера синхронизируется с интерфейсом; отмена доступна при подключении и переподключении.
+- Локальный workflow, SDK/NDK, новый ключ подписи и APK находятся в `.tools/android-build-local`, вне Git. Прежний ключ утрачен; совместимость обновления сохраняется только внутри новой линии подписанных тестовых APK.
+- В 0.5.12 подтверждены возврат после потери сети и открытие приложения долгим нажатием плитки. В 0.5.13 добавлен сброс галочек текущего режима РТ; версия синхронизирована с Windows.
+- PDF-копия этого плана генерируется из Markdown; источником актуальных изменений остаётся этот файл.
+- Полный список подтверждённых сценариев и оставшихся задач поддерживается в [проверке AWG](amneziawg-support-review.md) и [матрице Android](android-release-validation.md).
