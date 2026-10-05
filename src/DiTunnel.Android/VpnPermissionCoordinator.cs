@@ -27,6 +27,7 @@ internal sealed class VpnPermissionCoordinator : DiTunnel.Platform.Android.IAndr
 
     public async Task<bool> RequestAsync(CancellationToken cancellationToken = default)
     {
+        if (global::Android.Net.VpnService.Prepare(Application.Context) is null) return true;
         MainActivity owner;
         TaskCompletionSource<bool> request;
         bool shouldLaunchRequest;

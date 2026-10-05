@@ -14,12 +14,13 @@ internal static class AndroidLocaleCoordinator
     {
         context = applicationContext;
         App.AppLocale.ApplyPlatformLocale = Apply;
+        App.L.Changed += () => ApplyResources(App.UserSettings.Current.Language);
     }
 
     private static void Apply(string language)
     {
         if (context is null) return;
-        var tag = language == "en" ? "en" : "ru";
+        var tag = language is "en" or "es" or "zh-Hans" ? language : "ru";
         if (OperatingSystem.IsAndroidVersionAtLeast(33))
         {
             var manager = context.GetSystemService(Context.LocaleService) as LocaleManager;
@@ -27,6 +28,12 @@ internal static class AndroidLocaleCoordinator
             return;
         }
 
+        ApplyResources(tag);
+    }
+
+    private static void ApplyResources(string tag)
+    {
+        if (context is null) return;
 #pragma warning disable CA1422
         var locale = Locale.ForLanguageTag(tag);
         Locale.Default = locale;

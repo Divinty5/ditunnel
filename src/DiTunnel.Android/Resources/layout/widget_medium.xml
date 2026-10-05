@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="8dp" android:background="@drawable/widget_background">
+  <ImageView android:id="@+id/widget_power" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:scaleType="fitCenter" android:src="@drawable/ic_vpn_tile" android:contentDescription="Di-Tunnel" />
+  <TextView android:id="@+id/widget_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:text="@string/widget_select_server" android:textColor="#EDE6FF" android:textSize="12sp" android:maxLines="1" android:ellipsize="end" />
+  <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:textColor="#C3A9ED" android:textSize="10sp" android:maxLines="2" android:ellipsize="end" android:text="@string/widget_disconnected" />
+</LinearLayout>

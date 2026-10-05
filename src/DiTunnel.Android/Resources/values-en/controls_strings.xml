@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="qr_scanning">Scan QR code</string>
+  <string name="widget_select_server">Select a server</string>
+  <string name="widget_disconnected">VPN disconnected</string>
+  <string name="widget_subscription">Subscription servers</string>
+</resources>

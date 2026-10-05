@@ -17,7 +17,7 @@ namespace DiTunnel.Android;
 
 [Activity(
     Name = "com.divintyinteractive.ditunnel.QrScannerActivity",
-    Label = "Сканирование QR-кода",
+    Label = "@string/qr_scanning",
     Theme = "@android:style/Theme.Material.NoActionBar.Fullscreen",
     ScreenOrientation = ScreenOrientation.Portrait,
     Exported = false)]
@@ -33,12 +33,13 @@ public sealed class QrScannerActivity : Activity, ISurfaceHolderCallback, Camera
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        Title = App.L.T("Сканирование QR-кода");
         var root = new FrameLayout(this) { Background = new ColorDrawable(Color.Black) };
         preview = new SurfaceView(this);
         root.AddView(preview, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent));
         var hint = new TextView(this)
         {
-            Text = "Наведите камеру на QR-код",
+            Text = App.L.T("Наведите камеру на QR-код"),
             TextSize = 18,
             Gravity = GravityFlags.Center
         };

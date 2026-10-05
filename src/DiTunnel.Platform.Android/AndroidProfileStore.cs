@@ -13,6 +13,7 @@ namespace DiTunnel.Platform.Android;
 
 public sealed class AndroidProfileStore(Context context) : IProfileStore
 {
+    public static event Action? ProfilesChanged;
     private const string KeyAlias = "com.divintyinteractive.ditunnel.profiles.v1";
     private const int HeaderSize = 8;
     private const int GcmTagBits = 128;
@@ -37,9 +38,10 @@ public sealed class AndroidProfileStore(Context context) : IProfileStore
         var temporary = filePath + ".tmp";
         File.WriteAllBytes(temporary, encrypted);
         File.Move(temporary, filePath, true);
+        ProfilesChanged?.Invoke();
     }
 
-    private static byte[] Encrypt(byte[] plaintext)
+    internal static byte[] Encrypt(byte[] plaintext)
     {
         using var cipher = Cipher.GetInstance("AES/GCM/NoPadding")
             ?? throw new CryptographicException("Android не поддерживает AES-GCM.");
@@ -59,7 +61,7 @@ public sealed class AndroidProfileStore(Context context) : IProfileStore
         return result;
     }
 
-    private static byte[] Decrypt(byte[] payload)
+    internal static byte[] Decrypt(byte[] payload)
     {
         if (payload.Length < HeaderSize || !payload.AsSpan(0, 4).SequenceEqual(Magic) || payload[4] != 1)
             throw new CryptographicException("Файл профилей имеет неизвестный формат.");

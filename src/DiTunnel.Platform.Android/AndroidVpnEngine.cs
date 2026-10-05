@@ -14,6 +14,8 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     private readonly Func<bool> blockAds;
     private readonly Func<bool> strictAdBlocking;
     private readonly SemaphoreSlim lifecycle = new(1, 1);
+    private readonly object connectionLock = new();
+    private CancellationTokenSource? pendingConnection;
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? healthCancellation;
     private CancellationTokenSource? networkChangeCancellation;
@@ -44,14 +46,31 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     public VpnStatus Status => status;
     public ImportedProfile? ActiveProfile => activeProfile;
     public bool RequiresAdministrator => false;
-    public bool IsNetworkProtectionActive => status.State is VpnConnectionState.Connected or VpnConnectionState.Reconnecting;
+    public bool IsNetworkProtectionActive => status.State == VpnConnectionState.Connected && AndroidVpnRuntimeState.IsVpnProcessRunning(context);
     public event EventHandler<VpnStatus>? StatusChanged;
+    // Owned by the foreground control service, independently of an Activity. A fresh
+    // native process is started explicitly; Sticky restart is only the OS fallback.
+    public async Task RecoverConnectionAsync()
+    {
+        activeProfile ??= AndroidVpnRuntimeState.ReadActiveProfile(context);
+        BeginRecovery();
+        var recovery = recoveryTask;
+        if (recovery is not null) await recovery;
+    }
+    private Task? recoveryTask;
+    public void RefreshNotification()
+    {
+        if (status.State == VpnConnectionState.Connected)
+            context.StartService(new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionRefreshNotification));
+    }
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(profile);
         CancelRecovery();
         await lifecycle.WaitAsync(cancellationToken);
+        using var operation = BeginConnection(cancellationToken);
+        cancellationToken = operation.Token;
         try
         {
             if (status.State is not (VpnConnectionState.Disconnected or VpnConnectionState.Error))
@@ -65,11 +84,19 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             }
             await ConnectCoreAsync(profile, cancellationToken, recovering: false);
         }
-        finally { lifecycle.Release(); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            activeProfile = null;
+            SetStatus(VpnStatus.Disconnected);
+            throw;
+        }
+        finally { EndConnection(operation); lifecycle.Release(); }
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
+        // Cancellation must precede the lifecycle wait: START owns that semaphore.
+        lock (connectionLock) pendingConnection?.Cancel();
         CancelRecovery();
         await lifecycle.WaitAsync(cancellationToken);
         try
@@ -89,15 +116,40 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         ArgumentNullException.ThrowIfNull(profile);
         CancelRecovery();
         await lifecycle.WaitAsync(cancellationToken);
+        using var operation = BeginConnection(cancellationToken);
+        cancellationToken = operation.Token;
         try
         {
             SetStatus(new(VpnConnectionState.Reconnecting, $"Останавливаем текущий туннель перед переключением на {profile.Name}…"));
             StopHealthMonitor();
             await StopCoreAsync(cancellationToken);
-            SetStatus(new(VpnConnectionState.Reconnecting, $"Запускаем Android VpnService и Xray-core для сервера {profile.Name}…"));
+            SetStatus(new(VpnConnectionState.Reconnecting, $"Запускаем Android VPN для сервера {profile.Name}…"));
             await ConnectCoreAsync(profile, cancellationToken, recovering: true);
         }
-        finally { lifecycle.Release(); }
+        catch (Exception error)
+        {
+            // Manual switches have no recovery loop to transition a failed start out of
+            // Reconnecting. Otherwise the tile/widgets would stay busy indefinitely.
+            StopHealthMonitor();
+            activeProfile = null;
+            SetStatus(cancellationToken.IsCancellationRequested ? VpnStatus.Disconnected
+                : new(VpnConnectionState.Error, error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
+                    ? error.Message : "Не удалось запустить Android VPN."));
+            throw;
+        }
+        finally { EndConnection(operation); lifecycle.Release(); }
+    }
+
+    private CancellationTokenSource BeginConnection(CancellationToken token)
+    {
+        var operation = CancellationTokenSource.CreateLinkedTokenSource(token, lifetime.Token);
+        lock (connectionLock) pendingConnection = operation;
+        return operation;
+    }
+    private void EndConnection(CancellationTokenSource operation)
+    {
+        lock (connectionLock)
+            if (ReferenceEquals(pendingConnection, operation)) pendingConnection = null;
     }
 
     public async ValueTask DisposeAsync()
@@ -123,17 +175,23 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         }
 
         SetStatus(new(recovering ? VpnConnectionState.Reconnecting : VpnConnectionState.Connecting,
-            recovering ? $"Запускаем новый туннель через {profile.Name}…" : "Запускаем Android VpnService и Xray-core…"));
+            recovering ? $"Запускаем новый туннель через {profile.Name}…" : "Запускаем Android VPN…"));
         var completion = AndroidVpnServiceBridge.ExpectStart();
+        AndroidVpnStartupDiagnostics.Record(context, VpnStartupStage.Service);
         context.StartForegroundService(AndroidVpnServiceBridge.CreateStartIntent(context, profile, splitTunnelPolicy(), blockAds(), strictAdBlocking()));
         try
         {
-            var started = await completion.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            VpnStatus started;
+            try { started = await completion.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken); }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException($"{AndroidLocalization.T("Android VPN не подтвердил запуск за 30 секунд.")} ({AndroidVpnStartupDiagnostics.Read(context)})");
+            }
             if (started.State != VpnConnectionState.Connected)
-                throw new InvalidOperationException(started.Message ?? "Xray не запустил VPN.");
+                throw new InvalidOperationException(started.Message ?? "Не удалось запустить Android VPN.");
             activeProfile = profile;
             SetStatus(new(VpnConnectionState.Connected,
-                "Туннель активен. Android VpnService и Xray-core запущены; доступность сервера проверяется отдельно.",
+                "Туннель Android VPN активен; доступность интернета проверяется отдельно.",
                 DateTimeOffset.UtcNow));
             StartHealthMonitor();
         }
@@ -146,7 +204,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
                 var message = error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
                     ? error.Message
                     : "Не удалось запустить Android VPN.";
-                SetStatus(new(VpnConnectionState.Error, message));
+                SetStatus(cancellationToken.IsCancellationRequested ? VpnStatus.Disconnected : new(VpnConnectionState.Error, message));
             }
             throw;
         }
@@ -160,6 +218,14 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         var completion = AndroidVpnServiceBridge.ExpectStop();
         context.StartService(new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionStop));
         try { _ = await completion.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); }
+        catch (TimeoutException)
+        {
+            // A blocked/crashed native runtime cannot acknowledge STOP. Terminating
+            // our isolated process still closes all its sockets and TUN descriptors.
+            AndroidVpnRuntimeState.TerminateVpnProcess(context);
+            await Task.Delay(400, cancellationToken);
+            return;
+        }
         catch
         {
             AndroidVpnRuntimeState.TerminateVpnProcess(context);
@@ -178,7 +244,22 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     {
         StopHealthMonitor();
         healthCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        _ = WatchVpnProcessAsync(healthCancellation.Token);
         ScheduleNetworkEvaluation();
+    }
+
+    private async Task WatchVpnProcessAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(2000, token);
+                if (status.State != VpnConnectionState.Connected || AndroidVpnRuntimeState.IsVpnProcessRunning(context)) continue;
+                BeginRecovery();
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     private void RegisterNetworkMonitor()
@@ -239,7 +320,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             // Keep only a short settling window for capability handover instead of the
             // previous three-second polling-style delay.
             await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
-            if (!HasValidatedPhysicalNetwork()) BeginRecovery();
+            if (!HasValidatedPhysicalNetwork() && !AndroidVpnRuntimeState.ServiceOwnsRecovery(context)) BeginRecovery();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
@@ -264,16 +345,20 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
 
     private void BeginRecovery()
     {
-        var profile = activeProfile;
-        if (profile is null || recoveryCancellation is not null) return;
-        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-        recoveryCancellation = cancellation;
-        _ = RecoverAndClearAsync(profile, cancellation);
+        lock (connectionLock)
+        {
+            var profile = activeProfile;
+            if (profile is null || recoveryCancellation is not null || pendingConnection is not null || disposed) return;
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            recoveryCancellation = cancellation;
+            recoveryTask = RecoverAndClearAsync(profile, cancellation);
+        }
     }
 
     private async Task RecoverAndClearAsync(ImportedProfile profile, CancellationTokenSource cancellation)
     {
         try { await RecoverAsync(profile, cancellation.Token); }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         finally
         {
             if (ReferenceEquals(recoveryCancellation, cancellation)) recoveryCancellation = null;
@@ -301,13 +386,14 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             {
                 if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken);
                 await lifecycle.WaitAsync(cancellationToken);
+                using var operation = BeginConnection(cancellationToken);
                 try
                 {
                     try { await StopCoreAsync(CancellationToken.None); } catch { AndroidVpnRuntimeState.TerminateVpnProcess(context); }
-                    await ConnectCoreAsync(profile, cancellationToken, recovering: true);
+                    await ConnectCoreAsync(profile, operation.Token, recovering: true);
                     return;
                 }
-                finally { lifecycle.Release(); }
+                finally { EndConnection(operation); lifecycle.Release(); }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
             catch { failedAttempts++; }
@@ -332,18 +418,32 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     private void CancelRecovery()
     {
         recoveryCancellation?.Cancel();
-        recoveryCancellation?.Dispose();
         recoveryCancellation = null;
     }
 
     private void OnServiceStatusReceived(object? sender, VpnStatus value)
     {
-        if (status.State is VpnConnectionState.Connecting or VpnConnectionState.Disconnecting or VpnConnectionState.Reconnecting) return;
+        if (pendingConnection is not null || status.State is VpnConnectionState.Connecting or VpnConnectionState.Disconnecting) return;
+        if (value.State == VpnConnectionState.Connected)
+        {
+            activeProfile = AndroidVpnRuntimeState.ReadActiveProfile(context) ?? activeProfile;
+            SetStatus(value);
+            StartHealthMonitor();
+            return;
+        }
+        if (value.State == VpnConnectionState.Error && activeProfile is not null && !AndroidVpnRuntimeState.ServiceOwnsRecovery(context))
+        {
+            BeginRecovery();
+            return;
+        }
         if (value.State == VpnConnectionState.Disconnected)
         {
             CancelRecovery();
             StopHealthMonitor();
             activeProfile = null;
+            // Notification STOP and permission revocation do not pass through StopCore.
+            // STOPPED has reached this process; release the old Go runtime here as well.
+            AndroidVpnRuntimeState.TerminateVpnProcess(context);
         }
         SetStatus(value);
     }

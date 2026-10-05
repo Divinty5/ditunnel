@@ -24,7 +24,8 @@ public sealed class AndroidServerCountryResolver : IServerCountryResolver
     {
         try
         {
-            var host = XrayProfileConverter.Convert(profile).ServerHost;
+            var host = AmneziaWgProfileConverter.IsAmneziaWg(profile)
+                ? AmneziaWgProfileConverter.Convert(profile).ServerHost : XrayProfileConverter.Convert(profile).ServerHost;
             return await cache.GetOrAdd(host, LookupAsync).WaitAsync(cancellationToken);
         }
         catch (Exception error)

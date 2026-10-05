@@ -45,6 +45,7 @@ $env:DOTNET_CLI_HOME = Join-Path $AndroidRoot 'dotnet-home'
 $env:NUGET_PACKAGES = Join-Path $AndroidRoot 'nuget-packages'
 $env:DITUNNEL_BUILD_ROOT = Join-Path $AndroidRoot 'build-release'
 $env:DITUNNEL_LIBXRAY_AAR = Join-Path $AndroidRoot 'libxray\v26.7.28\libxray-android\libXray.aar'
+$env:DITUNNEL_ANDROID_AWG_ROOT = Join-Path $AndroidRoot 'amneziawg\native'
 $env:TEMP = Join-Path $AndroidRoot 'temp'
 $env:TMP = $env:TEMP
 

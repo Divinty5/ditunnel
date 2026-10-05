@@ -20,90 +20,160 @@ namespace DiTunnel.Platform.Android;
     Permission = global::Android.Manifest.Permission.BindVpnService,
     ForegroundServiceType = ForegroundService.TypeSpecialUse)]
 [IntentFilter([global::Android.Net.VpnService.ServiceInterface])]
-[MetaData(global::Android.Net.VpnService.ServiceMetaDataSupportsAlwaysOn, Value = "false")]
+[MetaData(global::Android.Net.VpnService.ServiceMetaDataSupportsAlwaysOn, Value = "true")]
 [Register(ServiceClassName)]
 public sealed class DiTunnelVpnService : global::Android.Net.VpnService
 {
     public const string ServiceClassName = "com.divintyinteractive.ditunnel.DiTunnelVpnService";
     public const string ActionStart = "com.divintyinteractive.ditunnel.action.START_VPN";
     public const string ActionStop = "com.divintyinteractive.ditunnel.action.STOP_VPN";
+    public const string ActionRefreshNotification = "com.divintyinteractive.ditunnel.action.REFRESH_NOTIFICATION";
     private const string NotificationChannelId = "ditunnel_vpn";
     private const int NotificationId = 1107;
     private readonly SemaphoreSlim lifecycle = new(1, 1);
     private ParcelFileDescriptor? tunnel;
     private XrayDialerController? dialerController;
     private bool xrayRunning;
+    private AndroidAwgBridgeClient? amneziaRuntime;
     private Intent? startIntent;
+    private CancellationTokenSource? starting;
+    private bool stopRequested;
+    private int restarting;
+    private int physicalNetworkId;
+    private PhysicalNetworkMonitor? networkMonitor;
+    private CancellationTokenSource? networkEvaluation;
+    private bool OwnsRecovery => !stopRequested;
+    private VpnStartupStage startupStage;
+    private void Stage(VpnStartupStage stage)
+    {
+        startupStage = stage;
+        AndroidVpnStartupDiagnostics.Record(this, stage);
+    }
 
     public override void OnCreate()
     {
         base.OnCreate();
+        AndroidVpnRuntimeState.SetStarting(this, OwnsRecovery);
         CreateNotificationChannel();
     }
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
     {
+        if (intent?.Action == ActionRefreshNotification)
+        {
+            CreateNotificationChannel();
+            if (xrayRunning) UpdateNotification(amneziaRuntime is not null ? "VPN подключён · AmneziaWG" : "VPN подключён");
+            else if (starting is not null && !stopRequested) UpdateNotification("Восстанавливаем VPN…");
+            else { stopRequested = true; StopSelf(); }
+            return OwnsRecovery ? StartCommandResult.Sticky : StartCommandResult.NotSticky;
+        }
         StartInForeground();
         if (intent?.Action == ActionStop)
         {
+            stopRequested = true;
+            StopNetworkMonitor();
+            starting?.Cancel();
             _ = StopTunnelAsync(stopService: true);
             return StartCommandResult.NotSticky;
         }
 
-        if (intent?.Action == ActionStart)
+        if (intent?.Action == ActionStart || intent is null || intent.Action == global::Android.Net.VpnService.ServiceInterface)
         {
+            stopRequested = false;
             startIntent = intent;
             _ = StartTunnelAsync();
+            return OwnsRecovery ? StartCommandResult.Sticky : StartCommandResult.NotSticky;
         }
+        stopRequested = true;
+        StopSelf();
         return StartCommandResult.NotSticky;
     }
 
     public override void OnRevoke()
     {
+        stopRequested = true;
+        StopNetworkMonitor();
+        starting?.Cancel();
         _ = StopTunnelAsync(stopService: true);
         base.OnRevoke();
     }
 
     public override void OnDestroy()
     {
-        AndroidVpnRuntimeState.Clear(this);
+        starting?.Cancel();
+        StopNetworkMonitor();
+        if (OwnsRecovery) AndroidVpnRuntimeState.SetRecovering(this);
+        else AndroidVpnRuntimeState.Clear(this);
         CloseTunnel();
         StopForeground(StopForegroundFlags.Remove);
-        AndroidVpnServiceBridge.PublishStopped(this);
+        if (OwnsRecovery) AndroidVpnServiceBridge.PublishRecovering(this);
+        else AndroidVpnServiceBridge.PublishStopped(this);
         base.OnDestroy();
     }
 
     private async Task StartTunnelAsync()
     {
         await lifecycle.WaitAsync();
+        var manualRequest = startIntent?.Action == ActionStart;
         try
         {
-            if (xrayRunning)
+            if (xrayRunning || amneziaRuntime is not null)
             {
                 AndroidVpnServiceBridge.PublishStarted(this);
                 return;
             }
-            var pendingRequest = startIntent is null ? null : AndroidVpnServiceBridge.ReadRequest(startIntent);
+            var persisted = startIntent is null ? null : AndroidVpnServiceBridge.RequestFromIntent(startIntent);
+            persisted ??= await Task.Run(() => new AndroidVpnResumeStore(this).Load());
             startIntent = null;
-            var request = pendingRequest
-                ?? throw new InvalidOperationException("Профиль VPN не был передан сервису.");
-            var profileConfiguration = XrayProfileConverter.Convert(request.Profile);
-            var addresses = await Dns.GetHostAddressesAsync(profileConfiguration.ServerHost);
+            var saved = persisted ?? throw new InvalidOperationException("Сначала подключите VPN вручную, чтобы сохранить профиль для постоянного VPN.");
+            if (stopRequested) throw new System.OperationCanceledException();
+            var request = (Profile: saved.Profile, SplitTunnelPolicy: new DiTunnel.Core.Connection.SplitTunnelPolicy(saved.Mode, saved.Domains, saved.Processes),
+                saved.BlockAds, saved.StrictAdBlocking);
+            starting?.Dispose();
+            starting = new CancellationTokenSource();
+            // Validate before replacing the saved request. Recovery must use the latest
+            // selected profile, including its current routing and ad-blocking settings.
+            if (AmneziaWgProfileConverter.IsAmneziaWg(request.Profile))
+                _ = AmneziaWgProfileConverter.Convert(request.Profile).TunnelDnsServers();
+            else _ = XrayProfileConverter.Convert(request.Profile);
+            await Task.Run(() => new AndroidVpnResumeStore(this).Save(saved), starting.Token);
+            if (OwnsRecovery && PhysicalNetwork() is null)
+            {
+                AndroidVpnRuntimeState.SetRecovering(this);
+                AndroidVpnServiceBridge.PublishRecovering(this);
+                while (PhysicalNetwork() is null) await Task.Delay(1000, starting.Token);
+            }
+            starting.Token.ThrowIfCancellationRequested();
+            Stage(VpnStartupStage.Profile);
+            var isAmneziaWg = AmneziaWgProfileConverter.IsAmneziaWg(request.Profile);
+            var profileConfiguration = isAmneziaWg
+                ? await StartAmneziaWgAsync(request.Profile, starting.Token)
+                : XrayProfileConverter.Convert(request.Profile);
+            starting.Token.ThrowIfCancellationRequested();
+            if (!isAmneziaWg) Stage(VpnStartupStage.Endpoint);
+            var addresses = profileConfiguration.IsLocalProxy ? [IPAddress.Loopback]
+                : await Dns.GetHostAddressesAsync(profileConfiguration.ServerHost, starting.Token);
             var serverAddress = addresses
                 .OrderBy(address => address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 0 : 1)
                 .FirstOrDefault()
                 ?? throw new InvalidOperationException("Не удалось определить IP-адрес VPN-сервера.");
 
+            var awgConfiguration = isAmneziaWg ? AmneziaWgProfileConverter.Convert(request.Profile) : null;
+            var supportsIpv4 = awgConfiguration?.SupportsAddressFamily(System.Net.Sockets.AddressFamily.InterNetwork) ?? true;
+            var supportsIpv6 = awgConfiguration?.SupportsAddressFamily(System.Net.Sockets.AddressFamily.InterNetworkV6) ?? true;
+            IReadOnlyList<string> dnsServers = awgConfiguration?.TunnelDnsServers() ?? ["1.1.1.1", "2606:4700:4700::1111"];
+            starting.Token.ThrowIfCancellationRequested();
+            Stage(VpnStartupStage.Tun);
             var builder = new Builder(this)
                 .SetSession("Di-Tunnel")
                 .SetMtu(1400)
-                .AddAddress("172.19.0.1", 30)
-                .AddAddress("fd00:19::1", 126)
-                .AddRoute("0.0.0.0", 0)
-                .AddRoute("::", 0)
-                .AddDnsServer("1.1.1.1")
-                .AddDnsServer("2606:4700:4700::1111")
                 .SetBlocking(true);
+            // Advertising an unsupported family makes browsers attempt connections that
+            // the AWG netstack cannot carry. Android blocks omitted families by default;
+            // do not allow them to escape through the physical network.
+            if (supportsIpv4) builder.AddAddress("172.19.0.1", 30).AddRoute("0.0.0.0", 0);
+            if (supportsIpv6) builder.AddAddress("fd00:19::1", 126).AddRoute("::", 0);
+            foreach (var dns in dnsServers) builder.AddDnsServer(dns);
             ApplyApplicationRules(builder, request.SplitTunnelPolicy, PackageName);
             tunnel = builder.Establish()
                 ?? throw new InvalidOperationException("Android не создал TUN-интерфейс.");
@@ -116,29 +186,173 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             var xrayPolicy = PolicyForXray(request.SplitTunnelPolicy);
             var assetDirectory = request.BlockAds ? EnsureXrayAssets() : null;
             var configuration = CreateAndroidConfiguration(
-                profileConfiguration.Build(serverAddress.ToString(), tun: true, splitTunnel: xrayPolicy, blockAds: request.BlockAds, strictAdBlocking: request.StrictAdBlocking),
+                profileConfiguration.Build(serverAddress.ToString(), tun: true, splitTunnel: xrayPolicy, blockAds: request.BlockAds, strictAdBlocking: request.StrictAdBlocking, dnsServers: dnsServers),
                 tunnel.Fd, assetDirectory);
-            var response = Invoke("runXrayFromJson", new JsonObject { ["configJSON"] = configuration });
+            starting.Token.ThrowIfCancellationRequested();
+            Stage(VpnStartupStage.Xray);
+            var response = await Task.Run(() => Invoke("runXrayFromJson", new JsonObject { ["configJSON"] = configuration }), starting.Token);
             if (!response.Success) throw new InvalidOperationException(SanitizeError(response.Error));
             xrayRunning = true;
-            AndroidVpnRuntimeState.SetConnected(this, request.Profile);
-            UpdateNotification("VPN подключён");
+            starting.Token.ThrowIfCancellationRequested();
+            Stage(VpnStartupStage.Connected);
+            await Task.Run(() => new AndroidVpnResumeStore(this).Save(saved), starting.Token);
+            AndroidVpnRuntimeState.SetConnected(this, request.Profile, OwnsRecovery);
+            UpdateNotification(isAmneziaWg ? "VPN подключён · AmneziaWG" : "VPN подключён");
             AndroidVpnServiceBridge.PublishStarted(this);
+            StartNetworkMonitor();
         }
         catch (Exception error)
         {
             AndroidVpnRuntimeState.Clear(this);
             CloseTunnel();
             StopForeground(StopForegroundFlags.Remove);
-            AndroidVpnServiceBridge.PublishStartFailed(this, error is InvalidOperationException or NotSupportedException or FormatException
+            var message = error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
                 ? error.Message
-                : "Не удалось запустить Android VPN.");
-            TerminateVpnProcess();
+                : "Не удалось запустить Android VPN.";
+            if (!manualRequest && OwnsRecovery && PersistedRequestAvailable()) _ = RestartForRecoveryAsync();
+            else
+            {
+                var wasStopping = stopRequested;
+                stopRequested = true;
+                StopSelf();
+                if (wasStopping) AndroidVpnServiceBridge.PublishStopped(this);
+                else AndroidVpnServiceBridge.PublishStartFailed(this, $"{message} ({startupStage}; {error.GetType().Name})");
+                TerminateVpnProcess();
+            }
         }
         finally
         {
             lifecycle.Release();
         }
+    }
+
+    private bool PersistedRequestAvailable()
+    {
+        try { return new AndroidVpnResumeStore(this).Load() is not null; }
+        catch { return false; }
+    }
+
+    private global::Android.Net.Network? PhysicalNetwork() => GetSystemService(ConnectivityService) is global::Android.Net.ConnectivityManager manager
+        ? AndroidXrayProbeRunner.FindPhysicalNetwork(manager) : null;
+
+    private void StartNetworkMonitor()
+    {
+        if (!OwnsRecovery || networkMonitor is not null) return;
+        if (amneziaRuntime is null) physicalNetworkId = PhysicalNetwork()?.GetHashCode() ?? 0;
+        var manager = (global::Android.Net.ConnectivityManager)GetSystemService(ConnectivityService)!;
+        networkMonitor = new PhysicalNetworkMonitor(ScheduleNetworkEvaluation);
+        using var builder = new global::Android.Net.NetworkRequest.Builder();
+        manager.RegisterNetworkCallback(builder.AddCapability(global::Android.Net.NetCapability.Internet)!
+            .AddCapability(global::Android.Net.NetCapability.NotVpn)!.Build()!, networkMonitor);
+    }
+
+    private void ScheduleNetworkEvaluation()
+    {
+        networkEvaluation?.Cancel();
+        networkEvaluation = new CancellationTokenSource();
+        _ = EvaluateNetworkAsync(networkEvaluation.Token);
+    }
+
+    private async Task EvaluateNetworkAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(300, token);
+            if (!OwnsRecovery || !xrayRunning) return;
+            var current = PhysicalNetwork();
+            if ((current?.GetHashCode() ?? 0) == physicalNetworkId) return;
+            if (amneziaRuntime is not null || current is null) await RestartForRecoveryAsync();
+            else { SetUnderlyingNetworks([current]); physicalNetworkId = current.GetHashCode(); }
+        }
+        catch (System.OperationCanceledException) { }
+        catch { if (OwnsRecovery) await RestartForRecoveryAsync(); }
+    }
+
+    private async Task RestartForRecoveryAsync()
+    {
+        if (!OwnsRecovery || Interlocked.Exchange(ref restarting, 1) != 0) return;
+        AndroidVpnRuntimeState.SetRecovering(this);
+        AndroidVpnServiceBridge.PublishRecovering(this);
+        UpdateNotification("Восстанавливаем VPN…");
+        // Keep this foreground process alive while offline. Killing it here relied on
+        // vendor Sticky restart scheduling and could leave recovery waiting forever.
+        // The independent foreground controller waits for physical network callbacks,
+        // sends STOP, and starts a fresh native process without an Activity.
+        try
+        {
+            StartForegroundService(new Intent().SetComponent(new ComponentName(PackageName!,
+                "com.divintyinteractive.ditunnel.VpnControlService"))
+                .SetAction("com.divintyinteractive.ditunnel.control.RECOVER"));
+        }
+        catch
+        {
+            Interlocked.Exchange(ref restarting, 0);
+            await Task.Delay(2000);
+            if (OwnsRecovery) _ = RestartForRecoveryAsync();
+        }
+    }
+
+    private void StopNetworkMonitor()
+    {
+        networkEvaluation?.Cancel();
+        if (networkMonitor is not null && GetSystemService(ConnectivityService) is global::Android.Net.ConnectivityManager manager)
+        {
+            try { manager.UnregisterNetworkCallback(networkMonitor); } catch (Java.Lang.IllegalArgumentException) { }
+            networkMonitor.Dispose();
+        }
+        networkMonitor = null;
+    }
+
+    private sealed class PhysicalNetworkMonitor(Action changed) : global::Android.Net.ConnectivityManager.NetworkCallback
+    {
+        public override void OnAvailable(global::Android.Net.Network network) => changed();
+        public override void OnLost(global::Android.Net.Network network) => changed();
+        public override void OnCapabilitiesChanged(global::Android.Net.Network network, global::Android.Net.NetworkCapabilities capabilities) => changed();
+    }
+
+    private async Task<XrayProfileConfiguration> StartAmneziaWgAsync(DiTunnel.Core.Profiles.ImportedProfile profile, CancellationToken cancellationToken)
+    {
+        Stage(VpnStartupStage.Endpoint);
+        var configuration = AmneziaWgProfileConverter.Convert(profile);
+        var manager = GetSystemService(ConnectivityService) as global::Android.Net.ConnectivityManager
+            ?? throw new InvalidOperationException("Сетевой сервис Android недоступен.");
+        var network = AndroidXrayProbeRunner.FindPhysicalNetwork(manager)
+            ?? throw new InvalidOperationException("Нет доступной физической сети.");
+        var endpoint = IPAddress.TryParse(configuration.ServerHost, out var ip) ? ip : null;
+        if (endpoint is null)
+        {
+            // Physical-network DNS may block. Never hold Android's main service thread
+            // during a widget/tile command, and leave time for the handshake/start bridge.
+            try
+            {
+                endpoint = await Task.Run(() => (network.GetAllByName(configuration.ServerHost) ?? [])
+                    .Select(address => IPAddress.Parse(address.HostAddress!))
+                    .OrderBy(address => address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 0 : 1).FirstOrDefault(), cancellationToken)
+                    .WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+            }
+            catch (TimeoutException) { throw new InvalidOperationException("Не удалось определить IP-адрес VPN-сервера."); }
+        }
+        if (endpoint is null) throw new InvalidOperationException("Не удалось определить IP-адрес VPN-сервера.");
+        cancellationToken.ThrowIfCancellationRequested();
+        SetUnderlyingNetworks([network]);
+        physicalNetworkId = network.GetHashCode();
+        Stage(VpnStartupStage.AwgTransport);
+        amneziaRuntime = new AndroidAwgBridgeClient(this, configuration, endpoint.ToString(), Stage);
+        amneziaRuntime.Disconnected += () =>
+        {
+            if (stopRequested) return;
+            starting?.Cancel();
+            if (!xrayRunning) return; // StartAsync will report the failed startup to its caller.
+            AndroidVpnRuntimeState.Clear(this);
+            if (OwnsRecovery) _ = RestartForRecoveryAsync();
+            else
+            {
+                StopSelf();
+                AndroidVpnServiceBridge.PublishStartFailed(this, "Служебный процесс AmneziaWG завершился.");
+                TerminateVpnProcess();
+            }
+        };
+        return await amneziaRuntime.StartAsync(cancellationToken);
     }
 
     private static void ApplyApplicationRules(Builder builder, DiTunnel.Core.Connection.SplitTunnelPolicy policy, string? ownPackageName)
@@ -187,7 +401,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
                 try { _ = Invoke("stopXray", new JsonObject()); }
                 catch { /* The isolated process is terminated below even if native shutdown fails. */ }
             }
-            try { global::LibXray.LibXray.ResetDNS(); } catch { }
+            if (xrayRunning) { try { global::LibXray.LibXray.ResetDNS(); } catch { } }
             AndroidVpnRuntimeState.Clear(this);
             StopForeground(StopForegroundFlags.Remove);
             CloseTunnel();
@@ -224,7 +438,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             ?? throw new InvalidOperationException("Android не создал действие отключения VPN.");
         return new Notification.Action.Builder(
                 Icon.CreateWithResource(this, Resource.Drawable.ic_vpn_status),
-                "Отключить",
+                AndroidLocalization.T("Отключить"),
                 stopPendingIntent)
             .Build();
     }
@@ -234,7 +448,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         var builder = new Notification.Builder(this, NotificationChannelId)
             .SetSmallIcon(Resource.Drawable.ic_vpn_status)
             .SetContentTitle("Di-Tunnel")
-            .SetContentText(text)
+            .SetContentText(AndroidLocalization.T(text))
             .SetOngoing(true)
             .SetCategory(Notification.CategoryService);
         builder.AddAction(CreateStopAction());
@@ -249,6 +463,11 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
 
     private void CloseTunnel()
     {
+        if (amneziaRuntime is not null)
+        {
+            try { amneziaRuntime.Dispose(); } catch { }
+            amneziaRuntime = null;
+        }
         xrayRunning = false;
         dialerController = null;
         tunnel?.Close();
@@ -329,10 +548,10 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             ?? throw new InvalidOperationException("Android NotificationManager недоступен.");
         var channel = new NotificationChannel(
             NotificationChannelId,
-            "VPN-подключение",
+            AndroidLocalization.T("VPN-подключение"),
             NotificationImportance.Low)
         {
-            Description = "Состояние VPN и безопасное отключение Di-Tunnel"
+            Description = AndroidLocalization.T("Состояние VPN и безопасное отключение Di-Tunnel")
         };
         manager.CreateNotificationChannel(channel);
     }

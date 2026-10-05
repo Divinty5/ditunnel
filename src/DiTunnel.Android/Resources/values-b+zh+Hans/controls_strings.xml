@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="qr_scanning">扫描二维码</string>
+  <string name="widget_select_server">选择服务器</string>
+  <string name="widget_disconnected">VPN 已断开</string>
+  <string name="widget_subscription">订阅服务器</string>
+</resources>

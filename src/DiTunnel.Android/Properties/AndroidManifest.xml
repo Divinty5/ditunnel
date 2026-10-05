@@ -15,7 +15,13 @@
   <application
       android:icon="@mipmap/app_icon"
       android:roundIcon="@mipmap/app_icon"
-      android:enableOnBackInvokedCallback="false">
+      android:enableOnBackInvokedCallback="false"
+      android:localeConfig="@xml/locales_config">
+    <service android:name="com.divintyinteractive.ditunnel.VpnControlService"
+        android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="Completing user-initiated VPN connection and server selection from Quick Settings or home screen widgets" />
+    </service>
     <provider
         android:name="androidx.core.content.FileProvider"
         android:authorities="${applicationId}.updates"
@@ -34,7 +40,7 @@
       </intent-filter>
       <meta-data
           android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
-          android:value="false" />
+          android:value="true" />
       <property
           android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
           android:value="User-initiated VPN tunnel carrying device network traffic" />
@@ -43,5 +49,15 @@
         android:name="com.divintyinteractive.ditunnel.DiTunnelProbeService"
         android:process=":probe"
         android:exported="false" />
+    <service
+        android:name="com.divintyinteractive.ditunnel.DiTunnelAwgService"
+        android:process=":awg"
+        android:exported="false"
+        android:permission="android.permission.BIND_VPN_SERVICE" />
+    <service
+        android:name="com.divintyinteractive.ditunnel.DiTunnelAwgProbeService"
+        android:process=":awgprobe"
+        android:exported="false"
+        android:permission="android.permission.BIND_VPN_SERVICE" />
   </application>
 </manifest>
