@@ -5,6 +5,39 @@ namespace DiTunnel.App.Tests;
 
 public sealed class ReleaseCheckerTests
 {
+    private static object CombinedRelease513(string? missingChecksum = null)
+    {
+        const string version = "0.5.13";
+        string[] names = ["Di-Tunnel-0.5.13-Setup-x64.exe", "Di-Tunnel-0.5.13-arm64.apk"];
+        var assets = names.SelectMany(name => name == missingChecksum ? new[] { name } : new[] { name, name + ".sha256" })
+            .Select(name => new { name, browser_download_url = $"https://github.com/Divinty5/ditunnel/releases/download/v{version}/{name}" });
+        return new { tag_name = "v" + version, draft = false, prerelease = false, assets };
+    }
+
+    [Theory]
+    [InlineData(false, "Di-Tunnel-0.5.13-Setup-x64.exe")]
+    [InlineData(true, "Di-Tunnel-0.5.13-arm64.apk")]
+    public void CombinedStable513ReleaseOffersCorrectPlatformFiles(bool android, string installerName)
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(CombinedRelease513()));
+        var release = ReleaseChecker.Parse(json.RootElement, new(0, 5, 12), android).Release;
+        Assert.NotNull(release);
+        Assert.Equal(new Version(0, 5, 13), release.Version);
+        Assert.Equal($"https://github.com/Divinty5/ditunnel/releases/download/v0.5.13/{installerName}", release.InstallerUrl);
+        Assert.Equal(release.InstallerUrl + ".sha256", release.ChecksumUrl);
+        Assert.Null(ReleaseChecker.Parse(json.RootElement, new(0, 5, 13), android).Release);
+    }
+
+    [Theory]
+    [InlineData(false, "Di-Tunnel-0.5.13-Setup-x64.exe")]
+    [InlineData(true, "Di-Tunnel-0.5.13-arm64.apk")]
+    public void Missing513ChecksumHidesOnlyAffectedPlatform(bool android, string installerName)
+    {
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(CombinedRelease513(installerName)));
+        Assert.Null(ReleaseChecker.Parse(json.RootElement, new(0, 5, 12), android).Release);
+        Assert.NotNull(ReleaseChecker.Parse(json.RootElement, new(0, 5, 12), !android).Release);
+    }
+
     private static object Release(string version, bool android, bool checksum = true, bool draft = false, bool prerelease = false)
     {
         var name = android ? $"Di-Tunnel-{version}-arm64.apk" : $"Di-Tunnel-{version}-Setup-x64.exe";
