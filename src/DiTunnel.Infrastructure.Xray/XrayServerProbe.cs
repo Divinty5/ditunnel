@@ -39,11 +39,17 @@ public static class XrayServerProbe
         try
         {
             await manager.StartAsync(path, timeout.Token);
-            if (tcpOnly) return await SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("1.1.1.1"), 443, timeout.Token);
+            if (tcpOnly)
+            {
+                if (configuration.SupportsIpv4)
+                    return await SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("1.1.1.1"), 443, timeout.Token);
+                return await SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("2606:4700:4700::1111"), 443, timeout.Token,
+                    new System.Net.Security.SslClientAuthenticationOptions { TargetHost = "one.one.one.one" });
+            }
             using var handler = new HttpClientHandler { UseProxy = true, Proxy = new WebProxy($"socks5://127.0.0.1:{port}") };
             using var client = new HttpClient(handler);
             var watch = Stopwatch.StartNew();
-            var target = useHttps ? "https://1.1.1.1/cdn-cgi/trace" : "http://cp.cloudflare.com/";
+            var target = useHttps ? configuration.SupportsIpv4 ? "https://1.1.1.1/cdn-cgi/trace" : "https://one.one.one.one/cdn-cgi/trace" : "http://cp.cloudflare.com/";
             using var request = new HttpRequestMessage(useHttps ? HttpMethod.Get : HttpMethod.Head, target);
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             response.EnsureSuccessStatusCode();

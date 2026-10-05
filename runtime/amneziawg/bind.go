@@ -18,6 +18,9 @@ type udpBind struct {
 	dryRun         bool
 	dryClosed      chan struct{}
 	interfaceIndex uint32
+	protect        func(uintptr) bool
+	ipv6           bool
+	openSocket     func() (*net.UDPConn, error)
 }
 type udpEndpoint struct{ address netip.AddrPort }
 
@@ -29,7 +32,7 @@ func (e *udpEndpoint) DstIP() netip.Addr   { return e.address.Addr() }
 func (e *udpEndpoint) SrcIP() netip.Addr   { return netip.Addr{} }
 func (b *udpBind) ParseEndpoint(value string) (conn.Endpoint, error) {
 	address, err := netip.ParseAddrPort(value)
-	if err != nil || !address.Addr().Is4() || address.Port() == 0 {
+	if err != nil || (!address.Addr().Is4() && !b.ipv6) || address.Port() == 0 {
 		return nil, errors.New("IPv4 endpoint required")
 	}
 	return &udpEndpoint{address}, nil
@@ -47,19 +50,42 @@ func (b *udpBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		return []conn.ReceiveFunc{receive}, port, nil
 	}
 	source := net.IPv4zero
+	family := "udp4"
+	if b.ipv6 {
+		source = net.IPv6zero
+		family = "udp6"
+	}
 	if b.source != "" {
 		source = net.ParseIP(b.source)
-		if source == nil || source.To4() == nil {
+		if source == nil || (!b.ipv6 && source.To4() == nil) {
 			return nil, 0, errors.New("invalid physical source")
 		}
 	}
-	socket, err := net.ListenUDP("udp4", &net.UDPAddr{IP: source, Port: int(port)})
+	var socket *net.UDPConn
+	var err error
+	if b.openSocket != nil {
+		socket, err = b.openSocket()
+	} else {
+		socket, err = net.ListenUDP(family, &net.UDPAddr{IP: source, Port: int(port)})
+	}
 	if err != nil {
 		return nil, 0, err
 	}
 	if err := bindInterface(socket, b.interfaceIndex); err != nil {
 		socket.Close()
 		return nil, 0, err
+	}
+	// Protect and bind encrypted transport before Device.Up can send any packets.
+	if b.protect != nil {
+		raw, controlErr := socket.SyscallConn()
+		protected := false
+		if controlErr == nil {
+			controlErr = raw.Control(func(fd uintptr) { protected = b.protect(fd) })
+		}
+		if controlErr != nil || !protected {
+			socket.Close()
+			return nil, 0, errors.New("transport protection failed")
+		}
 	}
 	b.socket = socket
 	receive := func(packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {

@@ -112,8 +112,10 @@ func request(t *testing.T, connection net.Conn, command byte, target netip.AddrP
 func TestEncryptedTCPAndUDP(t *testing.T) {
 	variants := map[string]string{
 		"AWG1": "jc=2\njmin=10\njmax=20\ns1=16\ns2=32\nh1=12345\nh2=23456\nh3=34567\nh4=45678\n",
+		"AWG1.5": "jc=2\njmin=10\njmax=20\ns1=16\ns2=32\nh1=12345\nh2=23456\nh3=34567\nh4=45678\ni1=<r 10>\n",
 		"AWG2": "jc=2\njmin=10\njmax=20\ns1=16\ns2=32\ns3=16\ns4=16\nh1=12345-12355\nh2=23456-23466\nh3=34567-34577\nh4=45678-45688\n",
 		"AWG3": "s1=16\ns2=32\ns3=16\ns4=16\nh1=12345\nh2=23456\nh3=34567\nh4=45678\nheader_protection_key=" + strings.Repeat("03", 32) + "\ncontent_padding_addition=10-20\n",
+		"AWG3.1": "s1=16\ns2=32\ns3=16\ns4=16\nh1=12345\nh2=23456\nh3=34567\nh4=45678\nheader_protection_key=" + strings.Repeat("03", 32) + "\ncontent_padding_addition=10-20\nrandom_trailers=true\ndisable_cookies=true\n",
 	}
 	for name, obfuscation := range variants {
 		t.Run(name, func(t *testing.T) {
@@ -170,9 +172,12 @@ func TestEncryptedTCPAndUDP(t *testing.T) {
 				}
 				defer udp.Close()
 				go func() {
-					buffer := make([]byte, 2048)
-					n, source, err := udp.ReadFrom(buffer)
-					if err == nil {
+					buffer := make([]byte, 4096)
+					for {
+						n, source, err := udp.ReadFrom(buffer)
+						if err != nil {
+							return
+						}
 						udp.WriteTo(buffer[:n], source)
 					}
 				}()
@@ -189,6 +194,14 @@ func TestEncryptedTCPAndUDP(t *testing.T) {
 					if port, ok := xrayProxy(t, socks); ok {
 						openClient = func() net.Conn { return noAuthClient(t, port) }
 					}
+				}
+				if name == "AWG2" {
+					t.Run("TLS13-"+host, func(t *testing.T) {
+						checkTLSForwarding(t, serverNet, host, openClient)
+						if port, ok := xrayProxy(t, socks); ok {
+							checkTLSForwarding(t, serverNet, host, func() net.Conn { return noAuthClient(t, port) })
+						}
+					})
 				}
 				connection := openClient()
 				request(t, connection, 1, tcpTarget)
@@ -207,17 +220,21 @@ func TestEncryptedTCPAndUDP(t *testing.T) {
 				}
 				defer socket.Close()
 				socket.SetDeadline(time.Now().Add(8 * time.Second))
-				payload = []byte("encrypted UDP through AWG")
 				frame := append([]byte{0, 0, 0}, encodeAddress(udpTarget)...)
-				socket.Write(append(frame, payload...))
-				buffer := make([]byte, 2048)
-				n, err := socket.Read(buffer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				target, echo, err := parseUDP(buffer[:n])
-				if err != nil || target != udpTarget.String() || !bytes.Equal(echo, payload) {
-					t.Fatalf("UDP echo failed: %v", err)
+				for _, size := range []int{24, 1200, 1350, 3000} {
+					payload = bytes.Repeat([]byte{0x5a}, size)
+					if _, err := socket.Write(append(frame, payload...)); err != nil {
+						t.Fatal(err)
+					}
+					buffer := make([]byte, 4096)
+					n, err := socket.Read(buffer)
+					if err != nil {
+						t.Fatalf("UDP %s size=%d: %v", host, size, err)
+					}
+					target, echo, err := parseUDP(buffer[:n])
+					if err != nil || target != udpTarget.String() || !bytes.Equal(echo, payload) {
+						t.Fatalf("UDP echo size=%d failed: %v", size, err)
+					}
 				}
 			}
 		})

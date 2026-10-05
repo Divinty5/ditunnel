@@ -78,6 +78,126 @@ public sealed class AmneziaWgProfileConverterTests
     public void RejectsIpv6OuterEndpointUntilWindowsHostSupportsIt()
         => Assert.Throws<NotSupportedException>(() => AmneziaWgProfileConverter.Convert(Profile()).BuildRuntimeConfiguration("2001:db8::1", "user", "password"));
 
+    [Fact]
+    public void AndroidProxyBridgePreservesIpv6EndpointAndTunnelAddresses()
+    {
+        using var document = JsonDocument.Parse(AmneziaWgProfileConverter.Convert(Profile())
+            .BuildProxyRuntimeConfiguration("2001:db8::1", "synthetic-user", "synthetic-password"));
+        Assert.Contains("endpoint=[2001:db8::1]:51820\n", document.RootElement.GetProperty("uapi").GetString());
+        Assert.Equal(["192.0.2.2", "2001:db8::2"], document.RootElement.GetProperty("addresses").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("allowed_ip=::/0\n", document.RootElement.GetProperty("uapi").GetString());
+    }
+
+    [Theory]
+    [InlineData("192.0.2.1", "192.0.2.1:51820")]
+    [InlineData("2001:db8::1", "[2001:db8::1]:51820")]
+    public void NativeTunnelPreservesPrefixesAndFormatsBothEndpointFamilies(string address, string expected)
+    {
+        var configuration = AmneziaWgProfileConverter.Convert(Profile());
+        Assert.Equal(new[] { "192.0.2.2/32", "2001:db8::2/128" }, configuration.TunnelAddresses);
+        Assert.Equal(new[] { "0.0.0.0/0", "::/0" }, configuration.AllowedIps);
+        var uapi = configuration.BuildUserspaceConfiguration(address);
+        Assert.Contains("endpoint=" + expected + "\n", uapi);
+        Assert.DoesNotContain("__ENDPOINT__", uapi);
+        Assert.Contains("preshared_key=", uapi);
+        Assert.Contains("h4=45678\n", uapi);
+    }
+
+    [Fact]
+    public void NativeTunnelRejectsUnresolvedEndpoint()
+        => Assert.Throws<ArgumentException>(() => AmneziaWgProfileConverter.Convert(Profile()).BuildUserspaceConfiguration("vpn.example.com"));
+
+    [Theory]
+    [InlineData("192.0.2.2/32", "0.0.0.0/0, ::/0", true, false)]
+    [InlineData("192.0.2.2/32, 2001:db8::2/128", "0.0.0.0/0", true, false)]
+    [InlineData("192.0.2.2/32, 2001:db8::2/128", "0.0.0.0/0, ::/0", true, true)]
+    [InlineData("2001:db8::2/128", "::/0", false, true)]
+    public void TunnelOnlyAdvertisesFamiliesWithALocalAddressAndPeerRoute(string addresses, string routes, bool ipv4, bool ipv6)
+    {
+        var source = Profile();
+        var profile = source with { Content = source.Content
+            .Replace("Address = 192.0.2.2/32, 2001:db8::2/128", "Address = " + addresses)
+            .Replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = " + routes) };
+        var configuration = AmneziaWgProfileConverter.Convert(profile);
+        Assert.Equal(ipv4, configuration.SupportsAddressFamily(System.Net.Sockets.AddressFamily.InterNetwork));
+        Assert.Equal(ipv6, configuration.SupportsAddressFamily(System.Net.Sockets.AddressFamily.InterNetworkV6));
+    }
+
+    [Theory]
+    [InlineData("0.0.0.0/0, ::/0", "1.1.1.1")]
+    [InlineData("2001:db8:10::/64", "2001:db8:10::1")]
+    [InlineData("192.0.2.0/24", "192.0.2.1")]
+    [InlineData("192.0.2.2/31", "192.0.2.3")]
+    public void HandshakeProbeStaysWithinPeerRoutes(string allowed, string expected)
+    {
+        var profile = Profile() with { Content = Profile().Content.Replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = " + allowed) };
+        Assert.Equal(expected, AmneziaWgProfileConverter.Convert(profile).HandshakeProbeAddress().ToString());
+    }
+
+    [Fact]
+    public void HandshakeProbeNeverTargetsTheLocalTunnelAddress()
+    {
+        var profile = Profile() with { Content = Profile().Content.Replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = 192.0.2.2/32") };
+        Assert.Throws<NotSupportedException>(() => AmneziaWgProfileConverter.Convert(profile).HandshakeProbeAddress());
+    }
+
+    [Theory]
+    [InlineData("2001:db8::/128, 2001:db8::1/128, 2001:db8::2/128", "2001:db8::3")]
+    [InlineData("2001:db8::/128, 2001:db8::1/128, 2001:db8::2/128, 2001:db8::3/128", null)]
+    public void HandshakeProbeSkipsEveryLocalAddressWithoutLeavingThePrefix(string addresses, string? expected)
+    {
+        var profile = Profile() with { Content = Profile().Content
+            .Replace("Address = 192.0.2.2/32, 2001:db8::2/128", "Address = " + addresses)
+            .Replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = 2001:db8::/126") };
+        var configuration = AmneziaWgProfileConverter.Convert(profile);
+        if (expected is null) Assert.Throws<NotSupportedException>(() => configuration.HandshakeProbeAddress());
+        else Assert.Equal(expected, configuration.HandshakeProbeAddress().ToString());
+    }
+
+    [Fact]
+    public void Ipv6OnlyTunnelNeverProbesAnUnusableIpv4PeerRoute()
+    {
+        var profile = Profile() with { Content = Profile().Content.Replace("Address = 192.0.2.2/32, 2001:db8::2/128", "Address = 2001:db8::2/128") };
+        Assert.Equal("2606:4700:4700::1111", AmneziaWgProfileConverter.Convert(profile).HandshakeProbeAddress().ToString());
+    }
+
+    [Fact]
+    public void Ipv6OnlyTunnelGetsUsableDefaultDns()
+    {
+        var profile = Profile() with { Content = Profile().Content
+            .Replace("Address = 192.0.2.2/32, 2001:db8::2/128", "Address = 2001:db8::2/128")
+            .Replace("DNS = 192.0.2.53, example.com", "") };
+        var configuration = AmneziaWgProfileConverter.Convert(profile);
+        Assert.All(configuration.TunnelDnsServers(), value => Assert.Contains(':', value));
+    }
+
+    [Theory]
+    [InlineData("192.0.2.0/24", "192.0.2.53", false)]
+    [InlineData("198.51.100.0/24", "192.0.2.53", true)]
+    [InlineData("::/0", "192.0.2.53", true)]
+    public void DnsMustBeReachableThroughThePeersCryptokeyRoutes(string routes, string dns, bool rejected)
+    {
+        var profile = Profile() with { Content = Profile().Content.Replace("AllowedIPs = 0.0.0.0/0, ::/0", "AllowedIPs = " + routes) };
+        var configuration = AmneziaWgProfileConverter.Convert(profile);
+        if (rejected) Assert.Throws<NotSupportedException>(() => configuration.TunnelDnsServers());
+        else Assert.Equal(dns, Assert.Single(configuration.TunnelDnsServers()));
+    }
+
+    [Theory]
+    [InlineData(SplitTunnelMode.ProxyAll)]
+    [InlineData(SplitTunnelMode.ProxySelected)]
+    [InlineData(SplitTunnelMode.BypassSelected)]
+    public void UnsupportedIpv6IsBlockedBeforeSplitRulesCanBypassIt(SplitTunnelMode mode)
+    {
+        var profile = Profile() with { Content = Profile().Content.Replace("Address = 192.0.2.2/32, 2001:db8::2/128", "Address = 192.0.2.2/32") };
+        using var document = JsonDocument.Parse(AmneziaWgProfileConverter.Convert(profile).CreateProxyConfiguration(12345, "u", "p")
+            .Build("192.0.2.1", true, splitTunnel: new(mode, ["::1"], [])));
+        var rule = document.RootElement.GetProperty("routing").GetProperty("rules")[0];
+        Assert.Equal("::/0", rule.GetProperty("ip")[0].GetString());
+        Assert.Equal("block", rule.GetProperty("outboundTag").GetString());
+        Assert.Contains(document.RootElement.GetProperty("outbounds").EnumerateArray(), outbound => outbound.GetProperty("protocol").GetString() == "blackhole");
+    }
+
     [Theory]
     [InlineData(SplitTunnelMode.ProxyAll)]
     [InlineData(SplitTunnelMode.ProxySelected)]

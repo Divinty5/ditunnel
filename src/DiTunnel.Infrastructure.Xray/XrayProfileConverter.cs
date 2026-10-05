@@ -9,6 +9,8 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
 {
     // The endpoint metadata refers to the encrypted server; the SOCKS hop stays on loopback.
     public bool IsLocalProxy { get; init; }
+    public bool SupportsIpv4 { get; init; } = true;
+    public bool SupportsIpv6 { get; init; } = true;
     public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false, IReadOnlyList<string>? dnsServers = null, bool enableSocksUdp = true)
     {
         var outbound = (JsonObject)Outbound.DeepClone();
@@ -28,11 +30,18 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(DirectOutbound());
         outbounds.Add(outbound);
         if (splitTunnel.Mode == SplitTunnelMode.BypassSelected) outbounds.Add(DirectOutbound());
-        if (blockAds) outbounds.Add(new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" });
+        if (blockAds || !SupportsIpv4 || !SupportsIpv6) outbounds.Add(new JsonObject { ["tag"] = "block", ["protocol"] = "blackhole" });
         if (!string.IsNullOrWhiteSpace(outboundSourceAddress))
             foreach (var item in outbounds.OfType<JsonObject>())
                 if (!IsLocalProxy || item["tag"]?.GetValue<string>() != "proxy") item["sendThrough"] = outboundSourceAddress;
         var rules = new JsonArray();
+        if (!SupportsIpv4 || !SupportsIpv6)
+        {
+            var unsupported = new JsonArray();
+            if (!SupportsIpv4) unsupported.Add("0.0.0.0/0");
+            if (!SupportsIpv6) unsupported.Add("::/0");
+            rules.Add(new JsonObject { ["ip"] = unsupported, ["outboundTag"] = "block" });
+        }
         if (blockAds)
         {
             var blockedDomains = new JsonArray(
@@ -93,7 +102,7 @@ public static class XrayProfileConverter
     {
         if (profile.Kind.Equals(AmneziaWgConfiguration.ProfileKind, StringComparison.OrdinalIgnoreCase) ||
             AmneziaWgConfiguration.LooksLikeConfiguration(profile.Content))
-            throw new NotSupportedException("AmneziaWG требует отдельного ядра AmneziaWG. Подключение и проверка реализованы в Windows-клиенте; на Android пока доступен только импорт.");
+            throw new NotSupportedException("AmneziaWG требует отдельного ядра AmneziaWG. Используйте движок AmneziaWG для подключения и проверки.");
         var vmess = profile.Content.StartsWith("vmess://", StringComparison.OrdinalIgnoreCase)
             ? ProfileParser.ParseVmessConfiguration(profile.Content) : null;
         Uri uri;

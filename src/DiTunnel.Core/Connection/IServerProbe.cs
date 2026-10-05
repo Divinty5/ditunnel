@@ -2,7 +2,7 @@ using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.Core.Connection;
 
-public sealed record ServerProbeResult(double? Milliseconds, string Message);
+public sealed record ServerProbeResult(double? Milliseconds, string Message, bool IsDeferred = false);
 
 public enum ServerProbeMode
 {

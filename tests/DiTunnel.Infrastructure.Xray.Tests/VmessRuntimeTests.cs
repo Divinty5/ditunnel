@@ -7,6 +7,7 @@ using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.Infrastructure.Xray.Tests;
 
+[Collection("Xray runtime")]
 public sealed class VmessRuntimeTests
 {
     [Theory]

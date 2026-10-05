@@ -4,6 +4,7 @@ using DiTunnel.Platform.Windows;
 
 namespace DiTunnel.Infrastructure.Xray.Tests;
 
+[Collection("Xray runtime")]
 public sealed class ProbeLifecycleTests
 {
     [Fact]
@@ -52,11 +53,10 @@ public sealed class ProbeLifecycleTests
         Assert.NotNull(root);
         var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.3.27", "windows-x64", "xray.exe");
         Assert.True(File.Exists(runtime));
-        // Bind UDP first, then find a free TCP port with that same number. No outbound traffic.
-        using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        // Windows can assign UDP an ephemeral port reserved/excluded for TCP. Reserve
+        // a usable TCP number first, then hold its UDP counterpart for the conflict test.
+        using var udp = ReserveUdpWithUsableTcpPort();
         var port = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
-        var tcp = new TcpListener(IPAddress.Loopback, port);
-        tcp.Start(); tcp.Stop();
         var path = Path.Combine(Path.GetTempPath(), "xray-loopback-test-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
@@ -64,9 +64,45 @@ public sealed class ProbeLifecycleTests
             await File.WriteAllTextAsync(path, configuration.Build("192.0.2.1", false, port, enableSocksUdp: enableUdp));
             await using var manager = new XrayProcessManager(new XrayOptions
             { ExecutablePath = runtime, WorkingDirectory = Path.GetDirectoryName(runtime)!, ValidateConfigurationBeforeStart = false, ShutdownTimeout = TimeSpan.FromMilliseconds(100) });
-            if (enableUdp) await Assert.ThrowsAsync<InvalidOperationException>(() => manager.StartAsync(path));
+            if (enableUdp)
+            {
+                var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var udpFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                manager.Exited += code => exited.TrySetResult(code);
+                manager.LogReceived += entry =>
+                {
+                    if (entry.Message.Contains("UDP", StringComparison.OrdinalIgnoreCase)
+                        && entry.Message.Contains("failed", StringComparison.OrdinalIgnoreCase))
+                        udpFailure.TrySetResult();
+                };
+                // A loaded host can report the bind failure after StartupGracePeriod.
+                // Assert the actual native failure, not the timing of StartAsync's return.
+                try { await manager.StartAsync(path); }
+                catch (InvalidOperationException) { }
+                Assert.NotEqual(0, await exited.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+                await udpFailure.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
             else { await manager.StartAsync(path); Assert.True(manager.IsRunning); }
         }
         finally { File.Delete(path); }
+    }
+    private static UdpClient ReserveUdpWithUsableTcpPort()
+    {
+        for (var attempt = 0; attempt < 32; attempt++)
+        {
+            using var tcp = new TcpListener(IPAddress.Loopback, 0);
+            tcp.Start();
+            var udp = new UdpClient(AddressFamily.InterNetwork);
+            try
+            {
+                udp.Client.Bind(tcp.LocalEndpoint);
+                return udp;
+            }
+            catch (SocketException error) when (error.SocketErrorCode is SocketError.AccessDenied or SocketError.AddressAlreadyInUse)
+            {
+                udp.Dispose();
+            }
+        }
+        throw new InvalidOperationException("No common loopback TCP/UDP test port is available.");
     }
 }

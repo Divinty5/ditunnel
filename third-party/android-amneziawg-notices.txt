@@ -1,0 +1,14 @@
+Di-Tunnel Android includes libditunnel-awg.so, built from runtime/amneziawg.
+This is the same authenticated SOCKS/netstack bridge used on Windows.
+Pinned source: github.com/amnezia-vpn/amneziawg-go/v3
+Version: v3.0.0-20260828154827-b5928efb6ca1
+Commit: b5928efb6ca19f0153958460c3d141f04abc5c2e
+https://github.com/amnezia-vpn/amneziawg-go/tree/b5928efb6ca19f0153958460c3d141f04abc5c2e
+Go toolchain: go1.27.1. Dependency checksums: runtime/amneziawg/go.sum.
+
+Di-Tunnel bridge and AmneziaWG: MIT.
+Copyright (C) 2017-2025 WireGuard LLC. All Rights Reserved.
+Copyright (C) The AmneziaVPN Authors.
+gVisor and google/btree: Apache-2.0.
+Go and golang.org/x dependencies: BSD-3-Clause.
+Full license texts are included in APK assets/licenses.

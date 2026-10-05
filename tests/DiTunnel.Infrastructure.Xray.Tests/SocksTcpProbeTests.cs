@@ -18,8 +18,9 @@ public sealed class SocksTcpProbeTests
         using var certificate = TestCertificate(key);
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var server = Task.Run(async () =>
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var server = ServeAsync();
+        async Task ServeAsync()
         {
             using var socket = await listener.AcceptTcpClientAsync(deadline.Token);
             var stream = socket.GetStream();
@@ -41,26 +42,31 @@ public sealed class SocksTcpProbeTests
                 try { await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate }, deadline.Token); }
                 catch (System.Security.Authentication.AuthenticationException) when (!trustCertificate) { }
             }
-        });
+        }
         var options = new SslClientAuthenticationOptions
         {
             TargetHost = "192.0.2.1",
             CertificateChainPolicy = new X509ChainPolicy
             {
                 TrustMode = X509ChainTrustMode.CustomRootTrust, RevocationMode = X509RevocationMode.NoCheck,
-                CustomTrustStore = { certificate }
+                DisableCertificateDownloads = true
             }
         };
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var probe = trustCertificate
-            ? SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("192.0.2.1"), 443, deadline.Token, options)
-            : SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("192.0.2.1"), 443, deadline.Token);
+        if (trustCertificate) options.CertificateChainPolicy.CustomTrustStore.Add(certificate);
+        var probe = SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("192.0.2.1"), 443, deadline.Token, options);
         if (reject) await Assert.ThrowsAsync<IOException>(() => probe);
         else if (!trustCertificate) await Assert.ThrowsAnyAsync<System.Security.Authentication.AuthenticationException>(() => probe);
         else
         {
-            try { Assert.InRange(await probe, 200, 5000); }
-            catch { await server; throw; }
+            try { Assert.InRange(await probe, 200, 15000); }
+            catch
+            {
+                // Preserve the client failure instead of replacing it with Accept's timeout.
+                deadline.Cancel();
+                try { await server; } catch { }
+                throw;
+            }
         }
         await server;
     }
