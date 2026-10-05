@@ -37,6 +37,8 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
     private static readonly Guid BlockV6Key = new("6438a235-b53c-4303-b19e-e8af06a06040");
     private static readonly Guid ProbeV4Key = new("88b4e719-bb96-47ef-96b2-ec79c1176ec1");
     private static readonly Guid ProbeV6Key = new("48e62582-572c-430c-94d6-b47a991e10d8");
+    private static readonly Guid DirectProxyV4Key = new("7c3738fa-d12a-4841-8c2b-86772e81ea40");
+    private static readonly Guid DirectProxyV6Key = new("8464a6d8-8ab1-4097-9d62-0e1d06b22111");
     private static readonly (Guid Key, string Prefix)[] LanV4 =
     [
         (new("20cc9f3b-c4db-4bd3-a05f-e943b330b328"), "10.0.0.0/8"),
@@ -58,6 +60,12 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
     public NetworkProtectionStatus Status { get; private set; } = NetworkProtectionStatus.Inactive;
     public event EventHandler<NetworkProtectionStatus>? StatusChanged;
 
+    public WindowsKillSwitchController()
+    {
+        installed = QueryBlockingFilters() == true;
+        if (installed) Status = new(NetworkProtectionState.Active, "Kill switch сохраняет блокировку после предыдущего запуска.");
+    }
+
     public Task ActivateAsync(KillSwitchConfiguration configuration, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException("A Windows tunnel interface index is required.");
 
@@ -69,16 +77,20 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
         {
             SetStatus(NetworkProtectionState.Activating, "Устанавливаем правила блокировки WFP…");
             cancellationToken.ThrowIfCancellationRequested();
-            activeTunnelLuid = ConvertInterfaceIndexToLuid(tunnelInterfaceIndex);
-            Install(configuration, activeTunnelLuid);
+            var nextTunnelLuid = ConvertInterfaceIndexToLuid(tunnelInterfaceIndex);
+            Install(configuration, nextTunnelLuid);
+            activeTunnelLuid = nextTunnelLuid;
             installed = true;
             activeConfiguration = configuration;
             SetStatus(NetworkProtectionState.Active, "Kill switch активен.");
         }
         catch (Exception error)
         {
-            try { RemoveOwnedObjects(); } catch { }
-            SetStatus(NetworkProtectionState.Faulted, $"Не удалось включить kill switch: {error.Message}");
+            // Install is transactional: abort retains the previous armed rule set.
+            // Deleting it here would turn a failed reconnection into a fail-open gap.
+            installed = QueryBlockingFilters() == true;
+            SetStatus(installed ? NetworkProtectionState.Active : NetworkProtectionState.Faulted,
+                $"Не удалось включить kill switch: {error.Message}");
             throw;
         }
         finally { gate.Release(); }
@@ -106,6 +118,32 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
     }
 
     public static void CleanupStaleFilters() => RemoveOwnedObjects();
+
+    // Read the deterministic block keys rather than assuming that a new UI process
+    // means protection is inactive. Never mutate filters during this startup check.
+    public static unsafe bool? QueryBlockingFilters()
+    {
+        FWPM_ENGINE_HANDLE engine = default;
+        var result = PInvoke.FwpmEngineOpen0(null, 10, null, null, &engine);
+        if (result != 0) return null;
+        try
+        {
+            foreach (var filterKey in new[] { BlockV4Key, BlockV6Key })
+            {
+                var key = filterKey;
+                FWPM_FILTER0* filter = null;
+                result = PInvoke.FwpmFilterGetByKey0(engine, &key, &filter);
+                if (result == 0)
+                {
+                    PInvoke.FwpmFreeMemory0((void**)&filter);
+                    return true; // A partial set still blocks one address family.
+                }
+                if (result != FwpEFilterNotFound) return null;
+            }
+            return false;
+        }
+        finally { _ = PInvoke.FwpmEngineClose0(engine); }
+    }
 
     public async Task PrepareTransitionAsync(KillSwitchConfiguration nextConfiguration, CancellationToken cancellationToken = default)
     {
@@ -203,6 +241,11 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
             RemoveOwnedObjects(engine);
             AddProvider(engine);
             AddSubLayer(engine);
+            if (configuration.DirectProxyApplicationPath is { } application)
+            {
+                AddApplicationFilter(engine, DirectProxyV4Key, PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V4, application);
+                AddApplicationFilter(engine, DirectProxyV6Key, PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V6, application);
+            }
             for (var i = 0; i < v4.Length; i++) AddServerFilter(engine, ServerFilterKey(false, i), $"Permit VPN server IPv4 #{i + 1}", PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V4, v4[i], configuration);
             for (var i = 0; i < v6.Length; i++) AddServerFilter(engine, ServerFilterKey(true, i), $"Permit VPN server IPv6 #{i + 1}", PInvoke.FWPM_LAYER_ALE_AUTH_CONNECT_V6, v6[i], configuration);
             var directV4 = (configuration.DirectAddresses ?? []).Where(a => a.AddressFamily == AddressFamily.InterNetwork).Take(MaximumDirectAddressesPerFamily).ToArray();
@@ -270,6 +313,22 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
     {
         var condition = EqualUInt64(PInvoke.FWPM_CONDITION_IP_LOCAL_INTERFACE, &luid);
         AddFilter(engine, key, name, layer, &condition, 1, FWP_ACTION_TYPE.FWP_ACTION_PERMIT, 15);
+    }
+    private static unsafe void AddApplicationFilter(FWPM_ENGINE_HANDLE engine, Guid key, Guid layer, string path)
+    {
+        FWP_BYTE_BLOB* appId = null;
+        fixed (char* filename = path)
+            WfpEngineTransaction.ThrowIfFailed(PInvoke.FwpmGetAppIdFromFileName0(new PCWSTR(filename), &appId));
+        try
+        {
+            var condition = new FWPM_FILTER_CONDITION0
+            {
+                fieldKey = PInvoke.FWPM_CONDITION_ALE_APP_ID, matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                conditionValue = new() { type = FWP_DATA_TYPE.FWP_BYTE_BLOB_TYPE, Anonymous = new() { byteBlob = appId } }
+            };
+            AddFilter(engine, key, "Permit Xray split-routing outbound", layer, &condition, 1, FWP_ACTION_TYPE.FWP_ACTION_PERMIT, 14);
+        }
+        finally { PInvoke.FwpmFreeMemory0((void**)&appId); }
     }
 
     private static unsafe void AddServerFilter(FWPM_ENGINE_HANDLE engine, Guid key, string name, Guid layer, IPAddress address, KillSwitchConfiguration configuration)
@@ -422,6 +481,7 @@ public sealed class WindowsKillSwitchController : INetworkProtectionController
         yield return LoopbackV4Key; yield return LoopbackV6Key;
         yield return DhcpV4Key; yield return DhcpV6Key; yield return BlockV4Key; yield return BlockV6Key;
         yield return ProbeV4Key; yield return ProbeV6Key;
+        yield return DirectProxyV4Key; yield return DirectProxyV6Key;
         foreach (var entry in LanV4) yield return entry.Key;
         foreach (var entry in LanV6) yield return entry.Key;
         for (var i = 0; i < MaximumServerAddressesPerFamily; i++) { yield return ServerFilterKey(false, i); yield return ServerFilterKey(true, i); }

@@ -60,7 +60,8 @@ internal static class Program
                 () => App.UserSettings.Current.BlockAdsEnabled,
                 () => App.UserSettings.Current.StrictAdBlockingEnabled);
             return new App.ViewModels.MainViewModel(engine,
-                probe: engine, countryResolver: new Platform.Windows.WindowsServerCountryResolver());
+                probe: engine, countryResolver: new Platform.Windows.WindowsServerCountryResolver(),
+                installedApplicationProvider: new Platform.Windows.WindowsInstalledApplicationProvider());
         };
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         timer.Stop();

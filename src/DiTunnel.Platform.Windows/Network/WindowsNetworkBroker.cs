@@ -54,6 +54,7 @@ public static class WindowsNetworkBroker
         var split = SplitTunnelPolicy.Default;
         var connection = ConnectionPolicy.Default;
         bool ads = false, strict = false;
+        var explicitlyStopped = false;
         var killSwitch = new WindowsKillSwitchController();
         var engine = new WindowsVpnEngine(() => split, () => connection, killSwitch, () => ads, () => strict);
         var probe = new WindowsServerProbe(killSwitch, engine);
@@ -87,12 +88,22 @@ public static class WindowsNetworkBroker
                         split = request.Split ?? SplitTunnelPolicy.Default;
                         connection = request.Connection ?? ConnectionPolicy.Default;
                         ads = request.BlockAds; strict = request.StrictAds;
+                        explicitlyStopped = false;
                     }
                     switch (request.Operation)
                     {
                         case "connect": await engine.ConnectAsync(request.Profile ?? throw new FormatException("Профиль отсутствует."), cancellation.Token); break;
                         case "switch": await engine.SwitchAsync(request.Profile ?? throw new FormatException("Профиль отсутствует."), cancellation.Token); break;
-                        case "disconnect": await engine.DisconnectAsync(cancellation.Token); break;
+                        case "disconnect":
+                            await engine.DisconnectAsync(cancellation.Token);
+                            explicitlyStopped = true;
+                            break;
+                        case "restore-network":
+                            await engine.DisconnectAsync(cancellation.Token);
+                            WindowsDnsPolicy.CleanupOwned();
+                            WindowsKillSwitchController.CleanupStaleFilters();
+                            explicitlyStopped = true;
+                            break;
                         default: throw new FormatException("Неизвестная операция сетевого модуля.");
                     }
                 }
@@ -141,7 +152,8 @@ public static class WindowsNetworkBroker
             lifetime.Cancel();
             // Cancel queued/in-flight requests before disconnecting. Cleanup itself must never be cancelled.
             await Task.WhenAll(tasks);
-            await engine.DisposeAsync();
+            // A probe-only broker can inherit armed filters before loading any policy.
+            await engine.DisposeAsync(preserveProtection: !explicitlyStopped && engine.IsNetworkProtectionActive);
             statusFrames.Writer.TryComplete();
             await statusWriter;
             await ownerWatch;

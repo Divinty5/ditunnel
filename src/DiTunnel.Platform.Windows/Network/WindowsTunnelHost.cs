@@ -9,7 +9,10 @@ namespace DiTunnel.Platform.Windows.Network;
 
 internal sealed record TunnelHostOptions(string Runtime, string Config, IPAddress Server, string Name,
     SplitTunnelMode SplitMode, IPAddress[] SplitAddresses, string[] SplitDomains, string? ProtectionReady,
-    string? AmneziaRuntime, string[] DnsServers);
+    string? AmneziaRuntime, string[] DnsServers, bool SupportsIpv4 = true, bool SupportsIpv6 = true, bool HasProcessRules = false)
+{
+    internal bool CaptureAllTraffic => SplitMode != SplitTunnelMode.ProxySelected || HasProcessRules;
+}
 
 /// <summary>Runs in the elevated broker. The GUI can disappear while rollback continues here.</summary>
 internal sealed class WindowsTunnelHost : IDisposable
@@ -195,8 +198,8 @@ internal sealed class WindowsTunnelHost : IDisposable
                 return tunnelIndex != 0;
             }, TimeSpan.FromSeconds(20));
             Stage("ADDRESSES");
-            await network.AddAddressAsync(tunnelIndex, "172.31.255.1", 30, stopping.Token);
-            await network.AddAddressAsync(tunnelIndex, "fd52:d17::1", 64, stopping.Token);
+            if (options.SupportsIpv4) await network.AddAddressAsync(tunnelIndex, "172.31.255.1", 30, stopping.Token);
+            if (options.SupportsIpv6) await network.AddAddressAsync(tunnelIndex, "fd52:d17::1", 64, stopping.Token);
             network.SetMetric(tunnelIndex, false);
             network.SetMetric(tunnelIndex, true);
             Emit("TUNNEL_INTERFACE_" + tunnelIndex);
@@ -207,11 +210,20 @@ internal sealed class WindowsTunnelHost : IDisposable
                     throw new InvalidOperationException("Kill switch не активирован.");
             }
             Stage("ROUTES");
-            if (options.SplitMode == SplitTunnelMode.ProxySelected && options.SplitAddresses.Length == 0)
+            if (!options.CaptureAllTraffic && options.SplitAddresses.Length == 0)
                 throw new InvalidOperationException("Нет адресов выбранных доменов.");
-            if (options.SplitMode != SplitTunnelMode.ProxySelected)
+            if (options.CaptureAllTraffic)
                 foreach (var prefix in new[] { "0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1" })
                     AddRoute(new(prefix, tunnelIndex, prefix.Contains(':') ? "::" : "0.0.0.0"));
+            else
+            {
+                // An unsupported family must not escape over the physical default route
+                // while selected-domain routing is active. Xray rejects it explicitly.
+                if (!options.SupportsIpv4)
+                    foreach (var prefix in new[] { "0.0.0.0/1", "128.0.0.0/1" }) AddRoute(new(prefix, tunnelIndex, "0.0.0.0"));
+                if (!options.SupportsIpv6)
+                    foreach (var prefix in new[] { "::/1", "8000::/1" }) AddRoute(new(prefix, tunnelIndex, "::"));
+            }
             foreach (var server in options.DnsServers)
                 AddRoute(new(server + (server.Contains(':') ? "/128" : "/32"), tunnelIndex, server.Contains(':') ? "::" : "0.0.0.0"));
             UpdateSplitRoutes(options.SplitAddresses.Select(a => a.ToString()), uplink);
@@ -228,7 +240,8 @@ internal sealed class WindowsTunnelHost : IDisposable
                     var deadline = DateTime.UtcNow.AddSeconds(10);
                     while (true)
                     {
-                        try { if ((await network.ResolveAsync(domain, stopping.Token)).Any(a => a.AddressFamily == AddressFamily.InterNetwork)) break; }
+                        try { if ((await network.ResolveAsync(domain, stopping.Token)).Any(a =>
+                            a.AddressFamily == AddressFamily.InterNetwork ? options.SupportsIpv4 : options.SupportsIpv6)) break; }
                         catch (Exception error) when (error is SocketException or TimeoutException) { }
                         if (DateTime.UtcNow >= deadline) throw new TimeoutException("DNS выбранного домена не стал доступен.");
                         await Task.Delay(250, stopping.Token);
@@ -240,7 +253,7 @@ internal sealed class WindowsTunnelHost : IDisposable
                 Stage("PROBE");
                 try
                 {
-                    await network.ProbeAsync(tunnelIndex, stopping.Token);
+                    await network.ProbeAsync(tunnelIndex, !options.SupportsIpv4, stopping.Token);
                 }
                 catch (SocketException error) when (error.SocketErrorCode == SocketError.AccessDenied)
                 {

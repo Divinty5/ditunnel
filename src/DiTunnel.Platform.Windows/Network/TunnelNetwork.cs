@@ -22,7 +22,7 @@ internal interface ITunnelNetwork
     void CleanupDns();
     IReadOnlyList<string> CachedNames();
     Task<IPAddress[]> ResolveAsync(string name, CancellationToken token);
-    Task ProbeAsync(uint tunnelIndex, CancellationToken token);
+    Task ProbeAsync(uint tunnelIndex, bool ipv6, CancellationToken token);
 }
 
 internal sealed class TunnelNetwork : ITunnelNetwork
@@ -44,11 +44,12 @@ internal sealed class TunnelNetwork : ITunnelNetwork
     public IReadOnlyList<string> CachedNames() => WindowsDnsPolicy.CachedNames();
     public Task<IPAddress[]> ResolveAsync(string name, CancellationToken token) =>
         Dns.GetHostAddressesAsync(name, token).WaitAsync(TimeSpan.FromSeconds(2), token);
-    public async Task ProbeAsync(uint tunnelIndex, CancellationToken token)
+    public async Task ProbeAsync(uint tunnelIndex, bool ipv6, CancellationToken token)
     {
-        if (WindowsNetworkApi.BestInterface(IPAddress.Parse("1.1.1.1")) != tunnelIndex) throw new TunnelRouteException();
-        using var probe = new TcpClient();
-        await probe.ConnectAsync(IPAddress.Parse("1.1.1.1"), 443, token).AsTask().WaitAsync(TimeSpan.FromSeconds(15), token);
+        var address = IPAddress.Parse(ipv6 ? "2606:4700:4700::1111" : "1.1.1.1");
+        if (WindowsNetworkApi.BestInterface(address) != tunnelIndex) throw new TunnelRouteException();
+        using var probe = new TcpClient(address.AddressFamily);
+        await probe.ConnectAsync(address, 443, token).AsTask().WaitAsync(TimeSpan.FromSeconds(15), token);
     }
 }
 

@@ -14,7 +14,8 @@ public sealed record KillSwitchConfiguration(
     bool AllowLocalNetwork,
     ushort? ServerPort = null,
     KillSwitchTransportProtocol ServerTransport = KillSwitchTransportProtocol.Any,
-    IReadOnlyList<IPAddress>? DirectAddresses = null)
+    IReadOnlyList<IPAddress>? DirectAddresses = null,
+    string? DirectProxyApplicationPath = null)
 {
     public static KillSwitchConfiguration Create(IEnumerable<IPAddress> addresses, bool allowLocalNetwork)
     {

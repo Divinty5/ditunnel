@@ -116,6 +116,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             var splitAddresses = await ResolveSplitAddressesAsync(policy, timeout.Token);
             var directAddresses = policy.Mode == SplitTunnelMode.BypassSelected ? splitAddresses : [];
             var protection = KillSwitchConfiguration.Create([address], configuration.ServerPort, configuration.ServerTransport, connectionPolicy().Normalize().AllowLocalNetwork, directAddresses);
+            if (policy.Mode != SplitTunnelMode.ProxyAll && policy.Processes.Count > 0)
+                protection = protection with { DirectProxyApplicationPath = WindowsRuntime.Find() };
             var preservePath = Path.Combine(sessionDirectory!, "preserve-kill-switch");
             await File.WriteAllTextAsync(preservePath, "READY", timeout.Token);
             try { await killSwitch.PrepareTransitionAsync(protection, timeout.Token); }
@@ -129,12 +131,9 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         finally { gate.Release(); }
 
         reconnectServerAddress = transitionAddress;
-        try { await ConnectCoreAsync(profile, cancellationToken, preserveKillSwitch: true, transitionAddress); }
-        catch
-        {
-            try { await killSwitch.DeactivateAsync(CancellationToken.None); } catch { }
-            throw;
-        }
+        // A failed replacement must preserve already armed protection. Explicit
+        // Disconnect (including the UI cancel command) owns filter removal.
+        await ConnectCoreAsync(profile, cancellationToken, preserveKillSwitch: true, transitionAddress);
     }
 
     private async Task ConnectCoreAsync(ImportedProfile profile, CancellationToken cancellationToken, bool preserveKillSwitch, IPAddress? knownServerAddress = null, bool recoveryAttempt = false)
@@ -151,10 +150,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             var configuration = ConvertProfile(profile);
             var connection = connectionPolicy().Normalize();
             var policy = splitTunnelPolicy();
-            if (policy.Mode == SplitTunnelMode.ProxySelected && policy.Domains.Count == 0)
-                throw new InvalidOperationException("Для режима «Только выбранные через VPN» добавьте хотя бы один домен.");
-            if (connection.KillSwitchEnabled && policy.Mode == SplitTunnelMode.BypassSelected && policy.Processes.Count > 0)
-                throw new InvalidOperationException("Kill switch с режимом «Обход выбранных» пока поддерживает домены, но не приложения. Удалите приложения из списка или выберите другой режим.");
+            if (policy.Mode == SplitTunnelMode.ProxySelected && policy.Domains.Count == 0 && policy.Processes.Count == 0)
+                throw new InvalidOperationException("Для режима «Только выбранные через VPN» добавьте хотя бы один домен или приложение.");
             var runtime = WindowsRuntime.Find();
             Publish(VpnConnectionState.Connecting, awg is null ? "Запускаем Xray и настраиваем системный туннель…" : "Запускаем AmneziaWG и настраиваем системный туннель…");
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -185,7 +182,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 await File.WriteAllTextAsync(Path.Combine(sessionDirectory, "amneziawg.json"), awg.BuildRuntimeConfiguration(address.ToString(), credentials.Username, credentials.Password, readyPath), timeout.Token);
                 configuration = awg.CreateProxyConfiguration(0, credentials.Username, credentials.Password);
             }
-            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName, blockAds: blockAds(), strictAdBlocking: strictAdBlocking(), dnsServers: awg?.DnsServers), timeout.Token);
+            var dnsServers = awg?.TunnelDnsServers().ToArray() ?? ["1.1.1.1", "1.0.0.1"];
+            await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName, blockAds: blockAds(), strictAdBlocking: strictAdBlocking(), dnsServers: dnsServers), timeout.Token);
             // On Windows, `xray run -test` initializes the TUN inbound and therefore creates a
             // short-lived Wintun adapter. Starting the real host immediately afterwards can race
             // that adapter's removal. The SOCKS probe above already validates the profile and
@@ -195,10 +193,13 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             cleanupFailed = false;
             host = new WindowsTunnelHost(new(runtime, configPath, address, tunnelName, policy.Mode, splitAddresses,
                 splitDomains, connection.KillSwitchEnabled ? killSwitchReadyPath : null,
-                awg is null ? null : WindowsAmneziaWgRuntime.Find(), awg?.DnsServers.ToArray() ?? ["1.1.1.1", "1.0.0.1"]));
+                awg is null ? null : WindowsAmneziaWgRuntime.Find(), dnsServers,
+                configuration.SupportsIpv4, configuration.SupportsIpv6, policy.Processes.Count > 0));
             var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var directAddresses = policy.Mode == SplitTunnelMode.BypassSelected ? splitAddresses : [];
             var protection = connection.KillSwitchEnabled ? KillSwitchConfiguration.Create([address], configuration.ServerPort, configuration.ServerTransport, connection.AllowLocalNetwork, directAddresses) : null;
+            if (protection is not null && policy.Mode != SplitTunnelMode.ProxyAll && policy.Processes.Count > 0)
+                protection = protection with { DirectProxyApplicationPath = runtime };
             monitor = MonitorAsync(host, ready, protection, killSwitchReadyPath, policy.Mode == SplitTunnelMode.BypassSelected);
             await ready.Task.WaitAsync(timeout.Token);
         }
@@ -362,7 +363,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 error = "Сетевой модуль не подтвердил восстановление сети. Проверьте адаптер DiTunnel; может потребоваться перезагрузка Windows.";
             }
         }
-        var preserveKillSwitch = File.Exists(Path.Combine(Path.GetDirectoryName(killSwitchReadyPath)!, "preserve-kill-switch"));
+        var preserveKillSwitch = File.Exists(Path.Combine(Path.GetDirectoryName(killSwitchReadyPath)!, "preserve-kill-switch"))
+            || (wasConnected && !stopping && connectionPolicy().Normalize().KillSwitchEnabled);
         if (rollbackConfirmed && !preserveKillSwitch)
         {
             try
@@ -513,8 +515,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         {
             if (host is not null) Publish(VpnConnectionState.Disconnecting, "Восстанавливаем маршруты и DNS…");
             await StopCoreAsync();
-            if (cleanupFailed) throw new InvalidOperationException("Не удалось полностью восстановить сеть. Запустите scripts/Repair-DiTunnelNetwork.ps1 от администратора.");
             await killSwitch.DeactivateAsync(CancellationToken.None);
+            if (cleanupFailed) throw new InvalidOperationException("Не удалось полностью восстановить сеть. Запустите scripts/Repair-DiTunnelNetwork.ps1 от администратора.");
             Publish(VpnConnectionState.Disconnected, "VPN отключён. Маршруты и DNS освобождены.");
         }
         finally { gate.Release(); }
@@ -567,19 +569,36 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync() => DisposeAsync(preserveProtection: false);
+
+    internal async ValueTask DisposeAsync(bool preserveProtection)
     {
         NetworkChange.NetworkAvailabilityChanged -= OnNetworkChanged;
         NetworkChange.NetworkAddressChanged -= OnNetworkChanged;
-        try { await DisconnectAsync(); }
+        try
+        {
+            if (preserveProtection && IsNetworkProtectionActive)
+            {
+                CancelReconnect();
+                await gate.WaitAsync();
+                try
+                {
+                    if (sessionDirectory is not null)
+                        await File.WriteAllTextAsync(Path.Combine(sessionDirectory, "preserve-kill-switch"), "READY");
+                    await StopCoreAsync();
+                }
+                finally { gate.Release(); }
+            }
+            else await DisconnectAsync();
+        }
         catch (TimeoutException)
         {
             // This engine lives in the independent broker. Exiting it would close the job
             // and stop the cores before a slow rollback finishes, so keep waiting here.
             if (monitor is not null) await monitor;
-            await DisconnectAsync();
+            if (!preserveProtection) await DisconnectAsync();
         }
-        await killSwitch.DisposeAsync();
+        if (!preserveProtection || !IsNetworkProtectionActive) await killSwitch.DisposeAsync();
         reconnectCancellation.Dispose();
         physicalNetworkAvailable.Dispose();
         gate.Dispose();

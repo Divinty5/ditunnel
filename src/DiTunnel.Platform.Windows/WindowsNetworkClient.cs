@@ -12,7 +12,7 @@ namespace DiTunnel.Platform.Windows;
 
 /// <summary>Unprivileged UI facade. Only the separately authenticated broker touches the network.</summary>
 public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<ConnectionPolicy> connection,
-    Func<bool> blockAds, Func<bool> strictAds) : IProfileVpnEngine, IServerProbe
+    Func<bool> blockAds, Func<bool> strictAds) : IProfileVpnEngine, IServerProbe, INetworkRecoveryEngine
 {
     private readonly SemaphoreSlim startup = new(1, 1);
     private readonly SemaphoreSlim writing = new(1, 1);
@@ -26,7 +26,7 @@ public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<Con
     public VpnStatus Status { get; private set; } = VpnStatus.Disconnected;
     public ImportedProfile? ActiveProfile { get; private set; }
     public bool RequiresAdministrator => false;
-    public bool IsNetworkProtectionActive { get; private set; }
+    public bool IsNetworkProtectionActive { get; private set; } = WindowsKillSwitchController.QueryBlockingFilters() == true;
     public event EventHandler<VpnStatus>? StatusChanged;
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
@@ -42,7 +42,13 @@ public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<Con
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         if (pipe is { IsConnected: true }) await RequestAsync("disconnect", null, cancellationToken);
-        else if (IsNetworkProtectionActive) throw new InvalidOperationException("Связь с сетевым модулем потеряна. Восстановление сети не подтверждено.");
+        else if (IsNetworkProtectionActive || WindowsKillSwitchController.QueryBlockingFilters() == true)
+            await RequestAsync("disconnect", null, cancellationToken);
+        ActiveProfile = null;
+    }
+    public async Task RestoreNetworkAsync(CancellationToken cancellationToken = default)
+    {
+        await RequestAsync("restore-network", null, cancellationToken);
         ActiveProfile = null;
     }
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
