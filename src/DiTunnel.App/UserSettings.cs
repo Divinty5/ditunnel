@@ -77,7 +77,7 @@ public sealed class UserSettings
     public static string Version => typeof(UserSettings).Assembly
         .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
         .FirstOrDefault(item => item.Key == (OperatingSystem.IsAndroid() ? "AndroidVersion" : "WindowsVersion"))?.Value
-        ?? typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.5.6";
+        ?? typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.5.13";
 
     public static UserSettings Load(string path)
     {
