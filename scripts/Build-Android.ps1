@@ -69,6 +69,9 @@ if (-not (Test-Path -LiteralPath $sourceApk -PathType Leaf)) {
 
 Copy-Item -LiteralPath $sourceApk -Destination $destinationApk -Force
 $hash = Get-FileHash -LiteralPath $destinationApk -Algorithm SHA256
+$digest = $hash.Hash.ToLowerInvariant()
+Set-Content -LiteralPath "$destinationApk.sha256" -Value "$digest  $([IO.Path]::GetFileName($destinationApk))" -Encoding ascii
 
 Write-Host "APK: $destinationApk"
 Write-Host "SHA256: $($hash.Hash)"
+Write-Host "Checksum: $destinationApk.sha256"

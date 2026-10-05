@@ -138,6 +138,7 @@ dotnet build src\DiTunnel.Desktop\DiTunnel.Desktop.csproj -c Release
 Дополнительные документы:
 
 - [История изменений](CHANGELOG.md)
+- [Материалы и файлы релиза 0.5.13](docs/release-0.5.13.md)
 - [Проверка поддержки AmneziaWG](docs/amneziawg-support-review.md)
 - [План разработки](docs/development-plan.md)
 - [План и архитектура Android](docs/android-development-plan.md)
