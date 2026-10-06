@@ -16,6 +16,15 @@ namespace DiTunnel.App.Views;
 
 public static class Dialogs
 {
+    private static TextBlock SectionHeading(string text)
+    {
+        var label = Label(text);
+        label.FontWeight = FontWeight.Bold;
+        label.FontSize = 17;
+        label.Margin = new Thickness(0, 10, 0, 0);
+        label.Bind(TextBlock.ForegroundProperty, label.GetResourceObservable("AccentTextBrush"));
+        return label;
+    }
     public static Button Button(string text, Action action)
     {
         var button = new Button { Content = L.T(text), Padding = new Thickness(16, 10), CornerRadius = new CornerRadius(10) };
@@ -92,6 +101,7 @@ public static class Dialogs
         var networkSettingsChangedExplicitly = false;
         var isClosing = false;
         Action? saveSplitRules = null;
+        Action? refreshInstalledApplications = null;
         async Task GoBackAsync()
         {
             if (isClosing) return;
@@ -112,11 +122,12 @@ public static class Dialogs
         void Build()
         {
             if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
-            var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Center };
+            var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Stretch };
             var back = AsyncButton("← Назад", GoBackAsync);
             var status = Label("");
             CheckBox? killSwitchControl = null;
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
+            panel.Children.Add(SectionHeading("Интерфейс"));
             panel.Children.Add(Label("Язык"));
             var language = new ComboBox
             {
@@ -148,7 +159,7 @@ public static class Dialogs
             appearance.Children.Add(theme); Grid.SetRow(theme, 1);
             if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1); }
             panel.Children.Add(appearance);
-            panel.Children.Add(Label("Защита соединения"));
+            panel.Children.Add(SectionHeading("Защита соединения"));
             var blockAds = new CheckBox { Content = L.T("Блокировать рекламу и трекеры"), IsChecked = UserSettings.Current.BlockAdsEnabled };
             var strictAdBlocking = new CheckBox
             {
@@ -196,7 +207,7 @@ public static class Dialogs
                 panel.Children.Add(allowLan);
                 panel.Children.Add(Label("Сетевые изменения применяются автоматически при возврате на главный экран. Kill switch использует отдельные правила Windows Filtering Platform."));
             }
-            panel.Children.Add(Label("Раздельное туннелирование"));
+            panel.Children.Add(SectionHeading("Раздельное туннелирование"));
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = (int)UserSettings.Current.SplitTunnelMode };
             var activeMode = UserSettings.Current.SplitTunnelMode == SplitTunnelMode.ProxySelected ? SplitTunnelMode.ProxySelected : SplitTunnelMode.BypassSelected;
             var domains = new TextBox { Text = string.Join(Environment.NewLine, draftDomains[activeMode]), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
@@ -230,7 +241,6 @@ public static class Dialogs
                 });
                 clearSelection.Margin = new Thickness(0, 0, 8, 4);
                 autoSelectRow.Children.Add(clearSelection);
-                autoSelectRow.Children.Add(autoSelectStatus);
                 splitRules.Children.Add(autoSelectRow);
                 var applicationRows = new StackPanel { Spacing = 2 };
                 void BuildApplicationRows()
@@ -247,7 +257,8 @@ public static class Dialogs
                         .OrderByDescending(item => selectedApplications.Contains(item.Id))
                         .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
                     {
-                        var check = new CheckBox { Content = $"{application.Name}\n{application.Id}", IsChecked = selectedApplications.Contains(application.Id), Padding = new Thickness(8, 6) };
+                        var check = new CheckBox { Content = new TextBlock { Text = $"{application.Name}\n{application.Id}", TextWrapping = TextWrapping.Wrap },
+                            HorizontalContentAlignment = HorizontalAlignment.Stretch, IsChecked = selectedApplications.Contains(application.Id), Padding = new Thickness(8, 6) };
                         check.IsCheckedChanged += (_, _) =>
                         {
                             if (check.IsChecked == true) selectedApplications.Add(application.Id);
@@ -257,8 +268,10 @@ public static class Dialogs
                     }
                 }
                 rebuildApplicationRows = BuildApplicationRows;
+                refreshInstalledApplications = BuildApplicationRows;
                 if (OperatingSystem.IsWindows())
-                    splitRules.Children.Add(AsyncButton("Добавить файл .exe…", async () =>
+                {
+                    var addExecutable = AsyncButton("Добавить файл .exe…", async () =>
                     {
                         var files = await TopLevel.GetTopLevel(owner)!.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
                         {
@@ -271,12 +284,17 @@ public static class Dialogs
                         installedApplications = installedApplications.Concat(additions).DistinctBy(app => app.Id, StringComparer.OrdinalIgnoreCase).ToArray();
                         selectedApplications.UnionWith(additions.Select(app => app.Id));
                         rebuildApplicationRows();
-                    }));
+                    });
+                    addExecutable.Margin = new Thickness(0, 0, 8, 4);
+                    autoSelectRow.Children.Add(addExecutable);
+                }
+                splitRules.Children.Add(autoSelectStatus);
                 search.TextChanged += (_, _) => rebuildApplicationRows();
                 rebuildApplicationRows();
                 splitRules.Children.Add(new ScrollViewer
                 {
                     Content = applicationRows,
+                    Height = 260,
                     MinHeight = 140,
                     MaxHeight = 320,
                     VerticalScrollBarVisibility = OperatingSystem.IsAndroid() ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto
@@ -308,6 +326,7 @@ public static class Dialogs
             {
                 CaptureDraft();
                 UserSettings.Current.SplitTunnelMode = (DiTunnel.Core.Connection.SplitTunnelMode)Math.Max(0, splitMode.SelectedIndex);
+                UserSettings.Current.SplitTunnelDefaultsApplied = true;
                 foreach (var mode in new[] { SplitTunnelMode.BypassSelected, SplitTunnelMode.ProxySelected })
                     UserSettings.Current.SetSplitTunnelRules(mode, draftDomains[mode], draftApplications[mode].OrderBy(value => value, StringComparer.Ordinal));
                 try { UserSettings.Current.Save(); status.Text = L.T("Правила будут применены при следующем подключении VPN."); } catch { status.Text = L.T("Не удалось сохранить настройки."); }
@@ -336,7 +355,7 @@ public static class Dialogs
             openLogs.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(openLogs);
             if (!OperatingSystem.IsAndroid())
             {
-                panel.Children.Add(Label("Диагностика"));
+                panel.Children.Add(SectionHeading("Диагностика"));
                 panel.Children.Add(serviceActions);
                 if (vm.CanRestoreNetwork)
                     panel.Children.Add(AsyncButton("Восстановить доступ к сети", async () =>
@@ -351,9 +370,9 @@ public static class Dialogs
                     }));
                 panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
             }
-            panel.Children.Add(Label("Обновления"));
-            var automaticUpdates = new CheckBox { Content = L.T("Автоматически проверять обновления"), IsChecked = UserSettings.Current.CheckForUpdatesAutomatically };
-            automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.CheckForUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
+            panel.Children.Add(SectionHeading("Обновления"));
+            var automaticUpdates = new CheckBox { Content = L.T("Автоматически скачивать и устанавливать обновления"), IsChecked = UserSettings.Current.InstallUpdatesAutomatically };
+            automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.InstallUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
             var updates = Button("Проверить обновления", async () =>
             {
                 status.Text = L.T("Проверяем обновления…");
@@ -364,6 +383,11 @@ public static class Dialogs
             updates.Margin = new Thickness(0, 0, 8, 6);
             panel.Children.Add(automaticUpdates);
             panel.Children.Add(updates);
+            panel.Children.Add(AsyncButton("Открыть проект на GitHub", async () =>
+            {
+                try { await (TopLevel.GetTopLevel(owner)?.Launcher?.LaunchUriAsync(new Uri("https://github.com/Divinty5/ditunnel")) ?? Task.FromResult(false)); }
+                catch { status.Text = L.T("Не удалось открыть страницу релиза."); }
+            }));
             panel.Children.Add(status);
             panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             owner.Content = Page("Настройки", back, panel);
@@ -381,9 +405,8 @@ public static class Dialogs
             applicationsLoaded = true;
             if (!isClosing)
             {
-                // Preserve edits made while discovery was still running.
-                saveSplitRules?.Invoke();
-                Build();
+                // Keep the page, focus, draft edits and outer ScrollViewer intact.
+                refreshInstalledApplications?.Invoke();
             }
         }
     }
@@ -397,7 +420,7 @@ public static class Dialogs
         panel.Children.Add(Label($"Доступна версия {ReleaseChecker.FormatVersion(release.Version)}. Установленная версия: {UserSettings.Version}."));
         panel.Children.Add(Label(canInstall
             ? "Установщик будет загружен и проверен по SHA-256. Перед его запуском VPN будет отключён."
-            : "В релизе нет установщика Windows или файла SHA-256. Откройте страницу релиза для ручной установки."));
+            : "Нет совместимого установщика или файла SHA-256. Откройте GitHub в настройках, в разделе «Обновления»."));
         var overlay = new Grid();
         void Complete(string? result)
         {
@@ -406,9 +429,7 @@ public static class Dialogs
             completion.TrySetResult(result);
         }
         if (canInstall) panel.Children.Add(Button("Скачать и установить", () => Complete("install")));
-        panel.Children.Add(Button("Открыть релиз на GitHub", () => Complete("github")));
-        panel.Children.Add(Button("Напомнить при следующей версии", () => Complete("later")));
-        panel.Children.Add(Button("Отмена", () => Complete(null)));
+        panel.Children.Add(Button("Позже", () => Complete("later")));
         var card = new Border { Margin = new Thickness(16), MaxWidth = 560, Padding = new Thickness(24), Background = Brushes.Black,
             CornerRadius = new CornerRadius(18), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Child = panel };
         card.Bind(Border.BackgroundProperty, card.GetResourceObservable("CardBrush"));

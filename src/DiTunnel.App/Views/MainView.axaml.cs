@@ -22,8 +22,9 @@ public partial class MainView : UserControl
         };
         AttachedToVisualTree += async (_, _) =>
         {
-            if (updateChecked || !OperatingSystem.IsAndroid() || !UserSettings.Current.CheckForUpdatesAutomatically || DataContext is not MainViewModel vm) return;
+            if (updateChecked || !OperatingSystem.IsAndroid() || DataContext is not MainViewModel vm) return;
             updateChecked = true;
+            await vm.InitializeSplitDefaultsAsync();
             await UpdateFlow.CheckAsync(this, vm, false);
         };
     }
@@ -31,7 +32,10 @@ public partial class MainView : UserControl
     private async void SettingsClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel vm)
+        {
+            await vm.InitializeSplitDefaultsAsync();
             await Dialogs.Settings(TopLevel.GetTopLevel(this) is Window window ? window : this, vm);
+        }
     }
     private async void SubscriptionsClick(object? sender, RoutedEventArgs e)
     {

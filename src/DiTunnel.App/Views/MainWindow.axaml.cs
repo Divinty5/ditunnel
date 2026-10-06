@@ -33,8 +33,9 @@ public partial class MainWindow : Window
                 if (normal.Maximized) WindowState = WindowState.Maximized;
             }
             ready = true; SetupTray();
+            if (DataContext is MainViewModel settingsModel) await settingsModel.InitializeSplitDefaultsAsync();
             if (DataContext is MainViewModel vm) await vm.RefreshSubscriptionsAsync(showToast: false);
-            if (UserSettings.Current.CheckForUpdatesAutomatically) await CheckForUpdatesAsync(false);
+            await CheckForUpdatesAsync(false);
         };
         PositionChanged += (_, _) => RememberNormal();
         SizeChanged += (_, _) => RememberNormal();

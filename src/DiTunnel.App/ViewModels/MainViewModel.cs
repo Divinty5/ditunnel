@@ -606,6 +606,7 @@ public sealed partial class MainViewModel : ViewModelBase
         connectionCancellation = new CancellationTokenSource();
         try
         {
+            await InitializeSplitDefaultsAsync().WaitAsync(connectionCancellation.Token);
             if (ConnectionState == VpnConnectionState.Connected) await engine.DisconnectAsync();
             else if (ConnectionState == VpnConnectionState.Reconnecting)
             {
@@ -646,6 +647,17 @@ public sealed partial class MainViewModel : ViewModelBase
     public Task<IReadOnlyList<InstalledApplication>> GetInstalledApplicationsAsync(CancellationToken cancellationToken = default) =>
         installedApplicationProvider?.GetInstalledApplicationsAsync(cancellationToken)
         ?? Task.FromResult<IReadOnlyList<InstalledApplication>>([]);
+
+    public async Task InitializeSplitDefaultsAsync()
+    {
+        if (installedApplicationProvider is null) return;
+        try
+        {
+            if (await UserSettings.Current.InitializeSplitTunnelDefaultsAsync(() => GetInstalledApplicationsAsync()))
+                await ApplyNetworkSettingsAsync();
+        }
+        catch { Notice = "Не удалось применить начальные настройки раздельного туннелирования."; }
+    }
     [RelayCommand] private void RemoveGroup()
     {
         if (SelectedGroup is null || !CanManageProfiles) return;

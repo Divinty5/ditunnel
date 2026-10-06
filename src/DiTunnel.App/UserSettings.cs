@@ -71,6 +71,35 @@ public sealed class UserSettings
     public bool StartWithWindows { get; set; }
     public bool AutoConnect { get; set; }
     public bool CheckForUpdatesAutomatically { get; set; } = true;
+    public bool InstallUpdatesAutomatically { get; set; }
+    public bool SplitTunnelDefaultsApplied { get; set; }
+    private readonly SemaphoreSlim defaultsGate = new(1, 1);
+
+    public bool ApplySplitTunnelDefaults(IEnumerable<InstalledApplication> applications)
+    {
+        if (SplitTunnelDefaultsApplied) return false;
+        SplitTunnelDefaultsApplied = true;
+        if (SplitTunnelMode != SplitTunnelMode.ProxyAll) return false;
+        BypassSplitTunnelProcesses = BypassSplitTunnelProcesses
+            .Concat(ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, applications))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        SplitTunnelMode = SplitTunnelMode.BypassSelected;
+        return true;
+    }
+
+    public async Task<bool> InitializeSplitTunnelDefaultsAsync(Func<Task<IReadOnlyList<InstalledApplication>>> discover)
+    {
+        await defaultsGate.WaitAsync();
+        try
+        {
+            if (SplitTunnelDefaultsApplied) return false;
+            var applications = await discover();
+            bool changed = ApplySplitTunnelDefaults(applications);
+            Save();
+            return changed;
+        }
+        finally { defaultsGate.Release(); }
+    }
     public string? SkippedUpdateVersion { get; set; }
     public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect).Normalize();
     public WindowPlacement? Window { get; set; }
