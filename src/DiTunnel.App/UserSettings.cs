@@ -136,6 +136,7 @@ public sealed class UserSettings
 
     public void ApplyTheme()
     {
+        ThemeChanged?.Invoke();
         if (Application.Current is not { } app) return;
         app.RequestedThemeVariant = Theme switch
         {
@@ -144,6 +145,7 @@ public sealed class UserSettings
             _ => app.PlatformSettings is null ? ThemeVariant.Dark : ThemeVariant.Default
         };
     }
+    public static event Action? ThemeChanged;
 }
 
 public static class WindowLayout

@@ -23,6 +23,72 @@ internal static class VpnQuickControls
     private static AndroidProfileStore store = null!;
     private static string? selectedKey;
     private static IReadOnlyList<ImportedProfile>? profiles;
+    private static readonly object LatencyGate = new();
+    private static CancellationTokenSource? latencyCancellation;
+    private static string? latencyProfileKey;
+    private sealed record LatencyReading(string ProfileKey, double Milliseconds);
+    private static LatencyReading? latencyReading;
+    public static double? LatencyMilliseconds => Status.State == VpnConnectionState.Connected &&
+        engine.ActiveProfile is { } profile && Volatile.Read(ref latencyReading) is { } reading && reading.ProfileKey == Key(profile)
+            ? reading.Milliseconds : null;
+
+    public static void EnsureLatencyMonitoring()
+    {
+        lock (LatencyGate)
+        {
+            var profile = Status.State == VpnConnectionState.Connected ? engine.ActiveProfile : null;
+            var key = profile is null ? null : Key(profile);
+            if (key is not null && key == latencyProfileKey && latencyCancellation is not null) return;
+            latencyCancellation?.Cancel();
+            latencyCancellation?.Dispose();
+            latencyCancellation = null;
+            latencyProfileKey = key;
+            Volatile.Write(ref latencyReading, null);
+            if (key is null || !VpnWidgets.HasLargeWidgets(context)) return;
+            latencyCancellation = new CancellationTokenSource();
+            _ = MeasureLatencyAsync(key, latencyCancellation.Token);
+        }
+    }
+    private static async Task MeasureLatencyAsync(string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(1000, cancellationToken);
+            var probe = new AndroidServerProbe(context);
+            while (!cancellationToken.IsCancellationRequested && VpnWidgets.HasLargeWidgets(context))
+            {
+                ServerProbeResult result;
+                try { result = await probe.ProbeActiveTunnelAsync(cancellationToken); }
+                catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+                {
+                    global::Android.Util.Log.Warn("DiTunnelWidgetLatency", error.GetType().Name);
+                    result = new(null, "Сервер недоступен");
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (LatencyGate)
+                {
+                    if (latencyCancellation?.Token != cancellationToken || Status.State != VpnConnectionState.Connected ||
+                        engine.ActiveProfile is not { } profile || Key(profile) != key) return;
+                    Volatile.Write(ref latencyReading, result.Milliseconds is { } delay ? new LatencyReading(key, delay) : null);
+                }
+                Refresh();
+                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+            }
+        }
+        catch (System.OperationCanceledException) { }
+        catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelWidgetLatency", error.GetType().Name); }
+        finally
+        {
+            lock (LatencyGate)
+                if (latencyCancellation?.Token == cancellationToken)
+                {
+                    latencyCancellation.Dispose();
+                    latencyCancellation = null;
+                    Volatile.Write(ref latencyReading, null);
+                }
+        }
+    }
+
     public static event Action<ImportedProfile>? SelectionChanged;
     public static event Action? Refreshed;
     public static VpnStatus Status => engine.Status;
@@ -44,7 +110,13 @@ internal static class VpnQuickControls
     {
         context = owner; engine = vpnEngine; store = profileStore;
         selectedKey = owner.GetSharedPreferences("ditunnel_controls", FileCreationMode.Private)?.GetString("selected", null);
-        engine.StatusChanged += (_, _) => Refresh();
+        engine.StatusChanged += (_, _) =>
+        {
+            try { EnsureLatencyMonitoring(); }
+            catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelWidgetLatency", error.GetType().Name); }
+            Refresh();
+        };
+        UserSettings.ThemeChanged += Refresh;
         AndroidProfileStore.ProfilesChanged += () => { profiles = null; Refresh(); };
         L.Changed += () =>
         {
@@ -83,6 +155,9 @@ internal static class VpnQuickControls
         if (!await Gate.WaitAsync(0)) return;
         try
         {
+            if (action == SelectAction || action == ToggleAction && !Active)
+                await UserSettings.Current.InitializeSplitTunnelDefaultsAsync(() =>
+                    new AndroidInstalledApplicationProvider(context).GetInstalledApplicationsAsync());
             if (action == SelectAction)
             {
                 // PendingIntent carries an identifier, never credentials. Validate against the encrypted store.

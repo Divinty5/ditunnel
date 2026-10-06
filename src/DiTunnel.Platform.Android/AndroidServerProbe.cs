@@ -114,7 +114,11 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
             catch (Exception error) when (error is InvalidOperationException or FormatException or NotSupportedException) { return new(null, ShortMessage(error.Message)); }
             catch { return new(null, "Сервер недоступен"); }
         }
-        return await Task.Run(() =>
+        return await ProbeActiveTunnelAsync(cancellationToken);
+    }
+
+    // Bind explicitly to the VPN Network; widget latency must never use a physical network fallback.
+    public Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default) => Task.Run(() =>
         {
             var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager;
 #pragma warning disable CA1422
@@ -140,7 +144,6 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
             catch (Exception) when (!cancellationToken.IsCancellationRequested) { return new ServerProbeResult(null, "Сервер недоступен"); }
             finally { connection.Disconnect(); }
         }, cancellationToken);
-    }
     private static void FillMissing(ServerProbeResult?[] results, string message)
     {
         for (var index = 0; index < results.Length; index++) results[index] ??= new(null, message);

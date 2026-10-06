@@ -12,6 +12,17 @@ namespace DiTunnel.Android;
 
 internal static class VpnWidgets
 {
+    internal static bool HasLargeWidgets(Context context)
+    {
+        var manager = AppWidgetManager.GetInstance(context);
+        return manager is not null && Providers.Skip(2).Any(type =>
+            manager.GetAppWidgetIds(new ComponentName(context, Java.Lang.Class.FromType(type))) is { Length: > 0 });
+    }
+    internal static bool IsLight(Context context) => UserSettings.Current.Theme == "light" ||
+        UserSettings.Current.Theme == "system" &&
+        (context.Resources?.Configuration?.UiMode & global::Android.Content.Res.UiMode.NightMask) == global::Android.Content.Res.UiMode.NightNo;
+    internal static Color TextColor(bool light) => Color.ParseColor(light ? "#241B35" : "#EDE6FF");
+    internal static Color AccentColor(bool light) => Color.ParseColor(light ? "#644096" : "#C3A9ED");
     private static readonly Type[] Providers = [typeof(VpnWidgetSmall), typeof(VpnWidgetMedium), typeof(VpnWidget43), typeof(VpnWidget44), typeof(VpnWidget45)];
     public static void Refresh(Context context)
     {
@@ -31,7 +42,8 @@ internal static class VpnWidgets
         var selected = VpnQuickControls.Selected;
         var status = VpnQuickControls.StatusText;
         var power = VpnQuickControls.Active ? L.T("Отключить") : L.T("Подключить");
-        using var bitmap = PowerBitmap(VpnQuickControls.Active, VpnQuickControls.Busy);
+        var light = IsLight(context);
+        using var bitmap = PowerBitmap(VpnQuickControls.Active, VpnQuickControls.Busy, light);
         views.SetImageViewBitmap(Resource.Id.widget_power, bitmap);
         views.SetBoolean(Resource.Id.widget_power, "setEnabled", VpnQuickControls.CanToggle);
         views.SetContentDescription(Resource.Id.widget_power, $"Di-Tunnel · {power} · {selected?.Name}");
@@ -42,6 +54,9 @@ internal static class VpnWidgets
         views.SetOnClickPendingIntent(Resource.Id.widget_power, toggle);
         if (!small)
         {
+            views.SetInt(Resource.Id.widget_root, "setBackgroundResource", light ? Resource.Drawable.widget_background_light : Resource.Drawable.widget_background);
+            views.SetTextColor(Resource.Id.widget_name, TextColor(light));
+            views.SetTextColor(Resource.Id.widget_status, AccentColor(light));
             views.SetTextViewText(Resource.Id.widget_name, selected?.Name ?? L.T("Сначала выберите сервер."));
             views.SetTextViewText(Resource.Id.widget_status, VpnQuickControls.Status.State == DiTunnel.Core.Connection.VpnConnectionState.Error
                 ? L.T(VpnQuickControls.Status.Message ?? "Не удалось подключиться") : status);
@@ -49,6 +64,16 @@ internal static class VpnWidgets
         }
         if (large)
         {
+            VpnQuickControls.EnsureLatencyMonitoring();
+            var delay = VpnQuickControls.LatencyMilliseconds;
+            views.SetViewVisibility(Resource.Id.widget_latency, delay is null ? ViewStates.Gone : ViewStates.Visible);
+            views.SetTextViewText(Resource.Id.widget_latency, delay is { } milliseconds ? L.T($"≈  {milliseconds:0} мс") : "");
+            views.SetInt(Resource.Id.widget_latency, "setBackgroundResource", light ? Resource.Drawable.widget_latency_light : Resource.Drawable.widget_latency_dark);
+            var brush = DiTunnel.App.ViewModels.LatencyPalette.ForTheme(DiTunnel.App.ViewModels.LatencyPalette.For(delay), light);
+            var color = ((global::Avalonia.Media.ISolidColorBrush)brush).Color;
+            views.SetTextColor(Resource.Id.widget_latency, new Color(color.R, color.G, color.B));
+            views.SetTextColor(Resource.Id.widget_heading, AccentColor(light));
+            views.SetTextColor(Resource.Id.widget_empty, AccentColor(light));
             views.SetBoolean(Resource.Id.widget_servers, "setEnabled", !VpnQuickControls.Busy);
             views.SetTextViewText(Resource.Id.widget_heading, "Di-Tunnel · " + (selected?.SourceName ?? L.T("Серверы подписки")));
             views.SetTextViewText(Resource.Id.widget_empty, L.T("Сначала выберите сервер."));
@@ -70,15 +95,16 @@ internal static class VpnWidgets
 #pragma warning restore CA1422
         }
     }
-    private static Bitmap PowerBitmap(bool active, bool busy)
+    private static Bitmap PowerBitmap(bool active, bool busy, bool light)
     {
         var bitmap = Bitmap.CreateBitmap(240, 240, Bitmap.Config.Argb8888!)!;
         using var canvas = new Canvas(bitmap);
         using var paint = new Paint(PaintFlags.AntiAlias);
-        var color = Color.ParseColor(busy ? "#C3A9ED" : active ? "#5DFF95" : "#FF6D85");
+        var color = Color.ParseColor(light ? busy ? "#644096" : active ? "#16804A" : "#C83243"
+            : busy ? "#C3A9ED" : active ? "#5DFF95" : "#FF6D85");
         paint.Color = color; paint.Alpha = 35; paint.SetStyle(Paint.Style.Stroke); paint.StrokeWidth = 20;
         canvas.DrawCircle(120, 120, 102, paint);
-        paint.Color = Color.ParseColor("#262037"); paint.Alpha = 255; paint.SetStyle(Paint.Style.Fill);
+        paint.Color = Color.ParseColor(light ? "#E9DFFA" : "#262037"); paint.Alpha = 255; paint.SetStyle(Paint.Style.Fill);
         canvas.DrawCircle(120, 120, 98, paint);
         paint.Color = color; paint.SetStyle(Paint.Style.Stroke); paint.StrokeWidth = 3;
         canvas.DrawCircle(120, 120, 98, paint);
@@ -142,6 +168,9 @@ public sealed class VpnWidgetServersService : RemoteViewsService
         public RemoteViews GetViewAt(int position)
         {
             var row = new RemoteViews(context.PackageName, Resource.Layout.widget_server_row);
+            var light = VpnWidgets.IsLight(context);
+            row.SetTextColor(Resource.Id.widget_server_name, VpnWidgets.TextColor(light));
+            row.SetTextColor(Resource.Id.widget_server_protocol, VpnWidgets.AccentColor(light));
             if (position < 0 || position >= servers.Count) return row;
             var profile = servers[position];
             var selected = VpnQuickControls.Selected;

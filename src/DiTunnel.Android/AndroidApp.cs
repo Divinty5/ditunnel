@@ -71,4 +71,9 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
             .WithInterFont()
             .LogToTrace();
     }
+    public override void OnConfigurationChanged(global::Android.Content.Res.Configuration newConfig)
+    {
+        base.OnConfigurationChanged(newConfig);
+        if (global::Android.App.Application.ProcessName == PackageName) VpnQuickControls.Refresh();
+    }
 }
