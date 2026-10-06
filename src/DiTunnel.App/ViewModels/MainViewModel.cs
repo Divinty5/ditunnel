@@ -218,7 +218,7 @@ public sealed partial class MainViewModel : ViewModelBase
         : SelectedProfile;
     public string SelectedName => DisplayProfile?.Name ?? L.T("Сервер не выбран");
     public string SelectedSummary => DisplayProfile?.Summary.Replace(" · конфигурация сервера", "", StringComparison.OrdinalIgnoreCase) ?? "Импортируйте свою первую подписку";
-    public string Tagline => "Ваш VPN. Ваш выбор.";
+    public string Tagline => "Твой VPN. Твой выбор.";
     public string ImportStorageDescription => OperatingSystem.IsAndroid()
         ? "Профили сохраняются только на этом устройстве и защищены Android Keystore."
         : "Профили сохраняются на этом компьютере и защищены вашей учётной записью Windows.";

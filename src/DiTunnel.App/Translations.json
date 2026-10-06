@@ -35,7 +35,7 @@
   "Подписки": "Subscriptions",
   "Удалить выбранную подписку и все её серверы?": "Delete the selected subscription and all its servers?",
   "Ваше пространство. Ваша сеть.": "Your space. Your network.",
-  "Ваш VPN. Ваш выбор.": "Your VPN. Your choice.",
+  "Твой VPN. Твой выбор.": "Your VPN. Your choice.",
   "АКТИВНЫЙ ПРОФИЛЬ": "ACTIVE PROFILE",
   "Мои серверы": "My servers",
   "Проверить сервер": "Test server",
@@ -93,7 +93,7 @@
   "Доступна версия": "Version available",
   "Установленная версия:": "Installed version:",
   "Установщик будет загружен и проверен по SHA-256. Перед его запуском VPN будет отключён.": "The installer will be downloaded and verified with SHA-256. The VPN will be disconnected before it starts.",
-  "В релизе нет установщика Windows или файла SHA-256. Откройте страницу релиза для ручной установки.": "The release has no Windows installer or SHA-256 file. Open the release page to install it manually.",
+  "В релизе нет установщика Windows или файла SHA-256. Откройте страницу релиза для ручной установки.": "No compatible installer or SHA-256 file is available. Open GitHub in Settings → Updates.",
   "Автообновление недоступно на этой платформе.": "Automatic updates are unavailable on this platform.",
   "Обновление пропущено до следующей версии.": "This update will be skipped until the next version.",
   "Не удалось открыть страницу релиза.": "Could not open the release page.",
@@ -522,5 +522,12 @@
   "Отменяем подключение…": "Cancelling the connection…",
   "DNS-серверы профиля AmneziaWG недоступны через Address и AllowedIPs.": "The AmneziaWG profile's DNS servers are not reachable through Address and AllowedIPs.",
   "Сначала подключите VPN вручную, чтобы сохранить профиль для постоянного VPN.": "Connect the VPN manually first to save a profile for Always-on VPN.",
-  "AmneziaWG требует отдельного ядра AmneziaWG. Используйте движок AmneziaWG для подключения и проверки.": "AmneziaWG requires its own runtime. Use the AmneziaWG engine to connect and test the profile."
+  "AmneziaWG требует отдельного ядра AmneziaWG. Используйте движок AmneziaWG для подключения и проверки.": "AmneziaWG requires its own runtime. Use the AmneziaWG engine to connect and test the profile.",
+  "Интерфейс": "Interface",
+  "Автоматически скачивать и устанавливать обновления": "Automatically download and install updates",
+  "Открыть проект на GitHub": "Open project on GitHub",
+  "Позже": "Later",
+  "Напомним об обновлении при следующем запуске.": "We will remind you about the update on the next launch.",
+  "Не удалось применить начальные настройки раздельного туннелирования.": "Could not apply initial split tunneling settings.",
+  "Нет совместимого установщика или файла SHA-256. Откройте GitHub в настройках, в разделе «Обновления».": "No compatible installer or SHA-256 file is available. Open GitHub from Settings, under Updates."
 }

@@ -1,14 +1,44 @@
 {
-  "Uncheck all": { "es": "Desmarcar todo", "zh-Hans": "取消全选" },
-  "Application selection cleared.": { "es": "Selección de aplicaciones borrada.", "zh-Hans": "已清除应用选择。" },
-  "Cancelling": { "es": "Cancelando", "zh-Hans": "取消中" },
-  "Windows applications (select multiple)": { "es": "Aplicaciones de Windows (selección múltiple)", "zh-Hans": "Windows 应用（可多选）" },
-  "Add an .exe file…": { "es": "Añadir un archivo .exe…", "zh-Hans": "添加 .exe 文件…" },
-  "Restore network access": { "es": "Restablecer el acceso a la red", "zh-Hans": "恢复网络访问" },
-  "VPN and kill switch disabled. Network access restored.": { "es": "VPN y kill switch desactivados. Acceso a la red restablecido.", "zh-Hans": "VPN 和 kill switch 已关闭。网络访问已恢复。" },
-  "Could not restore the network. Retry with administrator permissions.": { "es": "No se pudo restablecer la red. Reintente con permisos de administrador.", "zh-Hans": "无法恢复网络。请使用管理员权限重试。" },
-  "Kill switch is blocking internet access. Connect the VPN or restore network access in Settings.": { "es": "El kill switch bloquea el acceso a internet. Conecte la VPN o restablezca el acceso a la red en Ajustes.", "zh-Hans": "Kill switch 正在阻止互联网访问。请连接 VPN 或在设置中恢复网络访问。" },
-  "For Only selected through VPN, add at least one domain or application.": { "es": "Para Solo seleccionados por VPN, añada al menos un dominio o aplicación.", "zh-Hans": "使用“仅选定项通过 VPN”时，请至少添加一个域名或应用。" },
+  "Uncheck all": {
+    "es": "Desmarcar todo",
+    "zh-Hans": "取消全选"
+  },
+  "Application selection cleared.": {
+    "es": "Selección de aplicaciones borrada.",
+    "zh-Hans": "已清除应用选择。"
+  },
+  "Cancelling": {
+    "es": "Cancelando",
+    "zh-Hans": "取消中"
+  },
+  "Windows applications (select multiple)": {
+    "es": "Aplicaciones de Windows (selección múltiple)",
+    "zh-Hans": "Windows 应用（可多选）"
+  },
+  "Add an .exe file…": {
+    "es": "Añadir un archivo .exe…",
+    "zh-Hans": "添加 .exe 文件…"
+  },
+  "Restore network access": {
+    "es": "Restablecer el acceso a la red",
+    "zh-Hans": "恢复网络访问"
+  },
+  "VPN and kill switch disabled. Network access restored.": {
+    "es": "VPN y kill switch desactivados. Acceso a la red restablecido.",
+    "zh-Hans": "VPN 和 kill switch 已关闭。网络访问已恢复。"
+  },
+  "Could not restore the network. Retry with administrator permissions.": {
+    "es": "No se pudo restablecer la red. Reintente con permisos de administrador.",
+    "zh-Hans": "无法恢复网络。请使用管理员权限重试。"
+  },
+  "Kill switch is blocking internet access. Connect the VPN or restore network access in Settings.": {
+    "es": "El kill switch bloquea el acceso a internet. Conecte la VPN o restablezca el acceso a la red en Ajustes.",
+    "zh-Hans": "Kill switch 正在阻止互联网访问。请连接 VPN 或在设置中恢复网络访问。"
+  },
+  "For Only selected through VPN, add at least one domain or application.": {
+    "es": "Para Solo seleccionados por VPN, añada al menos un dominio o aplicación.",
+    "zh-Hans": "使用“仅选定项通过 VPN”时，请至少添加一个域名或应用。"
+  },
   "The AmneziaWG profile's DNS servers cannot be reached using its configured IP address families.": {
     "es": "No se puede acceder a los servidores DNS del perfil AmneziaWG mediante sus familias de direcciones IP configuradas.",
     "zh-Hans": "无法通过 AmneziaWG 配置中设置的 IP 地址族访问其 DNS 服务器。"
@@ -2052,5 +2082,37 @@
   "AmneziaWG requires its own runtime. Use the AmneziaWG engine to connect and test the profile.": {
     "es": "AmneziaWG requiere su propio motor. Utilice el motor AmneziaWG para conectarse y comprobar el perfil.",
     "zh-Hans": "AmneziaWG 需要独立内核。请使用 AmneziaWG 引擎连接和测试配置。"
+  },
+  "Interface": {
+    "es": "Interfaz",
+    "zh-Hans": "界面"
+  },
+  "Automatically download and install updates": {
+    "es": "Descargar e instalar actualizaciones automáticamente",
+    "zh-Hans": "自动下载并安装更新"
+  },
+  "Open project on GitHub": {
+    "es": "Abrir el proyecto en GitHub",
+    "zh-Hans": "在 GitHub 上打开项目"
+  },
+  "Later": {
+    "es": "Más tarde",
+    "zh-Hans": "稍后"
+  },
+  "We will remind you about the update on the next launch.": {
+    "es": "Te recordaremos la actualización al iniciar de nuevo.",
+    "zh-Hans": "将在下次启动时提醒您更新。"
+  },
+  "Could not apply initial split tunneling settings.": {
+    "es": "No se pudo aplicar la configuración inicial del túnel dividido.",
+    "zh-Hans": "无法应用初始分流设置。"
+  },
+  "No compatible installer or SHA-256 file is available. Open GitHub in Settings → Updates.": {
+    "es": "No hay un instalador compatible o un archivo SHA-256. Abre GitHub en Ajustes → Actualizaciones.",
+    "zh-Hans": "没有兼容的安装程序或 SHA-256 文件。请从设置 → 更新打开 GitHub。"
+  },
+  "No compatible installer or SHA-256 file is available. Open GitHub from Settings, under Updates.": {
+    "es": "No hay un instalador compatible o un archivo SHA-256. Abre GitHub desde Ajustes, en Actualizaciones.",
+    "zh-Hans": "没有兼容的安装程序或 SHA-256 文件。请在设置的“更新”部分打开 GitHub。"
   }
 }

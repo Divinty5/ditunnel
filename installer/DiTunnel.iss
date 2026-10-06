@@ -34,12 +34,29 @@ UninstallDisplayName=Di-Tunnel
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "chinesesimplified"; MessagesFile: "Languages\ChineseSimplified.isl"
+
+[CustomMessages]
+russian.CleanupStartFailed=Di-Tunnel: не удалось запустить восстановление сети.
+english.CleanupStartFailed=Di-Tunnel: could not start network cleanup.
+spanish.CleanupStartFailed=Di-Tunnel: no se pudo iniciar la restauración de la red.
+chinesesimplified.CleanupStartFailed=Di-Tunnel：无法启动网络恢复。
+russian.CleanupIncomplete=Di-Tunnel: восстановление сети не завершено. Дождитесь завершения сетевого модуля перед обновлением.
+english.CleanupIncomplete=Di-Tunnel: network cleanup is not complete. Wait for the network host to exit before updating.
+spanish.CleanupIncomplete=Di-Tunnel: la restauración de la red no ha finalizado. Espera a que el módulo de red se cierre antes de actualizar.
+chinesesimplified.CleanupIncomplete=Di-Tunnel：网络恢复尚未完成。请等待网络模块退出后再更新。
+russian.ExitBeforeUninstall=Di-Tunnel: выйдите из приложения через трей и дождитесь восстановления сети перед удалением.
+english.ExitBeforeUninstall=Di-Tunnel: exit the application from the tray and wait for network cleanup before uninstalling.
+spanish.ExitBeforeUninstall=Di-Tunnel: cierra la aplicación desde la bandeja del sistema y espera a que se restaure la red antes de desinstalar.
+chinesesimplified.ExitBeforeUninstall=Di-Tunnel：请通过系统托盘退出应用，等待网络恢复后再卸载。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "Languages\LICENSE-ChineseSimplified"; DestDir: "{app}\Licenses"; DestName: "Inno-Setup-ChineseSimplified-MIT.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"
@@ -74,7 +91,7 @@ begin
     begin
       if not Exec(CleanupPath, '--cleanup-wfp', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
       begin
-        Result := 'Di-Tunnel: could not start network cleanup.';
+        Result := CustomMessage('CleanupStartFailed');
         Exit;
       end;
       if ResultCode = 0 then Exit;
@@ -82,13 +99,12 @@ begin
       Sleep(1000);
     end;
   if (CleanupPath <> '') and (ResultCode <> 0) then
-    Result := 'Di-Tunnel: network cleanup is not complete. Wait for the network host to exit before updating.';
+    Result := CustomMessage('CleanupIncomplete');
 end;
 
 function InitializeUninstall(): Boolean;
 begin
   Result := not CheckForMutexes('DiTunnel.Desktop,Global\DiTunnel.NetworkHost.v1');
   if not Result then
-    MsgBox('Di-Tunnel: exit the application from the tray and wait for network cleanup before uninstalling.' + #13#10 +
-      'Di-Tunnel: выйдите из приложения через трей и дождитесь восстановления сети перед удалением.', mbError, MB_OK);
+    MsgBox(CustomMessage('ExitBeforeUninstall'), mbError, MB_OK);
 end;
