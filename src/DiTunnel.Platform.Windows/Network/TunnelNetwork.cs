@@ -17,7 +17,7 @@ internal interface ITunnelNetwork
     uint FindTunnel(string name);
     Task AddAddressAsync(uint index, string address, byte prefix, CancellationToken token);
     void SetMetric(uint index, bool ipv6);
-    void InstallDns(string[] servers);
+    bool InstallDns(uint tunnelIndex, string tunnelName, string[] servers);
     void FlushDns();
     void CleanupDns();
     IReadOnlyList<string> CachedNames();
@@ -27,6 +27,7 @@ internal interface ITunnelNetwork
 
 internal sealed class TunnelNetwork : ITunnelNetwork
 {
+    private WindowsInterfaceDns? interfaceDns;
     public void PrecheckDns() => WindowsDnsPolicy.Precheck();
     public PhysicalUplink FindUplink() => WindowsNetworkApi.FindUplink();
     public async Task<IAsyncDisposable> AcquireServerRouteAsync(System.Net.IPAddress address, PhysicalUplink uplink, CancellationToken token) =>
@@ -38,9 +39,14 @@ internal sealed class TunnelNetwork : ITunnelNetwork
         .FirstOrDefault(n => n.Name == name)?.GetIPProperties().GetIPv4Properties()?.Index ?? 0);
     public Task AddAddressAsync(uint index, string address, byte prefix, CancellationToken token) => WindowsNetworkApi.AddAddressAsync(index, address, prefix, token);
     public void SetMetric(uint index, bool ipv6) => WindowsNetworkApi.SetTunnelMetric(index, ipv6);
-    public void InstallDns(string[] servers) => WindowsDnsPolicy.Install(servers);
+    public bool InstallDns(uint tunnelIndex, string tunnelName, string[] servers) =>
+        WindowsDnsPolicy.Install(servers, () => interfaceDns = WindowsInterfaceDns.Configure(tunnelIndex, tunnelName, servers));
     public void FlushDns() => WindowsDnsPolicy.Flush();
-    public void CleanupDns() => WindowsDnsPolicy.CleanupOwned();
+    public void CleanupDns()
+    {
+        try { WindowsDnsPolicy.CleanupOwned(); }
+        finally { interfaceDns?.Dispose(); }
+    }
     public IReadOnlyList<string> CachedNames() => WindowsDnsPolicy.CachedNames();
     public Task<IPAddress[]> ResolveAsync(string name, CancellationToken token) =>
         Dns.GetHostAddressesAsync(name, token).WaitAsync(TimeSpan.FromSeconds(2), token);

@@ -228,7 +228,7 @@ internal sealed class WindowsTunnelHost : IDisposable
                 AddRoute(new(server + (server.Contains(':') ? "/128" : "/32"), tunnelIndex, server.Contains(':') ? "::" : "0.0.0.0"));
             UpdateSplitRoutes(options.SplitAddresses.Select(a => a.ToString()), uplink);
             Stage("DNS_RULE");
-            network.InstallDns(options.DnsServers);
+            Emit(network.InstallDns(tunnelIndex, options.Name, options.DnsServers) ? "DNS_INTERFACE_READY" : "DNS_NRPT_READY");
             Stage("DNS_CACHE");
             network.FlushDns();
             if (options.SplitMode == SplitTunnelMode.ProxySelected)
@@ -302,6 +302,7 @@ internal sealed class WindowsTunnelHost : IDisposable
             if (stage == "PRECHECK") Emit("ERROR_PRECHECK_" + precheckStep);
             // Only type and numeric code are logged; raw messages may contain profile secrets.
             Emit("ERROR_EXCEPTION_" + error.GetType().Name);
+            if (error is DnsPolicyException dnsError) Emit("ERROR_DNS_" + dnsError.Code);
             if (error is System.Runtime.InteropServices.COMException)
                 Emit("ERROR_HRESULT_" + error.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
             if (error is System.ComponentModel.Win32Exception native) Emit("ERROR_NATIVE_" + native.NativeErrorCode);

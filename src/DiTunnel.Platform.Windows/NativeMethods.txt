@@ -14,6 +14,7 @@ Windows.Win32.NetworkManagement.WindowsFilteringPlatform.FwpmFreeMemory0
 Windows.Win32.NetworkManagement.WindowsFilteringPlatform.FwpmGetAppIdFromFileName0
 Windows.Win32.NetworkManagement.WindowsFilteringPlatform.FWPM_CONDITION_ALE_APP_ID
 ConvertInterfaceIndexToLuid
+SetInterfaceDnsSettings
 GetIpForwardTable2
 GetIpForwardEntry2
 InitializeIpForwardEntry

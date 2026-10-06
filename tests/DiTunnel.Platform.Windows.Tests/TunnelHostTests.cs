@@ -7,6 +7,41 @@ namespace DiTunnel.Platform.Windows.Tests;
 
 public sealed class TunnelHostTests
 {
+    [Fact]
+    public async Task AdapterDnsFallbackReportsReadyAndUsesTheTunnelIdentity()
+    {
+        await using var fixture = new Fixture();
+        fixture.Network.UseAdapterDns = true;
+        using var host = fixture.Start();
+        var events = new List<string>();
+        while (await host.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)) is { } line)
+        {
+            events.Add(line);
+            if (line == "CONNECTED") break;
+        }
+        Assert.Contains("CONNECTED", events);
+        Assert.Contains("DNS_INTERFACE_READY", events);
+        Assert.Equal(42u, fixture.Network.DnsIndex);
+        Assert.Equal(fixture.Options.Name, fixture.Network.DnsName);
+        host.RequestStop();
+        Assert.Contains("STOPPED", await DrainAsync(host));
+        Assert.Equal(1, fixture.Network.CleanupCount);
+    }
+
+    [Fact]
+    public async Task AdapterDnsVerificationFailureReportsItsCodeAndRollsBack()
+    {
+        await using var fixture = new Fixture();
+        fixture.Network.DnsException = new DnsPolicyException("ADAPTER_VERIFY");
+        using var host = fixture.Start();
+        var events = await DrainAsync(host);
+        Assert.Contains("ERROR_DNS_ADAPTER_VERIFY", events);
+        Assert.Contains("ERROR_STAGE_DNS_RULE", events);
+        Assert.DoesNotContain("CONNECTED", events);
+        Assert.Contains("STOPPED", events);
+        Assert.Empty(fixture.Network.Table);
+        Assert.Equal(1, fixture.Network.CleanupCount);
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -295,6 +330,10 @@ public sealed class TunnelHostTests
         internal string? FailingStage;
         internal Exception? PrecheckException;
         internal Exception? ProbeException;
+        internal Exception? DnsException;
+        internal bool UseAdapterDns;
+        internal uint DnsIndex;
+        internal string? DnsName;
         internal bool FailRemoval;
         internal int CleanupCount;
         internal string[]? DnsServers;
@@ -326,7 +365,12 @@ public sealed class TunnelHostTests
             return Task.CompletedTask;
         }
         public void SetMetric(uint index, bool ipv6) { }
-        public void InstallDns(string[] servers) { if (FailingStage == "DNS_RULE") throw new InvalidOperationException(); DnsServers = servers; }
+        public bool InstallDns(uint tunnelIndex, string tunnelName, string[] servers)
+        {
+            if (DnsException is not null) throw DnsException;
+            if (FailingStage == "DNS_RULE") throw new InvalidOperationException();
+            DnsServers = servers; DnsIndex = tunnelIndex; DnsName = tunnelName; return UseAdapterDns;
+        }
         public void FlushDns() { if (FailingStage == "DNS_CACHE") throw new InvalidOperationException(); }
         public void CleanupDns() => CleanupCount++;
         public IReadOnlyList<string> CachedNames() => [];

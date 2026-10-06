@@ -266,7 +266,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         catch (UnauthorizedAccessException) { }
         while ((line = await process.ReadLineAsync()) is not null)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|PROBE_WARNING|PROBE_EXCEPTION_[A-Za-z0-9_]+|PROBE_SOCKET_[0-9]+|CONNECTED|STOPPED|CANCELLED)$"))
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|DNS_(INTERFACE|NRPT)_READY|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|PROBE_WARNING|PROBE_EXCEPTION_[A-Za-z0-9_]+|PROBE_SOCKET_[0-9]+|CONNECTED|STOPPED|CANCELLED)$"))
                 await AppendDiagnosticAsync(logPath, line);
             if (line.StartsWith("PHYSICAL_INTERFACE_", StringComparison.Ordinal) && int.TryParse(line[19..], out var physicalIndex))
                 physicalInterfaceIndex = physicalIndex;
@@ -315,6 +315,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             }
             if (line.StartsWith("ERROR_STAGE_", StringComparison.Ordinal))
                 error ??= $"Сбой настройки Windows на этапе {line[12..]}. Маршруты будут восстановлены.";
+            if (line.StartsWith("ERROR_DNS_", StringComparison.Ordinal) && line != "ERROR_DNS_POLICY")
+                error = "Windows не подтвердила установку DNS-правила Di-Tunnel.";
             if (line.StartsWith("ERROR_NATIVE_", StringComparison.Ordinal)) error += $" Код Windows: {line[13..]}.";
             if (line.StartsWith("ERROR_HRESULT_", StringComparison.Ordinal)) error += $" HRESULT Windows: 0x{line[14..]}.";
             if (line.StartsWith("ERROR_XRAY_EXIT_", StringComparison.Ordinal)) error = $"Xray-core завершился во время работы туннеля. Код: {line[16..]}.";

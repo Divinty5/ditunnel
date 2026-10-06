@@ -33,7 +33,7 @@ public sealed class WindowsNativeReadTests
         var effective = WindowsDnsPolicy.Invoke("PS_DnsClientNrptPolicy", "Get",
             new Dictionary<string, object> { ["Effective"] = true });
         Assert.NotNull(effective.Items);
-        _ = WindowsDnsPolicy.HasForeignPolicy();
+        _ = WindowsDnsPolicy.HasConflictingPolicy();
         _ = WindowsDnsPolicy.CachedNames();
     }
 
