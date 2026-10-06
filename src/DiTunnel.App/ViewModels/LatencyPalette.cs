@@ -10,6 +10,20 @@ internal static class LatencyPalette
     private static readonly IBrush Orange = Brush(0xF3, 0x9A, 0x4A);
     private static readonly IBrush Red = Brush(0xF0, 0x64, 0x70);
     private static readonly IBrush Pending = Brush(0xA5, 0x8A, 0xFF);
+    private static readonly IBrush[] DarkColours = [Green, Lime, Yellow, Orange, Red, Pending];
+    private static readonly IBrush[] LightColours =
+    [
+        Brush(0x16, 0x73, 0x44), Brush(0x52, 0x6F, 0x20), Brush(0x80, 0x60, 0x00),
+        Brush(0x95, 0x50, 0x12), Brush(0xAA, 0x30, 0x42), Brush(0x64, 0x40, 0x96)
+    ];
+
+    public static IBrush ForTheme(IBrush brush, bool light)
+    {
+        if (!light || brush is not ISolidColorBrush solid) return brush;
+        for (int index = 0; index < DarkColours.Length; index++)
+            if (((ISolidColorBrush)DarkColours[index]).Color == solid.Color) return LightColours[index];
+        return brush;
+    }
 
     public static IBrush For(double? milliseconds, bool unavailable = false) => unavailable || milliseconds > 4000
         ? Red

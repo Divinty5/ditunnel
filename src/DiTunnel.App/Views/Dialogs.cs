@@ -467,14 +467,21 @@ public static class Dialogs
                 summary.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Protocol)) { Converter = new TranslationConverter() });
                 var latency = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
                 latency.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.ProbeText)) { Converter = new TranslationConverter() });
-                latency.Bind(TextBlock.ForegroundProperty, new Binding(nameof(ServerItemViewModel.ProbeBrush)));
+                latency.Bind(TextBlock.ForegroundProperty, new MultiBinding
+                {
+                    Converter = LatencyThemeConverter.Instance,
+                    Bindings = { new Binding(nameof(ServerItemViewModel.ProbeBrush)), new Binding(nameof(StyledElement.ActualThemeVariant)) { Source = latency } }
+                });
                 var details = new Grid
                 {
                     RowDefinitions = new RowDefinitions("Auto,Auto,Auto"), MinWidth = 130,
                     VerticalAlignment = VerticalAlignment.Center
                 };
-                details.Children.Add(name); details.Children.Add(summary); details.Children.Add(latency);
-                Grid.SetRow(summary, 1); Grid.SetRow(latency, 2);
+                var latencyBadge = new Border { CornerRadius = new CornerRadius(6), Padding = new Thickness(7, 3),
+                    HorizontalAlignment = HorizontalAlignment.Left, Child = latency, Margin = new Thickness(0, 3, 0, 0) };
+                latencyBadge.Bind(Border.BackgroundProperty, latencyBadge.GetResourceObservable("LatencyBadgeBrush"));
+                details.Children.Add(name); details.Children.Add(summary); details.Children.Add(latencyBadge);
+                Grid.SetRow(summary, 1); Grid.SetRow(latencyBadge, 2);
                 var rowPanel = new Grid { MinHeight = 76, Margin = new Thickness(8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*") };
                 rowPanel.Children.Add(flag); rowPanel.Children.Add(globe); rowPanel.Children.Add(details);
                 Grid.SetColumn(details, 1);

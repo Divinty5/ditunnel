@@ -242,6 +242,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public IBrush PowerGlowBrush => ConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse("#3830C86D")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse("#40D94A58")), _ => new SolidColorBrush(Color.Parse("#18000000")) };
     public IBrush ConnectionStateBrush => ConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse(IsLightTheme ? "#16804A" : "#66E491")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse(IsLightTheme ? "#C83243" : "#FF7783")), _ => new SolidColorBrush(Color.Parse(IsLightTheme ? "#684096" : "#C9B9FF")) };
     public IBrush DelayBrush => LatencyPalette.For(DisplayDelay);
+    public bool HasDisplayDelay => DisplayDelay is not null;
     public IBrush ConnectionHintBrush => ConnectionState == VpnConnectionState.Connected && DisplayDelay is not null
         ? DelayBrush
         : new SolidColorBrush(Color.Parse(IsLightTheme ? "#665477" : "#B7ABC8"));
@@ -347,7 +348,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedFlag));
         OnPropertyChanged(nameof(HasSelectedFlag));
         OnPropertyChanged(nameof(SubscriptionLimits));
-        OnPropertyChanged(nameof(ConnectionHint));
+        OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay));
         if (status.Message is not null) Notice = status.Message;
     }
     partial void OnConnectionStateChanged(VpnConnectionState value)
@@ -371,7 +372,7 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         if (value != VpnConnectionState.Connected) StopActiveLatencyChecks();
         OnPropertyChanged(nameof(ShowKillSwitchStatus));
-        OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(KillSwitchText)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(PowerBorderBrush)); OnPropertyChanged(nameof(PowerGlowBrush)); OnPropertyChanged(nameof(ConnectionStateBrush)); OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
+        OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(KillSwitchText)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(PowerBorderBrush)); OnPropertyChanged(nameof(PowerGlowBrush)); OnPropertyChanged(nameof(ConnectionStateBrush)); OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
     }
     private void AdvanceMapLights()
     {
@@ -411,11 +412,26 @@ public sealed partial class MainViewModel : ViewModelBase
     private static ObservableCollection<MapLightViewModel> CreateMapLights() =>
     [
         // Coordinates match the twenty individual SVG layers in Assets.
-        new(220, 250), new(260, 235), new(290, 275), new(320, 305),
-        new(425, 490), new(440, 540), new(430, 590),
-        new(730, 200), new(780, 190), new(830, 205), new(880, 210), new(930, 215),
-        new(1180, 250), new(1240, 270), new(1300, 280),
-        new(835, 400), new(860, 450), new(1320, 500), new(1370, 535), new(1450, 635)
+        new(333.38, 212.21),
+        new(368.27, 169.31),
+        new(359.42, 297.96),
+        new(470.76, 360.54),
+        new(480.13, 437.08),
+        new(587.2, 446.67),
+        new(514.76, 512.66),
+        new(791.56, 158.38),
+        new(810.44, 173.7),
+        new(783.56, 209.34),
+        new(859.56, 158.25),
+        new(893.38, 159.47),
+        new(967.2, 144.61),
+        new(938.84, 253.16),
+        new(867.87, 398.24),
+        new(924.67, 490.62),
+        new(1143.16, 259.2),
+        new(1317.33, 211.53),
+        new(1168.62, 147.61),
+        new(1395.02, 480.07)
     ];
     partial void OnIsBusyChanged(bool value) { OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); OnPropertyChanged(nameof(CanConnect)); }
     partial void OnIsProbingChanged(bool value) { OnPropertyChanged(nameof(HasPendingOperation)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); }
@@ -501,7 +517,7 @@ public sealed partial class MainViewModel : ViewModelBase
     partial void OnSelectedProfileChanged(ServerItemViewModel? value)
     {
         OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag));
-        OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
+        OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
         OnPropertyChanged(nameof(SelectedServerUri)); OnPropertyChanged(nameof(CanShareServer));
     }
 
@@ -866,7 +882,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRemoveUnavailable));
         if (visible == SelectedProfile)
         {
-            OnPropertyChanged(nameof(ConnectionHint));
+            OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay));
             OnPropertyChanged(nameof(DelayBrush));
             OnPropertyChanged(nameof(ConnectionHintBrush));
         }
@@ -962,7 +978,7 @@ public sealed partial class MainViewModel : ViewModelBase
                     var result = await probe.ProbeAsync(server.Profile, cancellationToken, UserSettings.Current.ServerProbeMode);
                     ApplyProbeResult(server, result);
                     activeDelayMilliseconds = result.Milliseconds;
-                    OnPropertyChanged(nameof(ConnectionHint));
+                    OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay));
                     OnPropertyChanged(nameof(DelayBrush));
                     OnPropertyChanged(nameof(ConnectionHintBrush));
                     // Profile probes bypass the system tunnel; they cannot clear its health warning.
