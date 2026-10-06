@@ -6,9 +6,9 @@
     <Deterministic>true</Deterministic>
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
-    <Version>0.5.13</Version>
-    <WindowsVersion>0.5.13</WindowsVersion>
-    <AndroidVersion>0.5.13</AndroidVersion>
+    <Version>0.5.19</Version>
+    <WindowsVersion>0.5.19</WindowsVersion>
+    <AndroidVersion>0.5.19</AndroidVersion>
     <Company>Di Vinty Interactive</Company>
     <Authors>Di Vinty Interactive</Authors>
     <Copyright>Copyright © 2026 Di Vinty Interactive</Copyright>
