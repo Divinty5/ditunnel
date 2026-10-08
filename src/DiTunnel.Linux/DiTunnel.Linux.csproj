@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Di-Tunnel.Linux</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>$(LinuxVersion)</Version>
+    <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DiTunnel.Platform.Linux.Tests" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <ProjectReference Include="..\DiTunnel.App\DiTunnel.App.csproj" />
+    <ProjectReference Include="..\DiTunnel.Platform.Linux\DiTunnel.Platform.Linux.csproj" />
+  </ItemGroup>
+</Project>

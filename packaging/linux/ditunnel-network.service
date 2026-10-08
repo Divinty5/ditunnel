@@ -1,0 +1,37 @@
+[Unit]
+Description=Di-Tunnel Linux network host
+After=dbus.service systemd-resolved.service network.target
+Requires=dbus.service systemd-resolved.service
+
+[Service]
+Type=dbus
+BusName=org.divinty5.DiTunnel.Network1
+ExecStart=/usr/lib/ditunnel/host/DiTunnel.NetworkHost.Linux
+User=root
+Group=root
+RuntimeDirectory=ditunnel
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/net/tun rw
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+KillMode=control-group
+TimeoutStopSec=30
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

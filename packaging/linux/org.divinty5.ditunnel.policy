@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>Di Vinty Interactive</vendor>
+  <action id="org.divinty5.ditunnel.probe">
+    <description>Test a Di-Tunnel server using a local proxy</description>
+    <message>Server probes are available in an active local session.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+  <action id="org.divinty5.ditunnel.connect">
+    <description>Connect the Di-Tunnel system VPN</description>
+    <message>Authentication is required to configure the Di-Tunnel VPN.</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin_keep</allow_active></defaults>
+  </action>
+  <action id="org.divinty5.ditunnel.recover">
+    <description>Restore the network objects owned by Di-Tunnel</description>
+    <message>Authentication is required to restore Di-Tunnel network settings.</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+</policyconfig>

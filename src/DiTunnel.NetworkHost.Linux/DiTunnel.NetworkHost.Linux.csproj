@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>DiTunnel.NetworkHost.Linux</AssemblyName>
+    <Version>$(LinuxVersion)</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../DiTunnel.Platform.Linux/DiTunnel.Platform.Linux.csproj" />
+    <InternalsVisibleTo Include="DiTunnel.Linux.Smoke" />
+  </ItemGroup>
+</Project>
