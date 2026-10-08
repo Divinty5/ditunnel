@@ -3,9 +3,9 @@ using System.Text.Json;
 using DiTunnel.Core;
 using DiTunnel.Core.Profiles;
 
-namespace DiTunnel.App;
+namespace DiTunnel.Platform.Windows;
 
-internal sealed class ProfileStorage : IProfileStore
+public sealed class WindowsProfileStore : IProfileStore
 {
     private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiTunnel", "profiles.dat");
     public IReadOnlyList<ImportedProfile> Load() => File.Exists(FilePath)

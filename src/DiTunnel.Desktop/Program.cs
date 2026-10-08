@@ -51,6 +51,7 @@ internal static class Program
             }
         };
         timer.Start();
+        App.App.Platform = App.AppPlatform.Windows;
         App.App.UpdateInstaller = new WindowsUpdateInstaller();
         App.App.CreateMainViewModel = () =>
         {
@@ -60,6 +61,7 @@ internal static class Program
                 () => App.UserSettings.Current.BlockAdsEnabled,
                 () => App.UserSettings.Current.StrictAdBlockingEnabled);
             return new App.ViewModels.MainViewModel(engine,
+                store: new Platform.Windows.WindowsProfileStore(),
                 probe: engine, countryResolver: new Platform.Windows.WindowsServerCountryResolver(),
                 installedApplicationProvider: new Platform.Windows.WindowsInstalledApplicationProvider());
         };

@@ -8,6 +8,7 @@ namespace DiTunnel.App;
 
 public partial class App : Application
 {
+    public static AppPlatform Platform { get; set; } = AppPlatform.Detect();
     public static Func<MainViewModel> CreateMainViewModel { get; set; } = () => new MainViewModel();
     public static IUpdateInstaller? UpdateInstaller { get; set; }
     public static Func<Task<string?>>? ReadClipboardTextAsync { get; set; }

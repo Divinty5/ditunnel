@@ -6,5 +6,6 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <ProjectReference Include="../../src/DiTunnel.App/DiTunnel.App.csproj" />
     <Using Include="Xunit" />
+    <None Include="../../src/DiTunnel.App/Assets/world-map*.svg" Link="TestAssets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

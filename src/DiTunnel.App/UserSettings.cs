@@ -10,8 +10,10 @@ public sealed record WindowPlacement(int X, int Y, double Width, double Height, 
 
 public sealed class UserSettings
 {
-    public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiTunnel");
-    public static UserSettings Current { get; } = Load(Path.Combine(DataDirectory, "settings.json"));
+    public static string DataDirectory => AppPaths.DataDirectory;
+    private static readonly Lazy<UserSettings> current = new(() => Load(Path.Combine(AppPaths.ConfigDirectory, "settings.json")));
+    public static UserSettings Current => current.Value;
+    internal static bool IsCurrentLoaded => current.IsValueCreated;
     public string Language { get; set; } = "ru";
     public string Theme { get; set; } = "system";
     public string CloseAction { get; set; } = "ask";
@@ -38,15 +40,15 @@ public sealed class UserSettings
         ? (ProxySelectedSplitTunnelDomains, ProxySelectedSplitTunnelProcesses)
         : (BypassSplitTunnelDomains, BypassSplitTunnelProcesses);
 
-    public string NetworkSettingsFingerprint()
+    public string NetworkSettingsFingerprint(AppPlatform? platform = null)
     {
-        static string Canonical(IEnumerable<string> values) => string.Join('\n', values
-            .Select(value => value.Trim().ToLowerInvariant()).Where(value => value.Length > 0)
+        static string Canonical(IEnumerable<string> values, bool ignoreCase) => string.Join('\n', values
+            .Select(value => ignoreCase ? value.Trim().ToLowerInvariant() : value.Trim()).Where(value => value.Length > 0)
             .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal));
         var protection = string.Join('|', KillSwitchEnabled, AllowLocalNetwork, BlockAdsEnabled, StrictAdBlockingEnabled, (int)SplitTunnelMode);
         var rules = GetSplitTunnelPolicy();
         return SplitTunnelMode == SplitTunnelMode.ProxyAll ? protection
-            : string.Join('|', protection, Canonical(rules.Domains), Canonical(rules.Processes));
+            : string.Join('|', protection, Canonical(rules.Domains, true), Canonical(rules.Processes, !(platform ?? App.Platform).CaseSensitiveApplicationPaths));
     }
 
     public void SetSplitTunnelRules(SplitTunnelMode mode, IEnumerable<string> domains, IEnumerable<string> processes)
@@ -82,7 +84,7 @@ public sealed class UserSettings
         if (SplitTunnelMode != SplitTunnelMode.ProxyAll) return false;
         BypassSplitTunnelProcesses = BypassSplitTunnelProcesses
             .Concat(ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, applications))
-            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            .Distinct(App.Platform.ApplicationPathComparer).ToList();
         SplitTunnelMode = SplitTunnelMode.BypassSelected;
         return true;
     }
@@ -105,7 +107,7 @@ public sealed class UserSettings
     public WindowPlacement? Window { get; set; }
     public static string Version => typeof(UserSettings).Assembly
         .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
-        .FirstOrDefault(item => item.Key == (OperatingSystem.IsAndroid() ? "AndroidVersion" : "WindowsVersion"))?.Value
+        .FirstOrDefault(item => item.Key == App.Platform.VersionMetadataKey)?.Value
         ?? typeof(UserSettings).Assembly.GetName().Version?.ToString(3) ?? "0.5.13";
 
     public static UserSettings Load(string path)
@@ -128,7 +130,7 @@ public sealed class UserSettings
 
     public void Save(string? path = null)
     {
-        path ??= Path.Combine(DataDirectory, "settings.json");
+        path ??= Path.Combine(AppPaths.ConfigDirectory, "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(this, AppJsonContext.Default.UserSettings));
         File.Move(path + ".tmp", path, true);

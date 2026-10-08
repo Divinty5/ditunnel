@@ -88,7 +88,7 @@ public static class Dialogs
     {
         var originalContent = owner.Content;
         IReadOnlyList<InstalledApplication> installedApplications = [];
-        var applicationsLoaded = !(OperatingSystem.IsAndroid() || OperatingSystem.IsWindows());
+        var applicationsLoaded = !(OperatingSystem.IsAndroid() || OperatingSystem.IsWindows() || OperatingSystem.IsLinux());
         var draftDomains = new Dictionary<SplitTunnelMode, List<string>>();
         var draftApplications = new Dictionary<SplitTunnelMode, HashSet<string>>();
         foreach (var mode in new[] { SplitTunnelMode.BypassSelected, SplitTunnelMode.ProxySelected })
@@ -121,7 +121,6 @@ public static class Dialogs
         }
         void Build()
         {
-            if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
             var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Stretch };
             var back = AsyncButton("← Назад", GoBackAsync);
             var status = Label("");
@@ -148,9 +147,13 @@ public static class Dialogs
             var theme = new ComboBox { ItemsSource = new[] { L.T("Системная"), L.T("Тёмная"), L.T("Светлая") }, HorizontalAlignment = HorizontalAlignment.Stretch,
                 SelectedIndex = Array.IndexOf(new[] { "system", "dark", "light" }, UserSettings.Current.Theme) };
             theme.SelectionChanged += (_, _) => { if (theme.SelectedIndex < 0) return; UserSettings.Current.Theme = new[] { "system", "dark", "light" }[theme.SelectedIndex]; UserSettings.Current.ApplyTheme(); Save(); };
-            var close = new ComboBox { ItemsSource = new[] { L.T("Спрашивать каждый раз"), L.T("Скрыть в трей"), L.T("Выйти") }, HorizontalAlignment = HorizontalAlignment.Stretch,
-                SelectedIndex = Array.IndexOf(new[] { "ask", "hide", "exit" }, UserSettings.Current.CloseAction) };
-            close.SelectionChanged += (_, _) => { if (close.SelectedIndex < 0) return; UserSettings.Current.CloseAction = new[] { "ask", "hide", "exit" }[close.SelectedIndex]; Save(); };
+            string[] closeActions = App.Platform.SupportsHideToTray ? ["ask", "hide", "exit"] : ["ask", "exit"];
+            string[] closeLabels = App.Platform.SupportsHideToTray
+                ? [L.T("Спрашивать каждый раз"), L.T("Скрыть в трей"), L.T("Выйти")]
+                : [L.T("Спрашивать каждый раз"), L.T("Выйти")];
+            var close = new ComboBox { ItemsSource = closeLabels, HorizontalAlignment = HorizontalAlignment.Stretch,
+                SelectedIndex = Math.Max(0, Array.IndexOf(closeActions, UserSettings.Current.CloseAction)) };
+            close.SelectionChanged += (_, _) => { if (close.SelectedIndex < 0) return; UserSettings.Current.CloseAction = closeActions[close.SelectedIndex]; Save(); };
             var appearance = new Grid { ColumnDefinitions = new ColumnDefinitions(OperatingSystem.IsAndroid() ? "*" : "*,*"), RowDefinitions = new RowDefinitions("Auto,Auto"), ColumnSpacing = 12, RowSpacing = 6 };
             var themeLabel = Label("Тема");
             var closeLabel = Label("Действие при закрытии");
@@ -160,18 +163,20 @@ public static class Dialogs
             if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1); }
             panel.Children.Add(appearance);
             panel.Children.Add(SectionHeading("Защита соединения"));
-            var blockAds = new CheckBox { Content = L.T("Блокировать рекламу и трекеры"), IsChecked = UserSettings.Current.BlockAdsEnabled };
+            if (!vm.Platform.SupportsAdvancedNetworkSettings)
+                panel.Children.Add(Label("На этом этапе Linux направляет весь трафик через VPN. Разделение трафика и блокировка рекламы пока недоступны."));
+            var blockAds = new CheckBox { Content = L.T("Блокировать рекламу и трекеры"), IsChecked = vm.Platform.SupportsAdvancedNetworkSettings && UserSettings.Current.BlockAdsEnabled, IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings };
             var strictAdBlocking = new CheckBox
             {
                 Content = L.T("Строгая блокировка рекламы"),
-                IsChecked = UserSettings.Current.StrictAdBlockingEnabled,
-                IsEnabled = UserSettings.Current.BlockAdsEnabled
+                IsChecked = vm.Platform.SupportsAdvancedNetworkSettings && UserSettings.Current.StrictAdBlockingEnabled,
+                IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings && UserSettings.Current.BlockAdsEnabled
             };
             blockAds.IsCheckedChanged += (_, _) =>
             {
                 networkSettingsChangedExplicitly = true;
                 UserSettings.Current.BlockAdsEnabled = blockAds.IsChecked == true;
-                strictAdBlocking.IsEnabled = UserSettings.Current.BlockAdsEnabled;
+                strictAdBlocking.IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings && UserSettings.Current.BlockAdsEnabled;
                 Save();
             };
             panel.Children.Add(blockAds);
@@ -184,14 +189,14 @@ public static class Dialogs
             };
             panel.Children.Add(strictAdBlocking);
             panel.Children.Add(Label("Дополнительно блокируются общие домены, через которые мобильные рекламные SDK могут загружать объявления. Некоторые сервисы Яндекса могут перестать работать до отключения строгого режима и переподключения VPN."));
-            var killSwitch = killSwitchControl = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled };
-            var allowLan = new CheckBox { Content = L.T("Разрешать локальную сеть при активном kill switch"), IsChecked = UserSettings.Current.AllowLocalNetwork, IsEnabled = UserSettings.Current.KillSwitchEnabled };
+            var killSwitch = killSwitchControl = new CheckBox { Content = L.T("Kill switch: блокировать трафик вне VPN"), IsChecked = UserSettings.Current.KillSwitchEnabled, IsEnabled = vm.Platform.SupportsKillSwitch };
+            var allowLan = new CheckBox { Content = L.T("Разрешать локальную сеть при активном kill switch"), IsChecked = UserSettings.Current.AllowLocalNetwork, IsEnabled = vm.Platform.SupportsKillSwitch && UserSettings.Current.KillSwitchEnabled };
             void SaveProtection()
             {
                 networkSettingsChangedExplicitly = true;
                 UserSettings.Current.KillSwitchEnabled = killSwitch.IsChecked == true;
                 UserSettings.Current.AllowLocalNetwork = allowLan.IsChecked == true;
-                allowLan.IsEnabled = UserSettings.Current.KillSwitchEnabled;
+                allowLan.IsEnabled = vm.Platform.SupportsKillSwitch && UserSettings.Current.KillSwitchEnabled;
                 Save();
                 vm.RefreshConnectionPolicy();
             }
@@ -205,20 +210,25 @@ public static class Dialogs
             {
                 panel.Children.Add(killSwitch);
                 panel.Children.Add(allowLan);
-                panel.Children.Add(Label("Сетевые изменения применяются автоматически при возврате на главный экран. Kill switch использует отдельные правила Windows Filtering Platform."));
+                panel.Children.Add(Label(vm.Platform.ReleaseTarget == ReleaseTarget.LinuxX64
+                    ? vm.Platform.SupportsKillSwitch ? "При аварии VPN kill switch сохраняет блокировку до восстановления сети или явного отключения защиты." : "Kill switch и исключение для локальной сети пока недоступны на Linux."
+                    : "Сетевые изменения применяются автоматически при возврате на главный экран. Kill switch использует отдельные правила Windows Filtering Platform."));
+                if (vm.Platform.ReleaseTarget == ReleaseTarget.LinuxX64 && vm.Platform.SupportsKillSwitch)
+                    panel.Children.Add(Label("Прямой трафик правил РТ разрешён при работающем VPN. После аварии он блокируется; настройка локальной сети остаётся в силе."));
             }
             panel.Children.Add(SectionHeading("Раздельное туннелирование"));
-            var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = (int)UserSettings.Current.SplitTunnelMode };
+            var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = vm.Platform.SupportsAdvancedNetworkSettings ? (int)UserSettings.Current.SplitTunnelMode : 0, IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings };
             var activeMode = UserSettings.Current.SplitTunnelMode == SplitTunnelMode.ProxySelected ? SplitTunnelMode.ProxySelected : SplitTunnelMode.BypassSelected;
-            var domains = new TextBox { Text = string.Join(Environment.NewLine, draftDomains[activeMode]), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T("Домены или IPv4-адреса, по одному в строке") };
+            var domains = new TextBox { Text = string.Join(Environment.NewLine, draftDomains[activeMode]), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T(OperatingSystem.IsLinux() ? "Домены или IP-адреса, по одному в строке" : "Домены или IPv4-адреса, по одному в строке") };
             var splitRules = new StackPanel { Spacing = 12 };
             var selectedApplications = new HashSet<string>(draftApplications[activeMode], StringComparer.Ordinal);
             Action rebuildApplicationRows = () => { };
             splitRules.Children.Add(Label("Домены и IP-адреса"));
             splitRules.Children.Add(domains);
-            if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows())
+            if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
             {
-                splitRules.Children.Add(Label(OperatingSystem.IsAndroid() ? "Приложения Android (можно выбрать несколько)" : "Приложения Windows (можно выбрать несколько)"));
+                splitRules.Children.Add(Label(OperatingSystem.IsAndroid() ? "Приложения Android (можно выбрать несколько)" : OperatingSystem.IsLinux() ? "Приложения Linux (можно выбрать несколько)" : "Приложения Windows (можно выбрать несколько)"));
+                if (OperatingSystem.IsLinux()) splitRules.Children.Add(Label("Для Snap/Flatpak и дочерних процессов добавьте фактический исполняемый файл, который использует сеть."));
                 var search = new TextBox { PlaceholderText = L.T("Поиск приложений"), HorizontalAlignment = HorizontalAlignment.Stretch };
                 splitRules.Children.Add(search);
                 var autoSelectStatus = Label("");
@@ -269,19 +279,23 @@ public static class Dialogs
                 }
                 rebuildApplicationRows = BuildApplicationRows;
                 refreshInstalledApplications = BuildApplicationRows;
-                if (OperatingSystem.IsWindows())
+                if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
                 {
-                    var addExecutable = AsyncButton("Добавить файл .exe…", async () =>
+                    var executableTitle = OperatingSystem.IsLinux() ? "Добавить исполняемый файл…" : "Добавить файл .exe…";
+                    var addExecutable = AsyncButton(executableTitle, async () =>
                     {
                         var files = await TopLevel.GetTopLevel(owner)!.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
                         {
-                            Title = L.T("Добавить файл .exe…"), AllowMultiple = true,
-                            FileTypeFilter = [new FilePickerFileType("Windows") { Patterns = ["*.exe"] }]
+                            Title = L.T(executableTitle), AllowMultiple = true,
+                            FileTypeFilter = [new FilePickerFileType(OperatingSystem.IsLinux() ? "Linux" : "Windows") { Patterns = [OperatingSystem.IsLinux() ? "*" : "*.exe"] }]
                         });
                         var additions = files.Select(file => file.TryGetLocalPath()).OfType<string>()
-                            .Where(path => path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
+                            .Where(path => File.Exists(path) && (OperatingSystem.IsLinux()
+                                ? (File.GetUnixFileMode(path) & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0
+                                : path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
+                            .Select(path => OperatingSystem.IsLinux() ? new FileInfo(path).ResolveLinkTarget(true)?.FullName ?? path : path)
                             .Select(path => new InstalledApplication(path, Path.GetFileNameWithoutExtension(path))).ToArray();
-                        installedApplications = installedApplications.Concat(additions).DistinctBy(app => app.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+                        installedApplications = installedApplications.Concat(additions).DistinctBy(app => app.Id, vm.Platform.ApplicationPathComparer).ToArray();
                         selectedApplications.UnionWith(additions.Select(app => app.Id));
                         rebuildApplicationRows();
                     });
@@ -324,6 +338,7 @@ public static class Dialogs
             panel.Children.Add(splitMode); panel.Children.Add(splitRules);
             saveSplitRules = () =>
             {
+                if (!vm.Platform.SupportsAdvancedNetworkSettings) return;
                 CaptureDraft();
                 UserSettings.Current.SplitTunnelMode = (DiTunnel.Core.Connection.SplitTunnelMode)Math.Max(0, splitMode.SelectedIndex);
                 UserSettings.Current.SplitTunnelDefaultsApplied = true;
@@ -349,7 +364,7 @@ public static class Dialogs
             export.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(export);
             var openLogs = Button("Открыть папку журналов", () =>
             {
-                try { Directory.CreateDirectory(UserSettings.DataDirectory); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(UserSettings.DataDirectory) { UseShellExecute = true }); }
+                try { Directory.CreateDirectory(AppPaths.StateDirectory); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.StateDirectory) { UseShellExecute = true }); }
                 catch { status.Text = L.T("Не удалось открыть папку."); }
             });
             openLogs.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(openLogs);
@@ -391,17 +406,18 @@ public static class Dialogs
             panel.Children.Add(status);
             panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             owner.Content = Page("Настройки", back, panel);
+            if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
             AppBackNavigation.Set(() => _ = GoBackAsync());
         }
         Build();
-        if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows())
+        if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
         {
             try { installedApplications = await vm.GetInstalledApplicationsAsync(); }
             catch { installedApplications = []; }
-            if (OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
                 installedApplications = installedApplications.Concat(draftApplications.Values.SelectMany(ids => ids)
                     .Where(File.Exists).Select(path => new InstalledApplication(path, Path.GetFileNameWithoutExtension(path))))
-                    .DistinctBy(app => app.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+                    .DistinctBy(app => app.Id, vm.Platform.ApplicationPathComparer).ToArray();
             applicationsLoaded = true;
             if (!isClosing)
             {
@@ -444,8 +460,10 @@ public static class Dialogs
     {
         var dialog = Window(owner, "Закрыть Di-Tunnel?", 260);
         var panel = new StackPanel { Margin = new Thickness(24), Spacing = 16 };
-        panel.Children.Add(Label("Скрыть приложение и оставить VPN работающим или выйти и отключить VPN?"));
-        panel.Children.Add(Button("Скрыть в трей", () => dialog.Close("hide")));
+        panel.Children.Add(Label(App.Platform.SupportsHideToTray
+            ? "Скрыть приложение и оставить VPN работающим или выйти и отключить VPN?"
+            : "Выйти из Di-Tunnel?"));
+        if (App.Platform.SupportsHideToTray) panel.Children.Add(Button("Скрыть в трей", () => dialog.Close("hide")));
         panel.Children.Add(Button("Выйти", () => dialog.Close("exit")));
         panel.Children.Add(Button("Отмена", () => dialog.Close((string?)null)));
         dialog.Content = Scroll(panel);

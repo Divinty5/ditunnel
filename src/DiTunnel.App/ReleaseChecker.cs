@@ -31,7 +31,7 @@ public static class ReleaseChecker
                 response.EnsureSuccessStatusCode();
                 await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
                 using var json = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token);
-                var result = ParseReleases(json.RootElement, currentVersion, OperatingSystem.IsAndroid());
+                var result = ParseReleases(json.RootElement, currentVersion, App.Platform.ReleaseTarget);
                 if (result.Release is { } candidate && (latest is null || candidate.Version > latest.Version)) latest = candidate;
                 if (json.RootElement.GetArrayLength() < 100) break;
             }
@@ -42,6 +42,9 @@ public static class ReleaseChecker
     }
 
     public static ReleaseCheckResult Parse(JsonElement release, Version currentVersion, bool android = false)
+        => Parse(release, currentVersion, android ? ReleaseTarget.AndroidArm64 : ReleaseTarget.WindowsX64);
+
+    public static ReleaseCheckResult Parse(JsonElement release, Version currentVersion, ReleaseTarget target)
     {
         if (release.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True
             || release.TryGetProperty("prerelease", out var prerelease) && prerelease.ValueKind == JsonValueKind.True)
@@ -57,9 +60,13 @@ public static class ReleaseChecker
         string? installerUrl = null;
         string? checksumUrl = null;
         var displayVersion = FormatVersion(remote);
-        var installerName = android
-            ? $"Di-Tunnel-{displayVersion}-arm64.apk"
-            : $"Di-Tunnel-{displayVersion}-Setup-x64.exe";
+        var installerName = target switch
+        {
+            ReleaseTarget.WindowsX64 => $"Di-Tunnel-{displayVersion}-Setup-x64.exe",
+            ReleaseTarget.AndroidArm64 => $"Di-Tunnel-{displayVersion}-arm64.apk",
+            ReleaseTarget.LinuxX64 => $"Di-Tunnel-{displayVersion}-linux-amd64.deb",
+            _ => throw new ArgumentOutOfRangeException(nameof(target))
+        };
         if (release.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
         {
             foreach (var asset in assets.EnumerateArray())
@@ -79,11 +86,14 @@ public static class ReleaseChecker
     }
 
     public static ReleaseCheckResult ParseReleases(JsonElement releases, Version currentVersion, bool android = false)
+        => ParseReleases(releases, currentVersion, android ? ReleaseTarget.AndroidArm64 : ReleaseTarget.WindowsX64);
+
+    public static ReleaseCheckResult ParseReleases(JsonElement releases, Version currentVersion, ReleaseTarget target)
     {
         if (releases.ValueKind != JsonValueKind.Array) throw new FormatException("Ожидался список релизов.");
         AppRelease? latest = null;
         foreach (var release in releases.EnumerateArray())
-            if (Parse(release, currentVersion, android).Release is { } candidate
+            if (Parse(release, currentVersion, target).Release is { } candidate
                 && (latest is null || candidate.Version > latest.Version)) latest = candidate;
         return latest is null ? new("Установлена актуальная версия.") : Available(latest);
     }

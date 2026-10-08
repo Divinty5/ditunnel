@@ -27,6 +27,7 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
         // background restoration, including when this process is not running.
         if (global::Android.App.Application.ProcessName != PackageName) return;
         AndroidLocaleCoordinator.Initialize(this);
+        App.App.Platform = App.AppPlatform.Android;
         App.QrScanner.ScanAsync = QrScannerCoordinator.Instance.ScanAsync;
         App.App.UpdateInstaller = new AndroidUpdateInstaller(this);
         var engine = new AndroidVpnEngine(

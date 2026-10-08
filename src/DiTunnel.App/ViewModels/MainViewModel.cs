@@ -27,6 +27,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly List<ImportedProfile> allProfiles = [];
     private readonly IProfileVpnEngine? engine;
     private readonly IProfileStore profileStore;
+    public AppPlatform Platform { get; }
     private bool storageAvailable = true;
     private readonly IServerProbe? probe;
     private readonly IServerCountryResolver? countryResolver;
@@ -147,10 +148,10 @@ public sealed partial class MainViewModel : ViewModelBase
         ? $"≈  {delay:0} мс"
         : engine?.RequiresAdministrator == true
             ? "Для TUN запустите приложение от администратора"
-            : OperatingSystem.IsAndroid()
+            : Platform.ReleaseTarget == ReleaseTarget.AndroidArm64
                 ? SelectedProfile?.Profile.Kind.Equals("AmneziaWG", StringComparison.OrdinalIgnoreCase) == true ? "Android VPN · AmneziaWG" : "Android VPN · Xray-core"
-                : "Windows TUN · Xray-core";
-    public bool IsKillSwitchEnabled => !OperatingSystem.IsAndroid() && UserSettings.Current.KillSwitchEnabled;
+                : Platform.RuntimeDescription;
+    public bool IsKillSwitchEnabled => Platform.SupportsKillSwitch && UserSettings.Current.KillSwitchEnabled;
     public bool ShowKillSwitchStatus => IsKillSwitchEnabled || engine?.IsNetworkProtectionActive == true;
     public string KillSwitchText => engine?.IsNetworkProtectionActive == true && ConnectionState != VpnConnectionState.Connected
         ? "Kill switch блокирует интернет. Подключите VPN или восстановите доступ к сети в настройках."
@@ -219,9 +220,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public string SelectedName => DisplayProfile?.Name ?? L.T("Сервер не выбран");
     public string SelectedSummary => DisplayProfile?.Summary.Replace(" · конфигурация сервера", "", StringComparison.OrdinalIgnoreCase) ?? "Импортируйте свою первую подписку";
     public string Tagline => "Твой VPN. Твой выбор.";
-    public string ImportStorageDescription => OperatingSystem.IsAndroid()
-        ? "Профили сохраняются только на этом устройстве и защищены Android Keystore."
-        : "Профили сохраняются на этом компьютере и защищены вашей учётной записью Windows.";
+    public string ImportStorageDescription => Platform.ProfileStorageDescription;
     public string SubscriptionLimits
     {
         get
@@ -250,11 +249,11 @@ public sealed partial class MainViewModel : ViewModelBase
     public ObservableCollection<MapLightViewModel> MapLights { get; } = CreateMapLights();
     public Avalonia.Media.Imaging.Bitmap? SelectedFlag => DisplayProfile?.FlagImage;
     public bool HasSelectedFlag => SelectedFlag is not null;
-    public bool CanImport => !IsBusy && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting;
-    public bool CanRefreshSubscriptions => !IsBusy && !IsProbing;
-    public bool CanManageProfiles => !IsBusy && !IsConnecting && !IsProbing;
+    public bool CanImport => storageAvailable && !IsBusy && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting;
+    public bool CanRefreshSubscriptions => storageAvailable && !IsBusy && !IsProbing;
+    public bool CanManageProfiles => storageAvailable && !IsBusy && !IsConnecting && !IsProbing;
     public bool CanSelectProfile => !IsBusy && !HasPendingConnection && !IsCancellingConnection && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting;
-    public bool CanConnect => CanCancelConnection || (!IsCancellingConnection && !IsBusy && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting);
+    public bool CanConnect => CanCancelConnection || (engine is not null && !IsCancellingConnection && !IsBusy && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting);
     // A latency test never changes the selected VPN connection, so it remains safe while TUN is active.
     public bool CanProbe => !IsBusy && !HasPendingConnection && !IsProbing && probe is not null && SelectedProfile is not null;
     public bool CanProbeAll => !IsBusy && !HasPendingConnection && !IsProbing && probe is not null && Profiles.Count != 0;
@@ -268,13 +267,14 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public MainViewModel() : this(null) { }
     public MainViewModel(IProfileVpnEngine? engine, IProfileStore? store = null, IServerProbe? probe = null, IServerCountryResolver? countryResolver = null,
-        IInstalledApplicationProvider? installedApplicationProvider = null)
+        IInstalledApplicationProvider? installedApplicationProvider = null, AppPlatform? platform = null)
     {
         this.engine = engine;
+        Platform = platform ?? App.Platform;
         this.probe = probe;
         this.countryResolver = countryResolver;
         this.installedApplicationProvider = installedApplicationProvider;
-        profileStore = store ?? new ProfileStorage();
+        profileStore = store ?? new UnavailableProfileStore("Защищённое хранилище профилей не настроено.");
         if (engine is not null) engine.StatusChanged += EngineStatusChanged;
         mapLightsTimer.Tick += (_, _) => AdvanceMapLights();
         try
@@ -295,6 +295,7 @@ public sealed partial class MainViewModel : ViewModelBase
             }
             else if (SelectedProfile is not null) Notice = "Выберите профиль и сервер для подключения.";
         }
+        catch (ProfileStoreUnavailableException error) { Notice = error.Message; storageAvailable = false; }
         catch { Notice = "Не удалось прочитать сохранённые профили. Исходный файл не изменён."; storageAvailable = false; }
         if (IsLowestMode) StartLowestMode(checkImmediately: false);
     }
@@ -607,7 +608,11 @@ public sealed partial class MainViewModel : ViewModelBase
         try
         {
             await InitializeSplitDefaultsAsync().WaitAsync(connectionCancellation.Token);
-            if (ConnectionState == VpnConnectionState.Connected) await engine.DisconnectAsync();
+            if (ConnectionState == VpnConnectionState.Connected)
+            {
+                await engine.DisconnectAsync();
+                Notice = engine.Status.Message ?? "VPN отключён.";
+            }
             else if (ConnectionState == VpnConnectionState.Reconnecting)
             {
                 var target = activeProfile ?? SelectedProfile;
@@ -623,8 +628,13 @@ public sealed partial class MainViewModel : ViewModelBase
             else if (SelectedProfile is null) Notice = "Сначала выберите сервер.";
             else
             {
+                Notice = "Подключаем VPN…";
                 await engine.ConnectAsync(SelectedProfile.Profile, connectionCancellation.Token);
-                if (engine.Status.State == VpnConnectionState.Connected) activeProfile = SelectedProfile;
+                if (engine.Status.State == VpnConnectionState.Connected)
+                {
+                    activeProfile = SelectedProfile;
+                    Notice = engine.Status.Message ?? "VPN подключён";
+                }
             }
         }
         catch (OperationCanceledException) { Notice = "Подключение отменено."; }

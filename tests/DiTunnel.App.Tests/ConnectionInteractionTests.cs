@@ -76,17 +76,22 @@ public sealed class ConnectionInteractionTests
         }
         finally { await vm.ShutdownAsync(); }
     }
-    [Fact] public async Task ProbeUpdatesRowAndReenablesControls()
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64, "Windows TUN · Xray-core")]
+    [InlineData(ReleaseTarget.AndroidArm64, "Android VPN · Xray-core")]
+    [InlineData(ReleaseTarget.LinuxX64, "Linux TUN · Xray-core")]
+    public async Task ProbeUpdatesRowAndReenablesControls(ReleaseTarget target, string expectedHint)
     {
         var probe = new Probe();
-        var vm = new MainViewModel(null, new Store(), probe);
+        var platform = target switch { ReleaseTarget.WindowsX64 => AppPlatform.Windows, ReleaseTarget.AndroidArm64 => AppPlatform.Android, _ => AppPlatform.Linux };
+        var vm = new MainViewModel(null, new Store(), probe, platform: platform);
         await vm.ProbeAllCommand.ExecuteAsync(null);
         Assert.Equal(1, probe.Calls);
         Assert.Equal("HTTPS · 42 мс", vm.Profiles[0].ProbeText);
         Assert.False(vm.IsProbing);
         Assert.True(vm.CanImport);
         vm.ConnectionState = VpnConnectionState.Connected;
-        Assert.Equal("Windows TUN · Xray-core", vm.ConnectionHint);
+        Assert.Equal(expectedHint, vm.ConnectionHint);
     }
     private sealed class SortingProbe : IServerProbe
     {
@@ -258,6 +263,26 @@ public sealed class ConnectionInteractionTests
             new("B", "Hysteria 2", "hy2://b@192.0.2.2:443")
         ];
         public void Save(IEnumerable<ImportedProfile> profiles) { }
+    }
+
+    [Fact]
+    public async Task PowerButtonReplacesNoticesFromPreviousConnection()
+    {
+        var engine = new SwitchingEngine();
+        var vm = new MainViewModel(engine, new Store(), platform: AppPlatform.Linux);
+        try
+        {
+            vm.Notice = "Не удалось подключить VPN.";
+            await vm.ConnectCommand.ExecuteAsync(null);
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+            Assert.Equal("VPN подключён", vm.Notice);
+
+            vm.Notice = "Туннель активен, но контрольный запрос не выполнен.";
+            await vm.ConnectCommand.ExecuteAsync(null);
+            Assert.Equal(VpnConnectionState.Disconnected, vm.ConnectionState);
+            Assert.Equal("VPN отключён.", vm.Notice);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
     [Fact] public async Task SelectingAnotherProfileReconnectsActiveVpn()
     {

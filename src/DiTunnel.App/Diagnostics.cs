@@ -11,7 +11,7 @@ public static partial class Diagnostics
 
     public static void Export(string destination, string? directory = null)
     {
-        directory ??= UserSettings.DataDirectory;
+        directory ??= AppPaths.StateDirectory;
         using var zip = ZipFile.Open(destination, ZipArchiveMode.Create);
         using (var writer = new StreamWriter(zip.CreateEntry("version.txt").Open()))
             writer.WriteLine($"Di-Tunnel {UserSettings.Version}\n{Environment.OSVersion}\n{DateTimeOffset.Now:O}");

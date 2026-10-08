@@ -46,8 +46,9 @@ public partial class MainWindow : Window
             if (closing) return;
             closing = true;
             var action = UserSettings.Current.CloseAction;
+            if (action == "hide" && !App.Platform.SupportsHideToTray) action = "ask";
             if (action == "ask") action = await Dialogs.AskClose(this);
-            if (action == "hide" && tray is not null)
+            if (action == "hide" && App.Platform.SupportsHideToTray && tray is not null)
             {
                 SavePlacement(); Hide(); closing = false; return;
             }
@@ -92,6 +93,8 @@ public partial class MainWindow : Window
     }
     private void SetupTray()
     {
+        // Linux tray availability needs a real host check before Hide is enabled.
+        if (!App.Platform.SupportsHideToTray) return;
         try
         {
             trayStatus = new NativeMenuItem { IsEnabled = false };

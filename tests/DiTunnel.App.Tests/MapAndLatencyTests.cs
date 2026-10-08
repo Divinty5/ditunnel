@@ -11,10 +11,7 @@ public sealed class MapAndLatencyTests
     [Fact]
     public void AllTwentyLightsUseTheMapViewportAndTheirCentresAreOnLand()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !Directory.Exists(Path.Combine(directory.FullName, "src/DiTunnel.App/Assets"))) directory = directory.Parent;
-        Assert.NotNull(directory);
-        string assets = Path.Combine(directory.FullName, "src/DiTunnel.App/Assets");
+        string assets = Path.Combine(AppContext.BaseDirectory, "TestAssets");
         XNamespace ns = "http://www.w3.org/2000/svg";
         var map = XDocument.Load(Path.Combine(assets, "world-map.svg"));
         string viewport = map.Root!.Attribute("viewBox")!.Value;
