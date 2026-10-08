@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    install|upgrade)
+        # Refuse unresolved state from an unmanaged or failed older installation.
+        # A package upgrade has already run the old prerm's offline recovery.
+        if [ -e /run/ditunnel/vpn-owner.json ]; then
+            echo 'Restore the Di-Tunnel network before installing this package.' >&2
+            exit 1
+        fi
+        for path in /usr/lib/ditunnel /usr/lib/ditunnel/ui /usr/lib/ditunnel/host /usr/lib/ditunnel/runtime; do
+            if [ -L "$path" ]; then echo 'Di-Tunnel installation directories must not be symlinks.' >&2; exit 1; fi
+        done
+        if [ -d /run/systemd/system ] && systemctl cat ditunnel-network.service >/dev/null 2>&1; then
+            systemctl stop ditunnel-network.service
+        fi
+        if [ -e /run/ditunnel/vpn-owner.json ]; then
+            echo 'Di-Tunnel protection appeared during installation. Restore the network and retry.' >&2
+            exit 1
+        fi
+        ;;
+esac

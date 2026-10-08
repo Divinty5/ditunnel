@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Di-Tunnel
+Comment=VPN client
+Comment[ru]=Клиент VPN
+Exec=di-tunnel
+Icon=di-tunnel
+Terminal=false
+Categories=Network;
+StartupWMClass=Di-Tunnel.Linux
+StartupNotify=true

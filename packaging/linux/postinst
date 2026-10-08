@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    configure|abort-upgrade|abort-remove|abort-deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload
+            # The host must acquire its system-bus name with the installed policy.
+            busctl call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig
+            systemctl enable ditunnel-network.service
+            systemctl restart ditunnel-network.service
+        fi
+        if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q; fi
+        ;;
+esac

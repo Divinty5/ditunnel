@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|purge|disappear)
+        if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload; fi
+        if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q; fi
+        # Profile files and Secret Service entries belong to the user, including
+        # on purge. Never enumerate or remove users' home directories here.
+        if [ ! -e /run/ditunnel/vpn-owner.json ]; then
+            rm -f /run/ditunnel/host.lock
+            rmdir /run/ditunnel 2>/dev/null || true
+        fi
+        ;;
+esac

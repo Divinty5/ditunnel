@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then systemctl stop ditunnel-network.service; fi
+        # Stopping the service intentionally preserves KS. This explicit admin
+        # operation removes only Di-Tunnel's journal-owned network objects.
+        /usr/lib/ditunnel/host/DiTunnel.NetworkHost.Linux --recover-network
+        if [ "$1" = remove ] && [ -d /run/systemd/system ]; then systemctl disable ditunnel-network.service; fi
+        ;;
+    failed-upgrade)
+        # Never bypass an unsuccessful old prerm and unpack over retained KS.
+        if [ -e /run/ditunnel/vpn-owner.json ]; then exit 1; fi
+        ;;
+esac
