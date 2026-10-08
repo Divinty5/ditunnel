@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>$(LinuxVersion)</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DiTunnel.Core\DiTunnel.Core.csproj" />
+    <ProjectReference Include="..\DiTunnel.Infrastructure.Xray\DiTunnel.Infrastructure.Xray.csproj" />
+    <PackageReference Include="Tmds.DBus.Protocol" />
+    <InternalsVisibleTo Include="DiTunnel.Platform.Linux.Tests" />
+  </ItemGroup>
+</Project>
