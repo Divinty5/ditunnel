@@ -20,4 +20,9 @@
     <ProjectReference Include="..\..\src\DiTunnel.Core\DiTunnel.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Pure Android network-selection policy; runs without an Android device. -->
+    <Compile Include="../../src/DiTunnel.Platform.Android/PhysicalNetworkSelection.cs" Link="Platform/PhysicalNetworkSelection.cs" />
+  </ItemGroup>
+
 </Project>

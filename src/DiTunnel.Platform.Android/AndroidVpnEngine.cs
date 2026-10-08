@@ -76,7 +76,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             if (status.State is not (VpnConnectionState.Disconnected or VpnConnectionState.Error))
                 throw new InvalidOperationException("VPN уже подключается или подключён.");
             SetStatus(new(VpnConnectionState.Connecting, "Запрашиваем разрешение Android на VPN…"));
-            if (!await HasValidatedPhysicalNetworkAsync(cancellationToken))
+            if (!await HasAvailablePhysicalNetworkAsync(cancellationToken))
             {
                 const string message = "Нет подключения к интернету. Включите Wi-Fi или мобильную сеть и повторите подключение.";
                 SetStatus(new(VpnConnectionState.Error, message));
@@ -320,27 +320,27 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             // Keep only a short settling window for capability handover instead of the
             // previous three-second polling-style delay.
             await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
-            if (!HasValidatedPhysicalNetwork() && !AndroidVpnRuntimeState.ServiceOwnsRecovery(context)) BeginRecovery();
+            if (!HasAvailablePhysicalNetwork() && !AndroidVpnRuntimeState.ServiceOwnsRecovery(context)) BeginRecovery();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
-    private bool HasValidatedPhysicalNetwork()
+    private bool HasAvailablePhysicalNetwork()
     {
-        return networkCallback?.HasValidatedNetwork == true;
+        return networkCallback?.HasAvailableNetwork == true;
     }
 
-    private async Task<bool> HasValidatedPhysicalNetworkAsync(CancellationToken cancellationToken)
+    private async Task<bool> HasAvailablePhysicalNetworkAsync(CancellationToken cancellationToken)
     {
-        if (HasValidatedPhysicalNetwork()) return true;
+        if (HasAvailablePhysicalNetwork()) return true;
         Task signal;
         lock (networkSignalLock) signal = networkChanged.Task;
         try { await signal.WaitAsync(TimeSpan.FromMilliseconds(350), cancellationToken); }
         catch (TimeoutException) { }
         // onAvailable is followed by onCapabilitiesChanged; allow that ordered callback
         // to update the set before judging a manual connection attempt.
-        if (!HasValidatedPhysicalNetwork()) await Task.Delay(50, cancellationToken);
-        return HasValidatedPhysicalNetwork();
+        if (!HasAvailablePhysicalNetwork()) await Task.Delay(50, cancellationToken);
+        return HasAvailablePhysicalNetwork();
     }
 
     private void BeginRecovery()
@@ -371,7 +371,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         var failedAttempts = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
-            await WaitForValidatedPhysicalNetworkAsync(cancellationToken);
+            await WaitForAvailablePhysicalNetworkAsync(cancellationToken);
             var schedule = ReconnectSchedule.CreateForActiveTunnel(failedAttempts);
             if (schedule is null)
             {
@@ -400,14 +400,14 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         }
     }
 
-    private async Task WaitForValidatedPhysicalNetworkAsync(CancellationToken cancellationToken)
+    private async Task WaitForAvailablePhysicalNetworkAsync(CancellationToken cancellationToken)
     {
-        while (!HasValidatedPhysicalNetwork())
+        while (!HasAvailablePhysicalNetwork())
         {
             SetStatus(new(VpnConnectionState.Reconnecting, "Нет подключения к интернету. Ожидаем восстановление сети…"));
             Task signal;
             lock (networkSignalLock) signal = networkChanged.Task;
-            if (HasValidatedPhysicalNetwork()) return;
+            if (HasAvailablePhysicalNetwork()) return;
             await signal.WaitAsync(cancellationToken);
         }
     }
@@ -457,35 +457,35 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     private sealed class PhysicalNetworkCallback(Action changed) : ConnectivityManager.NetworkCallback
     {
         private readonly object gate = new();
-        private readonly HashSet<int> validatedNetworks = [];
+        private readonly HashSet<int> availableNetworks = [];
 
-        public bool HasValidatedNetwork
+        public bool HasAvailableNetwork
         {
-            get { lock (gate) return validatedNetworks.Count > 0; }
+            get { lock (gate) return availableNetworks.Count > 0; }
         }
 
         public override void OnAvailable(global::Android.Net.Network network)
         {
             // On Android 8+ the ordered capabilities callback follows immediately and
-            // is the authoritative source for validation state.
+            // is the authoritative source for network availability.
             changed();
         }
 
         public override void OnLost(global::Android.Net.Network network)
         {
-            lock (gate) validatedNetworks.Remove(network.GetHashCode());
+            lock (gate) availableNetworks.Remove(network.GetHashCode());
             changed();
         }
 
         public override void OnCapabilitiesChanged(global::Android.Net.Network network, global::Android.Net.NetworkCapabilities capabilities)
         {
-            var validated = capabilities.HasCapability(NetCapability.NotVpn)
-                && capabilities.HasCapability(NetCapability.Internet)
-                && capabilities.HasCapability(NetCapability.Validated);
+            var available = PhysicalNetworkSelection.CanUse(
+                capabilities.HasCapability(NetCapability.NotVpn),
+                capabilities.HasCapability(NetCapability.Internet));
             lock (gate)
             {
-                if (validated) validatedNetworks.Add(network.GetHashCode());
-                else validatedNetworks.Remove(network.GetHashCode());
+                if (available) availableNetworks.Add(network.GetHashCode());
+                else availableNetworks.Remove(network.GetHashCode());
             }
             changed();
         }
