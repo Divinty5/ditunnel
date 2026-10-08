@@ -15,6 +15,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Compile Include="..\..\src\DiTunnel.Platform.Windows\AsyncProbeLeaseGate.cs" Link="AsyncProbeLeaseGate.cs" />
+    <None Include="..\..\src\DiTunnel.Platform.Windows\WfpPlatformProbe.cs" Link="WfpPlatformProbe.cs" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

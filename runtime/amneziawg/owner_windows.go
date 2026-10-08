@@ -1,6 +1,12 @@
 package main
 
-import "golang.org/x/sys/windows"
+import (
+	"os"
+
+	"golang.org/x/sys/windows"
+)
+
+var terminationSignals = []os.Signal{os.Interrupt}
 
 type ownerWatch struct{ handle windows.Handle }
 

@@ -1,4 +1,5 @@
 * text=auto
+.gitattributes text eol=lf
 
 *.cs text eol=crlf
 *.csproj text eol=crlf
@@ -14,6 +15,17 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.sh text eol=lf
+*.go text eol=lf
+*.py text eol=lf
+packaging/linux/*.service text eol=lf
+packaging/linux/*.policy text eol=lf
+packaging/linux/*.conf text eol=lf
+packaging/linux/*.desktop text eol=lf
+packaging/linux/di-tunnel text eol=lf
+packaging/linux/preinst text eol=lf
+packaging/linux/postinst text eol=lf
+packaging/linux/prerm text eol=lf
+packaging/linux/postrm text eol=lf
 
 *.png binary
 *.ico binary

@@ -16,7 +16,11 @@ import (
 // Windows TUN inbound. The only OS connections here are loopback connections.
 func xrayProxy(t *testing.T, bridge *socksServer) (int, bool) {
 	t.Helper()
-	executable, err := filepath.Abs(filepath.Join("..", "..", ".tools", "xray", "26.3.27", "windows-x64", "xray.exe"))
+	executable := os.Getenv("DITUNNEL_XRAY")
+	if executable == "" {
+		executable = filepath.Join("..", "..", ".tools", "xray", "26.3.27", "windows-x64", "xray.exe")
+	}
+	executable, err := filepath.Abs(executable)
 	if err != nil {
 		t.Fatal(err)
 	}

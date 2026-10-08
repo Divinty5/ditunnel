@@ -6,7 +6,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public static class XrayServerProbe
 {
-    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true, string? outboundSourceAddress = null, bool tcpOnly = false, TimeSpan? probeTimeout = null)
+    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true, string? outboundSourceAddress = null, bool tcpOnly = false, TimeSpan? probeTimeout = null, Func<Process, IXrayProcessLifetime>? processLifetimeFactory = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var budget = probeTimeout ?? TimeSpan.FromSeconds(12);
@@ -25,7 +25,8 @@ public static class XrayServerProbe
             ExecutablePath = runtime,
             WorkingDirectory = Path.GetDirectoryName(runtime)!,
             ShutdownTimeout = TimeSpan.FromMilliseconds(250),
-            ValidateConfigurationBeforeStart = false
+            ValidateConfigurationBeforeStart = false,
+            ProcessLifetimeFactory = processLifetimeFactory
         });
         var certificateError = 0;
         var listenerError = 0;
@@ -39,6 +40,7 @@ public static class XrayServerProbe
         try
         {
             await manager.StartAsync(path, timeout.Token);
+            await SocksTcpProbe.WaitForListenerAsync(port, () => manager.IsRunning, timeout.Token).ConfigureAwait(false);
             if (tcpOnly)
             {
                 if (configuration.SupportsIpv4)

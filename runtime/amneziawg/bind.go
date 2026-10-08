@@ -10,7 +10,7 @@ import (
 )
 
 // The encrypted transport is bound to the physical source address supplied by the
-// Windows host. The in-memory TUN never creates an OS adapter or route.
+// platform host. The in-memory TUN never creates an OS adapter or route.
 type udpBind struct {
 	mu             sync.Mutex
 	socket         *net.UDPConn
@@ -18,6 +18,7 @@ type udpBind struct {
 	dryRun         bool
 	dryClosed      chan struct{}
 	interfaceIndex uint32
+	mark           uint32
 	protect        func(uintptr) bool
 	ipv6           bool
 	openSocket     func() (*net.UDPConn, error)
@@ -75,6 +76,12 @@ func (b *udpBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 		socket.Close()
 		return nil, 0, err
 	}
+	if b.mark != 0 {
+		if err := setSocketMark(socket, b.mark); err != nil {
+			socket.Close()
+			return nil, 0, err
+		}
+	}
 	// Protect and bind encrypted transport before Device.Up can send any packets.
 	if b.protect != nil {
 		raw, controlErr := socket.SyscallConn()
@@ -113,8 +120,18 @@ func (b *udpBind) Close() error {
 	b.socket = nil
 	return err
 }
-func (b *udpBind) SetMark(uint32) error { return nil }
-func (b *udpBind) BatchSize() int       { return 1 }
+func (b *udpBind) SetMark(mark uint32) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.socket != nil && (b.mark != 0 || mark != 0) {
+		if err := setSocketMark(b.socket, mark); err != nil {
+			return err
+		}
+	}
+	b.mark = mark
+	return nil
+}
+func (b *udpBind) BatchSize() int { return 1 }
 func (b *udpBind) Send(packets [][]byte, ep conn.Endpoint) error {
 	b.mu.Lock()
 	socket := b.socket

@@ -1,0 +1,19 @@
+{
+  "architecture": "amd64",
+  "xray": {
+    "version": "26.3.27",
+    "moduleVersion": "v1.260327.0",
+    "moduleSum": "h1:g4TzxMwyPrxslZh6uD+FiG3lXKTrnNO+b4ky2OhogHE=",
+    "processSourceSha256": "d5186003f74b7e8d4c5d50bd8d52ba651af796c8d84a7e669926971aca8ff750",
+    "routerSourceSha256": "fd5ba836bb444f4752f644b8f23567a43720cbab345bd41270572e866c34257a",
+    "asset": "Xray-linux-64.zip",
+    "url": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip",
+    "sha256": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
+  },
+  "go": {
+    "version": "go1.27.1",
+    "asset": "go1.27.1.linux-amd64.tar.gz",
+    "url": "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz",
+    "sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+  }
+}

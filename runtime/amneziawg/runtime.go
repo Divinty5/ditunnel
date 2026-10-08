@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"strings"
 )
 
 type configuration struct {
@@ -57,7 +58,15 @@ func addresses(values []string) ([]netip.Addr, error) {
 }
 
 func createDevice(cfg configuration, validate bool) (*device.Device, *netstack.Net, error) {
-	return createDeviceWithBind(cfg, &udpBind{source: cfg.SourceAddress, interfaceIndex: cfg.SourceInterface, dryRun: validate})
+	source, _ := netip.ParseAddr(cfg.SourceAddress)
+	ipv6 := source.Is6()
+	for _, line := range strings.Split(cfg.UAPI, "\n") {
+		if value, found := strings.CutPrefix(line, "endpoint="); found {
+			endpoint, _ := netip.ParseAddrPort(value)
+			ipv6 = ipv6 || endpoint.Addr().Is6()
+		}
+	}
+	return createDeviceWithBind(cfg, &udpBind{source: cfg.SourceAddress, interfaceIndex: cfg.SourceInterface, dryRun: validate, ipv6: ipv6})
 }
 
 func createDeviceWithBind(cfg configuration, bind *udpBind) (*device.Device, *netstack.Net, error) {

@@ -7,6 +7,30 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public static class SocksTcpProbe
 {
+    public static async Task WaitForListenerAsync(int proxyPort, Func<bool> isRunning, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!isRunning()) throw new InvalidOperationException("Xray завершился до готовности SOCKS-прокси.");
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attempt.CancelAfter(TimeSpan.FromMilliseconds(500));
+            try
+            {
+                using var client = new TcpClient(AddressFamily.InterNetwork);
+                await client.ConnectAsync(IPAddress.Loopback, proxyPort, attempt.Token).ConfigureAwait(false);
+                var stream = client.GetStream();
+                await stream.WriteAsync(new byte[] { 5, 1, 0 }, attempt.Token).ConfigureAwait(false);
+                var reply = new byte[2];
+                await stream.ReadExactlyAsync(reply, attempt.Token).ConfigureAwait(false);
+                if (reply[0] == 5 && reply[1] == 0) return;
+                throw new IOException("SOCKS listener negotiation failed.");
+            }
+            catch (Exception error) when (error is SocketException or IOException || error is OperationCanceledException && !cancellationToken.IsCancellationRequested) { }
+            await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     // Xray can acknowledge CONNECT before opening the remote outbound. Wait for
     // authenticated remote TLS traffic so the result includes the tunnel path.
     public static Task<double> MeasureAsync(int proxyPort, IPAddress destination, ushort destinationPort, CancellationToken cancellationToken)

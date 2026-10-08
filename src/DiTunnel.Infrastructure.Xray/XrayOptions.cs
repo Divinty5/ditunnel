@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace DiTunnel.Infrastructure.Xray;
 
 public sealed class XrayOptions
@@ -11,4 +13,11 @@ public sealed class XrayOptions
     public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(3);
 
     public bool ValidateConfigurationBeforeStart { get; init; } = true;
+
+    public Func<Process, IXrayProcessLifetime>? ProcessLifetimeFactory { get; init; }
+}
+
+public interface IXrayProcessLifetime : IDisposable
+{
+    void RequestShutdown();
 }

@@ -8,6 +8,7 @@ public sealed class XrayProcessManager : IXrayProcessManager
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _processLock = new();
     private Process? _process;
+    private IXrayProcessLifetime? _processLifetime;
     private bool _disposed;
 
     public XrayProcessManager(XrayOptions options)
@@ -117,6 +118,8 @@ public sealed class XrayProcessManager : IXrayProcessManager
                 _process = process;
             }
 
+            _processLifetime = _options.ProcessLifetimeFactory?.Invoke(process);
+
             process.EnableRaisingEvents = true;
             process.Exited += OnProcessExited;
             process.BeginOutputReadLine();
@@ -225,11 +228,14 @@ public sealed class XrayProcessManager : IXrayProcessManager
     private async Task StopCoreAsync(CancellationToken cancellationToken)
     {
         Process? process;
+        IXrayProcessLifetime? lifetime;
 
         lock (_processLock)
         {
             process = _process;
             _process = null;
+            lifetime = _processLifetime;
+            _processLifetime = null;
         }
 
         if (process is null)
@@ -241,7 +247,17 @@ public sealed class XrayProcessManager : IXrayProcessManager
         {
             if (!process.HasExited)
             {
-                process.CloseMainWindow();
+                try
+                {
+                    if (lifetime is not null) lifetime.RequestShutdown();
+                    else process.CloseMainWindow();
+                }
+                catch
+                {
+                    // Failure to request a graceful shutdown must not orphan the
+                    // owned runtime when its Process object is disposed below.
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                }
 
                 using var timeout = new CancellationTokenSource(_options.ShutdownTimeout);
                 using var combined = CancellationTokenSource.CreateLinkedTokenSource(
@@ -266,6 +282,7 @@ public sealed class XrayProcessManager : IXrayProcessManager
             process.ErrorDataReceived -= OnErrorDataReceived;
             process.Exited -= OnProcessExited;
             process.Dispose();
+            lifetime?.Dispose();
         }
     }
 

@@ -77,7 +77,7 @@ func main() {
 			return
 		}
 	} else if err == nil {
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+		ctx, cancel := signal.NotifyContext(context.Background(), terminationSignals...)
 		defer cancel()
 		if *owner <= 0 {
 			err = errors.New("owner required")
