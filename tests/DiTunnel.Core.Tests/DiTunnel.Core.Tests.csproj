@@ -23,6 +23,7 @@
   <ItemGroup>
     <!-- Pure Android network-selection policy; runs without an Android device. -->
     <Compile Include="../../src/DiTunnel.Platform.Android/PhysicalNetworkSelection.cs" Link="Platform/PhysicalNetworkSelection.cs" />
+    <Compile Include="../../src/DiTunnel.Platform.Android/AndroidProbeFailureIsolation.cs" Link="Platform/AndroidProbeFailureIsolation.cs" />
   </ItemGroup>
 
 </Project>

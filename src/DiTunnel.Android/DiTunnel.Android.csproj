@@ -8,7 +8,7 @@
     <ApplicationTitle>Di-Tunnel</ApplicationTitle>
     <Version>$(AndroidVersion)</Version>
     <ApplicationDisplayVersion>$(AndroidVersion)</ApplicationDisplayVersion>
-    <ApplicationVersion>50021</ApplicationVersion>
+    <ApplicationVersion>50022</ApplicationVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <AndroidStripNativeLibraries>true</AndroidStripNativeLibraries>

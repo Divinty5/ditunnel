@@ -133,6 +133,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         VpnConnectionState.Connecting => "Подключаем VPN…",
         VpnConnectionState.Reconnecting => "Восстанавливаем VPN…",
+        VpnConnectionState.Connected when Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 => "Туннель VPN запущен",
         VpnConnectionState.Connected => "VPN подключён",
         VpnConnectionState.Disconnecting => "Отключаем VPN…",
         VpnConnectionState.Error => "Не удалось подключиться",

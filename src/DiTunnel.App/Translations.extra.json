@@ -2144,5 +2144,25 @@
   "No compatible installer or SHA-256 file is available. Open GitHub from Settings, under Updates.": {
     "es": "No hay un instalador compatible o un archivo SHA-256. Abre GitHub desde Ajustes, en Actualizaciones.",
     "zh-Hans": "没有兼容的安装程序或 SHA-256 文件。请在设置的“更新”部分打开 GitHub。"
-  }
+  },
+  "VPN tunnel started": {"es":"Túnel VPN iniciado","zh-Hans":"VPN 隧道已启动"},
+  "DNS: server address not found": {"es":"DNS: no se encontró la dirección del servidor","zh-Hans":"DNS：未找到服务器地址"},
+  "Probe timed out": {"es":"La comprobación agotó el tiempo de espera","zh-Hans":"检测超时"},
+  "Probe not completed": {"es":"Comprobación no completada","zh-Hans":"检测未完成"},
+  "TCP: timed out": {"es":"TCP: tiempo de espera agotado","zh-Hans":"TCP: 超时"},
+  "TCP: no route to server": {"es":"TCP: sin ruta al servidor","zh-Hans":"TCP: 没有到服务器的路由"},
+  "TCP: connection error": {"es":"TCP: error de conexión","zh-Hans":"TCP: 连接错误"},
+  "TCP: probe error": {"es":"TCP: error de comprobación","zh-Hans":"TCP: 检测错误"},
+  "HTTPS: timed out": {"es":"HTTPS: tiempo de espera agotado","zh-Hans":"HTTPS: 超时"},
+  "HTTPS: no route to server": {"es":"HTTPS: sin ruta al servidor","zh-Hans":"HTTPS: 没有到服务器的路由"},
+  "HTTPS: connection error": {"es":"HTTPS: error de conexión","zh-Hans":"HTTPS: 连接错误"},
+  "HTTPS: probe error": {"es":"HTTPS: error de comprobación","zh-Hans":"HTTPS: 检测错误"},
+  "Profile: timed out": {"es":"Perfil: tiempo de espera agotado","zh-Hans":"配置: 超时"},
+  "Profile: no route to server": {"es":"Perfil: sin ruta al servidor","zh-Hans":"配置: 没有到服务器的路由"},
+  "Profile: connection error": {"es":"Perfil: error de conexión","zh-Hans":"配置: 连接错误"},
+  "Profile: probe error": {"es":"Perfil: error de comprobación","zh-Hans":"配置: 检测错误"},
+  "Probe: timed out": {"es":"Comprobación: tiempo de espera agotado","zh-Hans":"检测: 超时"},
+  "Probe: no route to server": {"es":"Comprobación: sin ruta al servidor","zh-Hans":"检测: 没有到服务器的路由"},
+  "Probe: connection error": {"es":"Comprobación: error de conexión","zh-Hans":"检测: 连接错误"},
+  "Probe: probe error": {"es":"Comprobación: error de comprobación","zh-Hans":"检测: 检测错误"}
 }
