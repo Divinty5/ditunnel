@@ -7,8 +7,8 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
     <Version>0.5.19</Version>
-    <WindowsVersion>0.5.19</WindowsVersion>
-    <AndroidVersion>0.5.22</AndroidVersion>
+    <WindowsVersion>0.5.23</WindowsVersion>
+    <AndroidVersion>0.5.23</AndroidVersion>
     <AndroidMinimumApiLevel>27</AndroidMinimumApiLevel>
     <LinuxVersion>0.6.0</LinuxVersion>
     <Company>Di Vinty Interactive</Company>

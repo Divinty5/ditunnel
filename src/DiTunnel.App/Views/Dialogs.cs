@@ -603,11 +603,13 @@ public static class Dialogs
         var shareTitle = Label("Поделиться");
         var shareQr = new Image { Width = 300, Height = 300, Stretch = Stretch.Uniform, IsVisible = false };
         var shareOptions = new WrapPanel();
+        var shareMessage = Label("");
+        shareMessage.Bind(TextBlock.TextProperty, new Binding("Notice") { Converter = new TranslationConverter() });
         var shareCard = new Border
         {
             MaxWidth = 360, Padding = new Thickness(20), CornerRadius = new CornerRadius(18),
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            Child = new StackPanel { Spacing = 14, Children = { shareTitle, shareQr, shareOptions } }
+            Child = new StackPanel { Spacing = 14, Children = { shareTitle, shareQr, shareOptions, shareMessage } }
         };
         shareCard.Bind(Border.BackgroundProperty, shareCard.GetResourceObservable("CardBrush"));
         var shareOverlay = new Border { IsVisible = false, Background = new SolidColorBrush(Color.FromArgb(210, 0, 0, 0)), Child = shareCard };
@@ -622,15 +624,21 @@ public static class Dialogs
         }
         async Task CopyShareAsync()
         {
-            var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
-            if (clipboard is not null) await clipboard.SetTextAsync(shareValue);
-            vm.Notice = "Ссылка скопирована в буфер обмена.";
-            CloseShare();
+            try
+            {
+                var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
+                if (clipboard is null) { vm.Notice = "Буфер обмена недоступен. Попробуйте QR-код."; return; }
+                await clipboard.SetTextAsync(shareValue);
+                vm.Notice = "Ссылка скопирована в буфер обмена.";
+                CloseShare();
+            }
+            catch { vm.Notice = "Не удалось скопировать ссылку. Попробуйте QR-код."; }
         }
         void OpenShare(string title, string value)
         {
             shareTitle.Text = L.T(title);
             shareValue = value;
+            vm.Notice = "";
             shareOverlay.IsVisible = true;
             AppBackNavigation.Set(CloseShare);
         }
@@ -638,8 +646,17 @@ public static class Dialogs
         copyShare.Margin = new Thickness(0, 0, 8, 6); shareOptions.Children.Add(copyShare);
         var qrShare = Button("QR-код", () =>
         {
-            try { shareBitmap = QrCodeImage.Create(shareValue); shareQr.Source = shareBitmap; shareQr.IsVisible = true; shareOptions.IsVisible = false; }
-            catch { vm.Notice = "Не удалось создать QR-код."; CloseShare(); }
+            try
+            {
+                var bitmap = QrCodeImage.Create(shareValue);
+                shareQr.Source = null;
+                shareBitmap?.Dispose();
+                shareBitmap = bitmap;
+                shareQr.Source = bitmap;
+                shareQr.IsVisible = true;
+            }
+            catch (QRCoder.Exceptions.DataTooLongException) { vm.Notice = "Профиль слишком большой для QR-кода. Используйте буфер обмена."; }
+            catch { vm.Notice = "Не удалось создать QR-код."; }
         });
         qrShare.Margin = new Thickness(0, 0, 8, 6); shareOptions.Children.Add(qrShare);
         shareOptions.Children.Add(Button("Отмена", CloseShare));
