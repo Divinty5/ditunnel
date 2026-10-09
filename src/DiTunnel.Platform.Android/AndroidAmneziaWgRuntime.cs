@@ -13,7 +13,7 @@ internal sealed class AndroidAmneziaWgRuntime : IDisposable
 
     public AndroidAmneziaWgRuntime(string configurationJson, string probeAddress, string endpoint, Func<int, bool> protectSocket)
     {
-        var name = global::Android.App.Application.ProcessName;
+        var name = AndroidProcessIdentity.CurrentName;
         var package = global::Android.App.Application.Context.PackageName;
         if (name != package + ":awg" && name != package + ":awgprobe")
             throw new InvalidOperationException("AmneziaWG должен запускаться в отдельном служебном процессе.");

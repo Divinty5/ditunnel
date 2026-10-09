@@ -133,6 +133,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         VpnConnectionState.Connecting => "Подключаем VPN…",
         VpnConnectionState.Reconnecting => "Восстанавливаем VPN…",
+        VpnConnectionState.Connected when Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 => "Туннель VPN запущен",
         VpnConnectionState.Connected => "VPN подключён",
         VpnConnectionState.Disconnecting => "Отключаем VPN…",
         VpnConnectionState.Error => "Не удалось подключиться",
@@ -260,7 +261,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public int UnavailableProfileCount => Profiles.Count(server => server.ProbeTimedOut);
     public bool CanRemoveUnavailable => !IsBusy && !IsConnecting && UnavailableProfileCount > 0;
     public string? SelectedSubscriptionUrl => allProfiles.FirstOrDefault(profile => profile.SourceId == SelectedGroup?.Id)?.SourceUrl;
-    public string? SelectedServerUri => SelectedProfile?.Profile.Content.Contains("://", StringComparison.Ordinal) == true ? SelectedProfile.Profile.Content : null;
+    public string? SelectedServerUri => ProfileShareFormatter.CreateLink(SelectedProfile?.Profile);
     public bool CanShareSubscription => SelectedSubscriptionUrl is not null;
     public bool CanShareServer => SelectedServerUri is not null;
     public bool IsLowestMode => UserSettings.Current.LowestMode;

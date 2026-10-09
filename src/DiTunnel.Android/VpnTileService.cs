@@ -58,7 +58,8 @@ public sealed class VpnTileService : TileService
     {
         if (QsTile is not { } tile) return;
         tile.Label = "Di-Tunnel";
-        tile.Subtitle = VpnQuickControls.StatusText;
+        if (OperatingSystem.IsAndroidVersionAtLeast(29))
+            tile.Subtitle = VpnQuickControls.StatusText;
         tile.State = !VpnQuickControls.CanToggle ? TileState.Unavailable
             : VpnQuickControls.Status.State == DiTunnel.Core.Connection.VpnConnectionState.Connected ? TileState.Active : TileState.Inactive;
         tile.Icon = Icon.CreateWithResource(this, Resource.Drawable.ic_vpn_tile);

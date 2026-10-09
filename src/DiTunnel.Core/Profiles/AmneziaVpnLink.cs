@@ -13,6 +13,29 @@ internal static class AmneziaVpnLink
     private static FormatException Invalid() => new("Не удалось импортировать: ссылка AmneziaVPN повреждена или содержит некорректную конфигурацию AWG.");
     private static FormatException MissingClient() => new("Ссылка AmneziaVPN не содержит готовой клиентской конфигурации AWG. Экспортируйте в AmneziaVPN конфигурацию AmneziaWG для подключения, а не доступ к управлению сервером или API.");
 
+    internal static string Create(ImportedProfile profile)
+    {
+        // Export the client configuration verbatim: reconstructing it from parsed
+        // fields would lose packet templates, comments and declared protocol versions.
+        AmneziaWgConfiguration.Parse(profile.Content);
+        var protocol = new Dictionary<string, string> { ["last_config"] = profile.Content };
+        if (NormalizeVersion(profile.ProtocolVersion) is { } version) protocol["protocol_version"] = version;
+        var json = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            description = profile.Name,
+            containers = new[] { new { container = "amnezia-awg", awg = protocol } }
+        });
+        if (json.Length > ProfileParser.MaximumBytes) throw Invalid();
+        using var output = new MemoryStream();
+        Span<byte> header = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(header, (uint)json.Length);
+        output.Write(header);
+        using (var zlib = new ZLibStream(output, CompressionLevel.Optimal, leaveOpen: true)) zlib.Write(json);
+        var link = "vpn://" + Convert.ToBase64String(output.ToArray()).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        if (link.Length > ProfileParser.MaximumBytes) throw Invalid();
+        return link;
+    }
+
     internal static IReadOnlyList<ImportedProfile> Parse(string link)
     {
         try

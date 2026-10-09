@@ -25,7 +25,7 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
         // VpnService and probes have isolated processes. Only the UI process owns the
         // engine facade, widget controller and selected profile. VpnService owns
         // background restoration, including when this process is not running.
-        if (global::Android.App.Application.ProcessName != PackageName) return;
+        if (AndroidProcessIdentity.CurrentName != PackageName) return;
         AndroidLocaleCoordinator.Initialize(this);
         App.App.Platform = App.AppPlatform.Android;
         App.QrScanner.ScanAsync = QrScannerCoordinator.Instance.ScanAsync;
@@ -75,6 +75,6 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
     public override void OnConfigurationChanged(global::Android.Content.Res.Configuration newConfig)
     {
         base.OnConfigurationChanged(newConfig);
-        if (global::Android.App.Application.ProcessName == PackageName) VpnQuickControls.Refresh();
+        if (AndroidProcessIdentity.CurrentName == PackageName) VpnQuickControls.Refresh();
     }
 }

@@ -601,13 +601,14 @@ public static class Dialogs
         string shareValue = "";
         Avalonia.Media.Imaging.Bitmap? shareBitmap = null;
         var shareTitle = Label("Поделиться");
-        var shareQr = new Image { Width = 300, Height = 300, Stretch = Stretch.Uniform, IsVisible = false };
-        var shareOptions = new WrapPanel();
+        var shareQr = new Image { MaxWidth = 300, MaxHeight = 300, Stretch = Stretch.Uniform, IsVisible = false };
+        var shareOptions = new Grid { ColumnDefinitions = new ColumnDefinitions("1.7*,8,*,8,*") };
+        var shareMessage = Label("");
         var shareCard = new Border
         {
-            MaxWidth = 360, Padding = new Thickness(20), CornerRadius = new CornerRadius(18),
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
-            Child = new StackPanel { Spacing = 14, Children = { shareTitle, shareQr, shareOptions } }
+            MaxWidth = 360, Margin = new Thickness(8), Padding = new Thickness(20), CornerRadius = new CornerRadius(18),
+            HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center,
+            Child = new StackPanel { Spacing = 14, Children = { shareTitle, shareQr, shareOptions, shareMessage } }
         };
         shareCard.Bind(Border.BackgroundProperty, shareCard.GetResourceObservable("CardBrush"));
         var shareOverlay = new Border { IsVisible = false, Background = new SolidColorBrush(Color.FromArgb(210, 0, 0, 0)), Child = shareCard };
@@ -620,29 +621,60 @@ public static class Dialogs
             shareBitmap?.Dispose(); shareBitmap = null;
             AppBackNavigation.Set(GoBack);
         }
+        void ShareError(string message)
+        {
+            shareMessage.Text = L.T(message);
+            vm.Notice = message;
+        }
+        void AddShareOption(Button button, int column)
+        {
+            button.Margin = default;
+            button.Padding = new Thickness(4, 10);
+            button.HorizontalAlignment = HorizontalAlignment.Stretch;
+            button.VerticalAlignment = VerticalAlignment.Stretch;
+            button.Content = new TextBlock { Text = button.Content?.ToString(), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
+            Grid.SetColumn(button, column);
+            shareOptions.Children.Add(button);
+        }
         async Task CopyShareAsync()
         {
-            var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
-            if (clipboard is not null) await clipboard.SetTextAsync(shareValue);
-            vm.Notice = "Ссылка скопирована в буфер обмена.";
-            CloseShare();
+            try
+            {
+                var clipboard = TopLevel.GetTopLevel(owner)?.Clipboard;
+                if (clipboard is null) { ShareError("Буфер обмена недоступен. Попробуйте QR-код."); return; }
+                await clipboard.SetTextAsync(shareValue);
+                vm.Notice = "Ссылка скопирована в буфер обмена.";
+                CloseShare();
+            }
+            catch { ShareError("Не удалось скопировать ссылку. Попробуйте QR-код."); }
         }
         void OpenShare(string title, string value)
         {
             shareTitle.Text = L.T(title);
             shareValue = value;
+            shareMessage.Text = "";
+            vm.Notice = "";
             shareOverlay.IsVisible = true;
             AppBackNavigation.Set(CloseShare);
         }
         var copyShare = AsyncButton("Буфер обмена", CopyShareAsync);
-        copyShare.Margin = new Thickness(0, 0, 8, 6); shareOptions.Children.Add(copyShare);
+        AddShareOption(copyShare, 0);
         var qrShare = Button("QR-код", () =>
         {
-            try { shareBitmap = QrCodeImage.Create(shareValue); shareQr.Source = shareBitmap; shareQr.IsVisible = true; shareOptions.IsVisible = false; }
-            catch { vm.Notice = "Не удалось создать QR-код."; CloseShare(); }
+            try
+            {
+                var bitmap = QrCodeImage.Create(shareValue);
+                shareQr.Source = null;
+                shareBitmap?.Dispose();
+                shareBitmap = bitmap;
+                shareQr.Source = bitmap;
+                shareQr.IsVisible = true;
+            }
+            catch (QRCoder.Exceptions.DataTooLongException) { ShareError("Профиль слишком большой для QR-кода. Используйте буфер обмена."); }
+            catch { ShareError("Не удалось создать QR-код."); }
         });
-        qrShare.Margin = new Thickness(0, 0, 8, 6); shareOptions.Children.Add(qrShare);
-        shareOptions.Children.Add(Button("Отмена", CloseShare));
+        AddShareOption(qrShare, 2);
+        AddShareOption(Button("Отмена", CloseShare), 4);
         static Control ShareButtonContent(string text)
         {
             var icon = new Avalonia.Controls.Shapes.Path

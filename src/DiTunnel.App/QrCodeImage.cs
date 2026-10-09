@@ -5,9 +5,11 @@ namespace DiTunnel.App;
 
 internal static class QrCodeImage
 {
+    internal static byte[] CreatePng(string text) => PngByteQRCodeHelper.GetQRCode(text, QRCodeGenerator.ECCLevel.M, 12);
+
     public static Bitmap Create(string text)
     {
-        var bytes = PngByteQRCodeHelper.GetQRCode(text, QRCodeGenerator.ECCLevel.M, 12);
-        return new Bitmap(new MemoryStream(bytes));
+        using var stream = new MemoryStream(CreatePng(text));
+        return new Bitmap(stream);
     }
 }

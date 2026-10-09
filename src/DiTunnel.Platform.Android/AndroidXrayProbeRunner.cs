@@ -214,13 +214,16 @@ internal static class AndroidXrayProbeRunner
     public static Network? FindPhysicalNetwork(ConnectivityManager manager)
     {
 #pragma warning disable CA1422
-        return manager.GetAllNetworks().FirstOrDefault(candidate =>
+        var active = manager.ActiveNetwork;
+        return PhysicalNetworkSelection.Select(manager.GetAllNetworks().Select(candidate =>
         {
             var capabilities = manager.GetNetworkCapabilities(candidate);
-            return capabilities?.HasCapability(NetCapability.NotVpn) == true
-                && capabilities.HasCapability(NetCapability.Internet)
-                && capabilities.HasCapability(NetCapability.Validated);
-        });
+            return new PhysicalNetworkCandidate<Network>(candidate,
+                capabilities?.HasCapability(NetCapability.NotVpn) == true,
+                capabilities?.HasCapability(NetCapability.Internet) == true,
+                capabilities?.HasCapability(NetCapability.Validated) == true,
+                candidate.Equals(active));
+        }));
 #pragma warning restore CA1422
     }
 

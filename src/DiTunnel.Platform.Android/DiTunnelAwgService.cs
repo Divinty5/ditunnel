@@ -21,7 +21,7 @@ public class DiTunnelAwgService : global::Android.Net.VpnService
     {
         base.OnCreate();
         // Only a bound helper, with no OS TUN and no second VPN registration.
-        File.WriteAllText(PidPath(this, global::Android.App.Application.ProcessName == PackageName + ":awgprobe"), global::Android.OS.Process.MyPid().ToString(System.Globalization.CultureInfo.InvariantCulture));
+        File.WriteAllText(PidPath(this, AndroidProcessIdentity.CurrentName == PackageName + ":awgprobe"), global::Android.OS.Process.MyPid().ToString(System.Globalization.CultureInfo.InvariantCulture));
         handler = new CommandHandler(this);
         commands = new Messenger(handler);
     }

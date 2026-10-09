@@ -1,4 +1,7 @@
 {
+  "Clipboard unavailable. Try a QR code.": { "es": "Portapapeles no disponible. Pruebe con un código QR.", "zh-Hans": "剪贴板不可用。请尝试二维码。" },
+  "Could not copy the link. Try a QR code.": { "es": "No se pudo copiar el enlace. Pruebe con un código QR.", "zh-Hans": "无法复制链接。请尝试二维码。" },
+  "The profile is too large for a QR code. Use the clipboard.": { "es": "El perfil es demasiado grande para un código QR. Use el portapapeles.", "zh-Hans": "配置过大，无法生成二维码。请使用剪贴板。" },
   "Domains or IP addresses, one per line": { "es": "Dominios o direcciones IP, uno por línea", "zh-Hans": "域名或 IP 地址，每行一个" },
   "Linux VPN is available. Update the Linux runtime for split tunneling.": { "es": "La VPN de Linux está disponible. Actualice el runtime de Linux para usar el túnel dividido.", "zh-Hans": "Linux VPN 已可用。请更新 Linux 运行时以使用分流。" },
   "Direct split traffic is allowed while the VPN is running. After a failure it is blocked; the local network setting remains in effect.": { "es": "El tráfico directo del túnel dividido se permite mientras funciona la VPN. Tras un fallo se bloquea; la configuración de red local sigue vigente.", "zh-Hans": "VPN 运行时允许分流规则中的直连流量。故障后会阻止该流量；局域网设置仍然有效。" },
@@ -2144,5 +2147,25 @@
   "No compatible installer or SHA-256 file is available. Open GitHub from Settings, under Updates.": {
     "es": "No hay un instalador compatible o un archivo SHA-256. Abre GitHub desde Ajustes, en Actualizaciones.",
     "zh-Hans": "没有兼容的安装程序或 SHA-256 文件。请在设置的“更新”部分打开 GitHub。"
-  }
+  },
+  "VPN tunnel started": {"es":"Túnel VPN iniciado","zh-Hans":"VPN 隧道已启动"},
+  "DNS: server address not found": {"es":"DNS: no se encontró la dirección del servidor","zh-Hans":"DNS：未找到服务器地址"},
+  "Probe timed out": {"es":"La comprobación agotó el tiempo de espera","zh-Hans":"检测超时"},
+  "Probe not completed": {"es":"Comprobación no completada","zh-Hans":"检测未完成"},
+  "TCP: timed out": {"es":"TCP: tiempo de espera agotado","zh-Hans":"TCP: 超时"},
+  "TCP: no route to server": {"es":"TCP: sin ruta al servidor","zh-Hans":"TCP: 没有到服务器的路由"},
+  "TCP: connection error": {"es":"TCP: error de conexión","zh-Hans":"TCP: 连接错误"},
+  "TCP: probe error": {"es":"TCP: error de comprobación","zh-Hans":"TCP: 检测错误"},
+  "HTTPS: timed out": {"es":"HTTPS: tiempo de espera agotado","zh-Hans":"HTTPS: 超时"},
+  "HTTPS: no route to server": {"es":"HTTPS: sin ruta al servidor","zh-Hans":"HTTPS: 没有到服务器的路由"},
+  "HTTPS: connection error": {"es":"HTTPS: error de conexión","zh-Hans":"HTTPS: 连接错误"},
+  "HTTPS: probe error": {"es":"HTTPS: error de comprobación","zh-Hans":"HTTPS: 检测错误"},
+  "Profile: timed out": {"es":"Perfil: tiempo de espera agotado","zh-Hans":"配置: 超时"},
+  "Profile: no route to server": {"es":"Perfil: sin ruta al servidor","zh-Hans":"配置: 没有到服务器的路由"},
+  "Profile: connection error": {"es":"Perfil: error de conexión","zh-Hans":"配置: 连接错误"},
+  "Profile: probe error": {"es":"Perfil: error de comprobación","zh-Hans":"配置: 检测错误"},
+  "Probe: timed out": {"es":"Comprobación: tiempo de espera agotado","zh-Hans":"检测: 超时"},
+  "Probe: no route to server": {"es":"Comprobación: sin ruta al servidor","zh-Hans":"检测: 没有到服务器的路由"},
+  "Probe: connection error": {"es":"Comprobación: error de conexión","zh-Hans":"检测: 连接错误"},
+  "Probe: probe error": {"es":"Comprobación: error de comprobación","zh-Hans":"检测: 检测错误"}
 }

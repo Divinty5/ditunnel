@@ -46,40 +46,63 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
                     timeout.CancelAfter(mode == ServerProbeMode.Fast ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(18));
                     if (mode == ServerProbeMode.Fast)
                     {
-                        var measured = await Task.WhenAll(chunk.Select(index => Task.Run(() =>
-                        {
-                            var milliseconds = MeasureTcp(configurations[index]!.ServerHost, configurations[index]!.ServerPort, timeout.Token);
-                            return new ServerProbeResult(milliseconds, $"TCP · {milliseconds:F0} мс");
-                        }, timeout.Token)));
-                        for (var offset = 0; offset < chunk.Length; offset++) results[chunk[offset]] = measured[offset];
+                        var measured = await Task.WhenAll(chunk.Select(index => AndroidProbeFailureIsolation.RunAsync(
+                            () => Task.Run(() =>
+                            {
+                                var milliseconds = MeasureTcp(configurations[index]!.ServerHost, configurations[index]!.ServerPort, timeout.Token);
+                                return new ServerProbeResult(milliseconds, $"TCP · {milliseconds:F0} мс");
+                            }, timeout.Token),
+                            error => ProbeFailure(error, "TCP", timeout.IsCancellationRequested), cancellationToken)));
+                        for (var offset = 0; offset < chunk.Length; offset++)
+                            results[chunk[offset]] = offset < measured.Length ? measured[offset] : new(null, "Проверка не выполнена");
                     }
                     else
                     {
-                        var measured = await AndroidProbeServiceBridge.ProbeAsync(context,
-                            chunk.Select(index => profiles[index]).ToArray(), mode, timeout.Token);
-                        for (var offset = 0; offset < chunk.Length; offset++) results[chunk[offset]] = measured[offset];
+                        var measured = await AndroidProbeFailureIsolation.RunAsync(
+                            () => AndroidProbeServiceBridge.ProbeAsync(context,
+                                chunk.Select(index => profiles[index]).ToArray(), mode, timeout.Token),
+                            error => (IReadOnlyList<ServerProbeResult>)Enumerable.Repeat(
+                                ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested), chunk.Length).ToArray(), cancellationToken);
+                        for (var offset = 0; offset < chunk.Length; offset++)
+                            results[chunk[offset]] = offset < measured.Count ? measured[offset] : new(null, "Проверка не выполнена");
                     }
                 }
                 foreach (var index in Enumerable.Range(0, profiles.Count).Where(index => configurations[index]?.ServerTransport == KillSwitchTransportProtocol.Udp))
                 {
-                    results[index] = await ProbeUdpProfileAsync(profiles[index], mode, cancellationToken);
+                    results[index] = await AndroidProbeFailureIsolation.RunAsync(
+                        () => ProbeUdpProfileAsync(profiles[index], mode, cancellationToken),
+                        error => ProbeFailure(error, "Профиль"), cancellationToken);
                 }
             }
             finally { XrayProbeGate.Release(); }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { FillMissing(results, "Таймаут проверки"); }
         catch (OperationCanceledException) { throw; }
-        catch (TimeoutException) { }
+        catch (TimeoutException) { FillMissing(results, "Таймаут проверки"); }
         catch (Exception error) when (error is InvalidOperationException or NotSupportedException or FormatException)
         {
             FillMissing(results, ShortMessage(error.Message));
         }
         catch (Exception error)
         {
-            Log.Warn("DiTunnelProbe", error.ToString());
+            FillMissing(results, ProbeFailure(error, "Проверка").Message);
         }
-        FillMissing(results, "Таймаут");
+        FillMissing(results, "Проверка не выполнена");
         return results.Select(result => result!).ToArray();
+    }
+
+    private static ServerProbeResult ProbeFailure(Exception error, string stage, bool timedOut = false)
+    {
+        Log.Warn("DiTunnelProbe", error.ToString());
+        return new(null, timedOut ? $"{stage}: таймаут" : error switch
+        {
+            Java.Net.SocketTimeoutException or TimeoutException or OperationCanceledException => $"{stage}: таймаут",
+            Java.Net.UnknownHostException => "DNS: адрес сервера не найден",
+            Java.Net.NoRouteToHostException => $"{stage}: нет маршрута до сервера",
+            Java.Net.ConnectException => $"{stage}: ошибка подключения",
+            InvalidOperationException or NotSupportedException or FormatException => ShortMessage(error.Message),
+            _ => $"{stage}: ошибка проверки"
+        });
     }
 
     private static string ShortMessage(string message) => message.Length <= 42 ? message : "Недоступен";
