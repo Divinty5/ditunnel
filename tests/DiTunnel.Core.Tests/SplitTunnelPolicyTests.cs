@@ -5,6 +5,17 @@ namespace DiTunnel.Core.Tests;
 public sealed class SplitTunnelPolicyTests
 {
     [Theory]
+    [InlineData("ru", true)]
+    [InlineData("рф", true)]
+    [InlineData("xn--p1ai", true)]
+    [InlineData("org", true)]
+    [InlineData("пример.рф", false)]
+    [InlineData("192.0.2.40", false)]
+    [InlineData("2001:db8::1", false)]
+    [InlineData("", false)]
+    public void DomainZonesAreSuffixesRatherThanAddressRecords(string value, bool expected) =>
+        Assert.Equal(expected, SplitTunnelPolicy.IsTopLevelDomain(value));
+    [Theory]
     [InlineData("рф", "xn--p1ai")]
     [InlineData(" .РФ. ", "xn--p1ai")]
     [InlineData("пример.рф", "xn--e1afmkfd.xn--p1ai")]

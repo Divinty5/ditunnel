@@ -8,7 +8,7 @@ namespace DiTunnel.Platform.Linux.Network;
 
 // Only bounded settings cross IPC; neither nft scripts nor Xray JSON come from the UI.
 public sealed record LinuxVpnPolicy(SplitTunnelMode Mode, string[] Domains, string[] Processes,
-    bool KillSwitch, bool AllowLan, bool BlockAds = false, bool StrictAds = false)
+    bool KillSwitch, bool AllowLan, bool BlockAds = false, bool StrictAds = false, bool Ipv4Only = true)
 {
     public static LinuxVpnPolicy Default { get; } = new(SplitTunnelMode.ProxyAll, [], [], false, false);
     public const int MaximumBytes = 64 * 1024;

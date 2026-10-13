@@ -128,7 +128,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             var saved = persisted ?? throw new InvalidOperationException("Сначала подключите VPN вручную, чтобы сохранить профиль для постоянного VPN.");
             if (stopRequested) throw new System.OperationCanceledException();
             var request = (Profile: saved.Profile, SplitTunnelPolicy: new DiTunnel.Core.Connection.SplitTunnelPolicy(saved.Mode, saved.Domains, saved.Processes),
-                saved.BlockAds, saved.StrictAdBlocking);
+                saved.BlockAds, saved.StrictAdBlocking, saved.Ipv4Only);
             starting?.Dispose();
             starting = new CancellationTokenSource();
             // Validate before replacing the saved request. Recovery must use the latest
@@ -149,19 +149,21 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             var profileConfiguration = isAmneziaWg
                 ? await StartAmneziaWgAsync(request.Profile, starting.Token)
                 : XrayProfileConverter.Convert(request.Profile);
+            profileConfiguration = profileConfiguration.WithIpv4Only(request.Ipv4Only);
             starting.Token.ThrowIfCancellationRequested();
             if (!isAmneziaWg) Stage(VpnStartupStage.Endpoint);
             var addresses = profileConfiguration.IsLocalProxy ? [IPAddress.Loopback]
                 : await Dns.GetHostAddressesAsync(profileConfiguration.ServerHost, starting.Token);
             var serverAddress = addresses
+                .Where(address => !request.Ipv4Only || address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                 .OrderBy(address => address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 0 : 1)
                 .FirstOrDefault()
                 ?? throw new InvalidOperationException("Не удалось определить IP-адрес VPN-сервера.");
 
             var awgConfiguration = isAmneziaWg ? AmneziaWgProfileConverter.Convert(request.Profile) : null;
-            var supportsIpv4 = awgConfiguration?.SupportsAddressFamily(System.Net.Sockets.AddressFamily.InterNetwork) ?? true;
-            var supportsIpv6 = awgConfiguration?.SupportsAddressFamily(System.Net.Sockets.AddressFamily.InterNetworkV6) ?? true;
-            IReadOnlyList<string> dnsServers = awgConfiguration?.TunnelDnsServers() ?? ["1.1.1.1", "2606:4700:4700::1111"];
+            var supportsIpv4 = profileConfiguration.SupportsIpv4;
+            var supportsIpv6 = profileConfiguration.SupportsIpv6;
+            IReadOnlyList<string> dnsServers = XrayProfileConfiguration.DnsServersFor(request.Ipv4Only, awgConfiguration?.TunnelDnsServers() ?? ["1.1.1.1", "2606:4700:4700::1111"]);
             starting.Token.ThrowIfCancellationRequested();
             Stage(VpnStartupStage.Tun);
             var builder = new Builder(this)

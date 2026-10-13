@@ -11,6 +11,18 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
     public bool IsLocalProxy { get; init; }
     public bool SupportsIpv4 { get; init; } = true;
     public bool SupportsIpv6 { get; init; } = true;
+    public bool Ipv4Only { get; init; }
+    public XrayProfileConfiguration WithIpv4Only(bool enabled)
+    {
+        if (!enabled) return this;
+        if (!SupportsIpv4) throw new NotSupportedException("Профиль не поддерживает IPv4. Отключите «Использовать только IPv4» или выберите другой профиль.");
+        return this with { Ipv4Only = true, SupportsIpv6 = false };
+    }
+    public static string[] DnsServersFor(bool ipv4Only, IReadOnlyList<string> servers)
+    {
+        var selected = servers.Where(value => !ipv4Only || IPAddress.TryParse(value, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork).ToArray();
+        return selected.Length > 0 ? selected : ["1.1.1.1", "1.0.0.1"];
+    }
     public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false, IReadOnlyList<string>? dnsServers = null, bool enableSocksUdp = true)
     {
         var outbound = (JsonObject)Outbound.DeepClone();
@@ -35,6 +47,19 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
             foreach (var item in outbounds.OfType<JsonObject>())
                 if (!IsLocalProxy || item["tag"]?.GetValue<string>() != "proxy") item["sendThrough"] = outboundSourceAddress;
         var rules = new JsonArray();
+        if (Ipv4Only && tun)
+        {
+            outbounds.Add(new JsonObject
+            {
+                ["tag"] = "dns-ipv4", ["protocol"] = "dns",
+                ["settings"] = new JsonObject { ["nonIPQuery"] = "skip" },
+                ["streamSettings"] = new JsonObject { ["sockopt"] = new JsonObject { ["dialerProxy"] = "proxy" } }
+            });
+            // Internal resolver traffic must reach the VPN before DNS interception,
+            // otherwise the resolver would recursively intercept its own queries.
+            rules.Add(new JsonObject { ["inboundTag"] = new JsonArray("dns-upstream"), ["outboundTag"] = "proxy" });
+            rules.Add(new JsonObject { ["inboundTag"] = new JsonArray("tun"), ["network"] = "tcp,udp", ["port"] = "53", ["outboundTag"] = "dns-ipv4" });
+        }
         if (!SupportsIpv4 || !SupportsIpv6)
         {
             var unsupported = new JsonArray();
@@ -86,13 +111,20 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         if (domains.Length > 0) rules.Add(new JsonObject { ["domain"] = new JsonArray(domains), ["outboundTag"] = selectedTag });
         if (addresses.Length > 0) rules.Add(new JsonObject { ["ip"] = new JsonArray(addresses), ["outboundTag"] = selectedTag });
         if (processes.Length > 0) rules.Add(new JsonObject { ["process"] = new JsonArray(processes), ["outboundTag"] = selectedTag });
-        return new JsonObject
+        var result = new JsonObject
         {
             ["log"] = new JsonObject { ["loglevel"] = tun ? "info" : "none" },
             ["inbounds"] = new JsonArray(inbound),
             ["outbounds"] = outbounds,
             ["routing"] = new JsonObject { ["domainStrategy"] = "AsIs", ["rules"] = rules }
-        }.ToJsonString();
+        };
+        if (Ipv4Only && tun)
+            result["dns"] = new JsonObject
+            {
+                ["servers"] = new JsonArray(DnsServersFor(true, dnsServers ?? ["1.1.1.1", "1.0.0.1"]).Select(value => (JsonNode?)value).ToArray()),
+                ["queryStrategy"] = "UseIPv4", ["tag"] = "dns-upstream"
+            };
+        return result.ToJsonString();
     }
 }
 

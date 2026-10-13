@@ -1,4 +1,10 @@
 {
+  "Connection": { "es": "Conexión", "zh-Hans": "连接" },
+  "Use IPv4 only": { "es": "Usar solo IPv4", "zh-Hans": "仅使用 IPv4" },
+  "Disables IPv6 inside the VPN and uses IPv4 for DNS. Reconnect to apply the change.": { "es": "Desactiva IPv6 dentro de la VPN y usa IPv4 para DNS. Vuelva a conectarse para aplicar el cambio.", "zh-Hans": "禁用 VPN 内的 IPv6，并使用 IPv4 进行 DNS 查询。重新连接后生效。" },
+  "The profile does not support IPv4. Turn off Use IPv4 only or choose another profile.": { "es": "El perfil no admite IPv4. Desactive Usar solo IPv4 o elija otro perfil.", "zh-Hans": "配置不支持 IPv4。请关闭仅使用 IPv4 或选择其他配置。" },
+  "Could not resolve a compatible VPN server address.": { "es": "No se pudo resolver una dirección compatible del servidor VPN.", "zh-Hans": "无法解析兼容的 VPN 服务器地址。" },
+  "Linux VPN is available. Configure split tunneling and the kill switch in connection settings.": { "es": "La VPN de Linux está disponible. Configure el túnel dividido y el kill switch en los ajustes de conexión.", "zh-Hans": "Linux VPN 已可用。请在连接设置中配置分流和断网保护。" },
   "Clipboard unavailable. Try a QR code.": { "es": "Portapapeles no disponible. Pruebe con un código QR.", "zh-Hans": "剪贴板不可用。请尝试二维码。" },
   "Could not copy the link. Try a QR code.": { "es": "No se pudo copiar el enlace. Pruebe con un código QR.", "zh-Hans": "无法复制链接。请尝试二维码。" },
   "The profile is too large for a QR code. Use the clipboard.": { "es": "El perfil es demasiado grande para un código QR. Use el portapapeles.", "zh-Hans": "配置过大，无法生成二维码。请使用剪贴板。" },

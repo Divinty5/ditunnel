@@ -106,7 +106,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         await gate.WaitAsync(cancellationToken);
         try
         {
-            var configuration = ConvertProfile(profile);
+            var configuration = ConvertProfile(profile).WithIpv4Only(connectionPolicy().Ipv4Only);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             var address = (await Dns.GetHostAddressesAsync(configuration.ServerHost, timeout.Token)).FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
@@ -147,7 +147,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             // Clear deterministic stale objects left by an earlier crash before DNS/profile probing.
             if (!preserveKillSwitch) await killSwitch.DeactivateAsync(cancellationToken);
             var awg = AmneziaWgProfileConverter.IsAmneziaWg(profile) ? AmneziaWgProfileConverter.Convert(profile) : null;
-            var configuration = ConvertProfile(profile);
+            var configuration = ConvertProfile(profile).WithIpv4Only(connectionPolicy().Ipv4Only);
             var connection = connectionPolicy().Normalize();
             var policy = splitTunnelPolicy();
             if (policy.Mode == SplitTunnelMode.ProxySelected && policy.Domains.Count == 0 && policy.Processes.Count == 0)
@@ -182,7 +182,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 await File.WriteAllTextAsync(Path.Combine(sessionDirectory, "amneziawg.json"), awg.BuildRuntimeConfiguration(address.ToString(), credentials.Username, credentials.Password, readyPath), timeout.Token);
                 configuration = awg.CreateProxyConfiguration(0, credentials.Username, credentials.Password);
             }
-            var dnsServers = awg?.TunnelDnsServers().ToArray() ?? ["1.1.1.1", "1.0.0.1"];
+            configuration = configuration.WithIpv4Only(connection.Ipv4Only);
+            var dnsServers = XrayProfileConfiguration.DnsServersFor(connection.Ipv4Only, awg?.TunnelDnsServers().ToArray() ?? ["1.1.1.1", "1.0.0.1"]);
             await File.WriteAllTextAsync(configPath, configuration.Build(address.ToString(), true, splitTunnel: policy, tunnelName: tunnelName, blockAds: blockAds(), strictAdBlocking: strictAdBlocking(), dnsServers: dnsServers), timeout.Token);
             // On Windows, `xray run -test` initializes the TUN inbound and therefore creates a
             // short-lived Wintun adapter. Starting the real host immediately afterwards can race
@@ -231,16 +232,22 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         else _ = XrayProfileConverter.Convert(profile);
     }
 
-    private static async Task<IPAddress[]> ResolveSplitAddressesAsync(SplitTunnelPolicy policy, CancellationToken cancellationToken)
+    internal static async Task<IPAddress[]> ResolveSplitAddressesAsync(SplitTunnelPolicy policy, CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<IPAddress[]>>? resolve = null)
     {
         if (policy.Mode == SplitTunnelMode.ProxyAll) return [];
+        resolve ??= (domain, token) => Dns.GetHostAddressesAsync(domain, token);
         var addresses = new List<IPAddress>();
-        foreach (var domain in policy.Domains.Where(domain => !string.IsNullOrWhiteSpace(domain)).Select(SplitTunnelPolicy.NormalizeDomain).Where(domain => domain.Length > 0))
+        var hosts = policy.Domains.Where(domain => !string.IsNullOrWhiteSpace(domain)).Select(SplitTunnelPolicy.NormalizeDomain)
+            .Where(domain => domain.Length > 0 && !SplitTunnelPolicy.IsTopLevelDomain(domain)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        // A domain zone is a suffix rule, not a host with an A record. Its actual
+        // hosts are handled by Xray and the tunnel host's DNS-cache route updates.
+        foreach (var domain in hosts)
         {
-            try { addresses.AddRange((await Dns.GetHostAddressesAsync(domain, cancellationToken)).Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)); }
+            try { addresses.AddRange((await resolve(domain, cancellationToken)).Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)); }
             catch (SocketException) { }
         }
-        if (policy.Domains.Count > 0 && addresses.Count == 0)
+        if (hosts.Length > 0 && addresses.Count == 0)
             throw new InvalidOperationException("Не удалось получить адреса выбранных доменов. Проверьте написание и интернет-соединение.");
         return addresses.Distinct().ToArray();
     }

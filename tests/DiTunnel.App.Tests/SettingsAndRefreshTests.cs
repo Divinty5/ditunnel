@@ -8,6 +8,25 @@ namespace DiTunnel.App.Tests;
 
 public sealed class SettingsAndRefreshTests
 {
+    [Fact]
+    public void Ipv4OnlyDefaultsForOldSettingsPersistsAndTriggersReconnect()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "DiTunnel-ipv4-" + Guid.NewGuid().ToString("N"), "settings.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            File.WriteAllText(path, "{\"Theme\":\"dark\"}");
+            var settings = UserSettings.Load(path);
+            Assert.True(settings.Ipv4Only);
+            Assert.True(settings.GetConnectionPolicy().Ipv4Only);
+            var fingerprint = settings.NetworkSettingsFingerprint();
+            settings.Ipv4Only = false;
+            Assert.NotEqual(fingerprint, settings.NetworkSettingsFingerprint());
+            settings.Save(path);
+            Assert.False(UserSettings.Load(path).Ipv4Only);
+        }
+        finally { File.Delete(path); Directory.Delete(Path.GetDirectoryName(path)!); }
+    }
     private sealed class Store : IProfileStore
     {
         public List<ImportedProfile> Items = [new("Old", "VLESS", "old", "sub", "Subscription", "https://example.com/sub"), new("Manual", "SS", "manual", "manual", "Manual")];

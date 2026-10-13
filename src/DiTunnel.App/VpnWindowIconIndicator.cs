@@ -16,11 +16,19 @@ internal sealed class VpnWindowIconIndicator : IDisposable
     private readonly WindowIcon? originalIcon;
     private readonly Dictionary<Color, WindowIcon> icons = [];
     private MainViewModel? model;
+    private readonly WindowsTaskbarIcon? taskbar;
+    private bool disposed;
 
-    public VpnWindowIconIndicator(Window window)
+    public VpnWindowIconIndicator(Window window, string? taskbarIconPath = null, IReadOnlyList<string>? shortcutPaths = null)
     {
         this.window = window;
-        originalIcon = window.Icon;
+        originalIcon = OperatingSystem.IsWindows() ? CreateIcon(null) : window.Icon;
+        if (OperatingSystem.IsWindows())
+        {
+            taskbar = new WindowsTaskbarIcon(window, taskbarIconPath, shortcutPaths);
+            try { taskbar.Update(originalIcon!); }
+            catch (Exception error) { Trace.TraceWarning("Unable to initialize VPN taskbar icon: {0}", error.Message); }
+        }
         window.DataContextChanged += DataContextChanged;
         DataContextChanged(null, EventArgs.Empty);
     }
@@ -51,7 +59,17 @@ internal sealed class VpnWindowIconIndicator : IDisposable
                 if (!icons.TryGetValue(accent, out icon))
                     icons[accent] = icon = CreateIcon(accent);
             }
-            if (!ReferenceEquals(window.Icon, icon)) window.Icon = icon;
+            // Refresh the Shell resource before Avalonia sends WM_SETICON and
+            // prompts Explorer to redraw the taskbar group.
+            if (OperatingSystem.IsWindows() && icon is not null)
+            {
+                try { taskbar?.Update(icon); }
+                catch (Exception error) { Trace.TraceWarning("Unable to update VPN taskbar icon: {0}", error.Message); }
+            }
+            if (!ReferenceEquals(window.Icon, icon))
+            {
+                window.Icon = icon;
+            }
         }
         catch (Exception error)
         {
@@ -60,7 +78,7 @@ internal sealed class VpnWindowIconIndicator : IDisposable
         }
     }
 
-    internal static WindowIcon CreateIcon(Color accent)
+    internal static WindowIcon CreateIcon(Color? accent)
     {
         using var stream = AssetLoader.Open(new Uri("avares://DiTunnel.App/Assets/icon.png"));
         using var source = Bitmap.DecodeToWidth(stream, 256);
@@ -77,17 +95,48 @@ internal sealed class VpnWindowIconIndicator : IDisposable
                 {
                     var index = x * 4;
                     var pixel = Color.FromArgb(row[index + 3], row[index + 2], row[index + 1], row[index]);
-                    var tinted = ConnectionPalette.RecolourTunnelPixel(pixel, accent);
+                    var tinted = accent is { } colour ? ConnectionPalette.RecolourTunnelPixel(pixel, colour) : pixel;
                     row[index] = tinted.B; row[index + 1] = tinted.G; row[index + 2] = tinted.R;
                 }
                 Marshal.Copy(row, 0, address, row.Length);
             }
         }
-        return new WindowIcon(bitmap);
+        if (!OperatingSystem.IsWindows()) return new WindowIcon(bitmap);
+        // Raw PNG icons become a single oversized HICON on Win32. Supply the
+        // actual caption/taskbar sizes rather than relying on Shell downscaling.
+        using var ico = new MemoryStream();
+        using var writer = new BinaryWriter(ico, System.Text.Encoding.UTF8, leaveOpen: true);
+        using var bitmapData = new MemoryStream();
+        bitmap.Save(bitmapData, new PngBitmapEncoderOptions());
+        bitmapData.Position = 0;
+        using var scalable = new Bitmap(bitmapData);
+        var images = new[] { 16, 24, 32, 48, 64, 256 }.Select(size =>
+        {
+            using var scaled = scalable.CreateScaledBitmap(new Avalonia.PixelSize(size, size), BitmapInterpolationMode.HighQuality);
+            using var png = new MemoryStream();
+            scaled.Save(png, new PngBitmapEncoderOptions());
+            return (Size: size, Data: png.ToArray());
+        }).ToArray();
+        writer.Write((ushort)0); writer.Write((ushort)1); writer.Write((ushort)images.Length);
+        var offset = 6 + 16 * images.Length;
+        foreach (var image in images)
+        {
+            writer.Write((byte)(image.Size == 256 ? 0 : image.Size));
+            writer.Write((byte)(image.Size == 256 ? 0 : image.Size));
+            writer.Write((ushort)0); writer.Write((ushort)1); writer.Write((ushort)32);
+            writer.Write(image.Data.Length); writer.Write(offset);
+            offset += image.Data.Length;
+        }
+        foreach (var image in images) writer.Write(image.Data);
+        ico.Position = 0;
+        return new WindowIcon(ico);
     }
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
+        if (OperatingSystem.IsWindows()) taskbar?.Dispose();
         window.DataContextChanged -= DataContextChanged;
         if (model is not null) model.PropertyChanged -= ModelPropertyChanged;
         model = null;

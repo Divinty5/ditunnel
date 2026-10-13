@@ -13,6 +13,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     private readonly Func<SplitTunnelPolicy> splitTunnelPolicy;
     private readonly Func<bool> blockAds;
     private readonly Func<bool> strictAdBlocking;
+    private readonly Func<bool> ipv4Only;
     private readonly SemaphoreSlim lifecycle = new(1, 1);
     private readonly object connectionLock = new();
     private CancellationTokenSource? pendingConnection;
@@ -27,7 +28,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     private VpnStatus status;
     private bool disposed;
 
-    public AndroidVpnEngine(Context context, IAndroidVpnPermissionRequester permissionRequester, Func<SplitTunnelPolicy>? splitTunnelPolicy = null, Func<bool>? blockAds = null, Func<bool>? strictAdBlocking = null)
+    public AndroidVpnEngine(Context context, IAndroidVpnPermissionRequester permissionRequester, Func<SplitTunnelPolicy>? splitTunnelPolicy = null, Func<bool>? blockAds = null, Func<bool>? strictAdBlocking = null, Func<bool>? ipv4Only = null)
     {
         this.context = context.ApplicationContext
             ?? throw new InvalidOperationException("Android ApplicationContext недоступен.");
@@ -35,6 +36,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         this.splitTunnelPolicy = splitTunnelPolicy ?? (() => SplitTunnelPolicy.Default);
         this.blockAds = blockAds ?? (() => false);
         this.strictAdBlocking = strictAdBlocking ?? (() => false);
+        this.ipv4Only = ipv4Only ?? (() => true);
         status = AndroidVpnRuntimeState.ReadStatus(this.context);
         activeProfile = AndroidVpnRuntimeState.ReadActiveProfile(this.context);
         AndroidVpnServiceBridge.Register(this.context);
@@ -178,7 +180,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             recovering ? $"Запускаем новый туннель через {profile.Name}…" : "Запускаем Android VPN…"));
         var completion = AndroidVpnServiceBridge.ExpectStart();
         AndroidVpnStartupDiagnostics.Record(context, VpnStartupStage.Service);
-        context.StartForegroundService(AndroidVpnServiceBridge.CreateStartIntent(context, profile, splitTunnelPolicy(), blockAds(), strictAdBlocking()));
+        context.StartForegroundService(AndroidVpnServiceBridge.CreateStartIntent(context, profile, splitTunnelPolicy(), blockAds(), strictAdBlocking(), ipv4Only()));
         try
         {
             VpnStatus started;

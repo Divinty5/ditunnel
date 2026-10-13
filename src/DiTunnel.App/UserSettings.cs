@@ -46,7 +46,7 @@ public sealed class UserSettings
         static string Canonical(IEnumerable<string> values, bool ignoreCase) => string.Join('\n', values
             .Select(value => ignoreCase ? value.Trim().ToLowerInvariant() : value.Trim()).Where(value => value.Length > 0)
             .Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal));
-        var protection = string.Join('|', KillSwitchEnabled, AllowLocalNetwork, BlockAdsEnabled, StrictAdBlockingEnabled, (int)SplitTunnelMode);
+        var protection = string.Join('|', KillSwitchEnabled, AllowLocalNetwork, BlockAdsEnabled, StrictAdBlockingEnabled, Ipv4Only, (int)SplitTunnelMode);
         var rules = GetSplitTunnelPolicy();
         return SplitTunnelMode == SplitTunnelMode.ProxyAll ? protection
             : string.Join('|', protection, Canonical(rules.Domains, true), Canonical(rules.Processes, !(platform ?? App.Platform).CaseSensitiveApplicationPaths));
@@ -74,6 +74,7 @@ public sealed class UserSettings
     public bool AllowLocalNetwork { get; set; }
     public bool StartWithWindows { get; set; }
     public bool AutoConnect { get; set; }
+    public bool Ipv4Only { get; set; } = true;
     public bool CheckForUpdatesAutomatically { get; set; } = true;
     public bool InstallUpdatesAutomatically { get; set; }
     public bool SplitTunnelDefaultsApplied { get; set; }
@@ -105,7 +106,7 @@ public sealed class UserSettings
         finally { defaultsGate.Release(); }
     }
     public string? SkippedUpdateVersion { get; set; }
-    public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect).Normalize();
+    public ConnectionPolicy GetConnectionPolicy() => new ConnectionPolicy(KillSwitchEnabled, AllowLocalNetwork, StartWithWindows, AutoConnect, Ipv4Only).Normalize();
     public WindowPlacement? Window { get; set; }
     public static string Version => typeof(UserSettings).Assembly
         .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()

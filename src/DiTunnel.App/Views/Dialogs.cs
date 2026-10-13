@@ -103,6 +103,7 @@ public static class Dialogs
         var isClosing = false;
         Action? saveSplitRules = null;
         Action? refreshInstalledApplications = null;
+        var expandedSections = new HashSet<string>(StringComparer.Ordinal);
         async Task GoBackAsync()
         {
             if (isClosing) return;
@@ -122,12 +123,25 @@ public static class Dialogs
         }
         void Build()
         {
-            var panel = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var sections = new StackPanel { Margin = new Thickness(24, 24, 24, 8), Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Stretch };
+            var panel = sections;
+            void BeginSection(string title)
+            {
+                panel = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 4) };
+                var section = SettingsSection(title, panel);
+                section.IsExpanded = expandedSections.Contains(title);
+                section.PropertyChanged += (_, change) =>
+                {
+                    if (change.Property != Expander.IsExpandedProperty) return;
+                    if (section.IsExpanded) expandedSections.Add(title); else expandedSections.Remove(title);
+                };
+                sections.Children.Add(section);
+            }
             var back = AsyncButton("← Назад", GoBackAsync);
             var status = Label("");
             CheckBox? killSwitchControl = null;
             void Save() { try { UserSettings.Current.Save(); status.Text = L.T("Настройки сохранены."); } catch { status.Text = L.T("Не удалось сохранить настройки."); } }
-            panel.Children.Add(SectionHeading("Интерфейс"));
+            BeginSection("Интерфейс");
             panel.Children.Add(Label("Язык"));
             var language = new ComboBox
             {
@@ -163,7 +177,16 @@ public static class Dialogs
             appearance.Children.Add(theme); Grid.SetRow(theme, 1);
             if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1); }
             panel.Children.Add(appearance);
-            panel.Children.Add(SectionHeading("Защита соединения"));
+            BeginSection("Соединение");
+            var ipv4Only = new CheckBox { Content = L.T("Использовать только IPv4"), IsChecked = UserSettings.Current.Ipv4Only };
+            ipv4Only.IsCheckedChanged += (_, _) =>
+            {
+                networkSettingsChangedExplicitly = true;
+                UserSettings.Current.Ipv4Only = ipv4Only.IsChecked == true;
+                Save();
+            };
+            panel.Children.Add(ipv4Only);
+            panel.Children.Add(Label("Отключает IPv6 внутри VPN и использует IPv4 для DNS. Изменение применяется при переподключении."));
             if (!vm.Platform.SupportsAdvancedNetworkSettings)
                 panel.Children.Add(Label("На этом этапе Linux направляет весь трафик через VPN. Разделение трафика и блокировка рекламы пока недоступны."));
             var blockAds = new CheckBox { Content = L.T("Блокировать рекламу и трекеры"), IsChecked = vm.Platform.SupportsAdvancedNetworkSettings && UserSettings.Current.BlockAdsEnabled, IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings };
@@ -217,7 +240,7 @@ public static class Dialogs
                 if (vm.Platform.ReleaseTarget == ReleaseTarget.LinuxX64 && vm.Platform.SupportsKillSwitch)
                     panel.Children.Add(Label("Прямой трафик правил РТ разрешён при работающем VPN. После аварии он блокируется; настройка локальной сети остаётся в силе."));
             }
-            panel.Children.Add(SectionHeading("Раздельное туннелирование"));
+            BeginSection("Раздельное туннелирование");
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = vm.Platform.SupportsAdvancedNetworkSettings ? (int)UserSettings.Current.SplitTunnelMode : 0, IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings };
             var activeMode = UserSettings.Current.SplitTunnelMode == SplitTunnelMode.ProxySelected ? SplitTunnelMode.ProxySelected : SplitTunnelMode.BypassSelected;
             var domains = new TextBox { Text = string.Join(Environment.NewLine, draftDomains[activeMode]), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T(OperatingSystem.IsLinux() ? "Домены или IP-адреса, по одному в строке" : "Домены или IPv4-адреса, по одному в строке") };
@@ -371,7 +394,7 @@ public static class Dialogs
             openLogs.Margin = new Thickness(0, 0, 8, 6); serviceActions.Children.Add(openLogs);
             if (!OperatingSystem.IsAndroid())
             {
-                panel.Children.Add(SectionHeading("Диагностика"));
+                BeginSection("Диагностика");
                 panel.Children.Add(serviceActions);
                 if (vm.CanRestoreNetwork)
                     panel.Children.Add(AsyncButton("Восстановить доступ к сети", async () =>
@@ -386,7 +409,7 @@ public static class Dialogs
                     }));
                 panel.Children.Add(Label("Экспорт содержит только события сети, без подписок и ключей."));
             }
-            panel.Children.Add(SectionHeading("Обновления"));
+            BeginSection("Обновления");
             var automaticUpdates = new CheckBox { Content = L.T("Автоматически скачивать и устанавливать обновления"), IsChecked = UserSettings.Current.InstallUpdatesAutomatically };
             automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.InstallUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
             var updates = Button("Проверить обновления", async () =>
@@ -404,9 +427,9 @@ public static class Dialogs
                 try { await (TopLevel.GetTopLevel(owner)?.Launcher?.LaunchUriAsync(new Uri("https://github.com/Divinty5/ditunnel")) ?? Task.FromResult(false)); }
                 catch { status.Text = L.T("Не удалось открыть страницу релиза."); }
             }));
-            panel.Children.Add(status);
-            panel.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
-            owner.Content = Page("Настройки", back, panel);
+            sections.Children.Add(status);
+            sections.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
+            owner.Content = Page("Настройки", back, sections);
             if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
             AppBackNavigation.Set(() => _ = GoBackAsync());
         }
@@ -427,6 +450,13 @@ public static class Dialogs
             }
         }
     }
+
+    internal static Expander SettingsSection(string title, Control content) => new()
+    {
+        Header = SectionHeading(title), Content = content, IsExpanded = false,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch
+    };
 
     public static Task<string?> AskUpdate(ContentControl owner, AppRelease release, bool canInstall)
     {

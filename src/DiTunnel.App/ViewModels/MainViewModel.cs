@@ -153,8 +153,9 @@ public sealed partial class MainViewModel : ViewModelBase
                 ? SelectedProfile?.Profile.Kind.Equals("AmneziaWG", StringComparison.OrdinalIgnoreCase) == true ? "Android VPN · AmneziaWG" : "Android VPN · Xray-core"
                 : Platform.RuntimeDescription;
     public bool IsKillSwitchEnabled => Platform.SupportsKillSwitch && UserSettings.Current.KillSwitchEnabled;
-    public bool ShowKillSwitchStatus => IsKillSwitchEnabled || engine?.IsNetworkProtectionActive == true;
-    public string KillSwitchText => engine?.IsNetworkProtectionActive == true && ConnectionState != VpnConnectionState.Connected
+    public bool ShowKillSwitchStatus => Platform.SupportsKillSwitch && (IsKillSwitchEnabled || engine?.IsNetworkProtectionActive == true);
+    public string KillSwitchText => !Platform.SupportsKillSwitch ? ""
+        : engine?.IsNetworkProtectionActive == true && ConnectionState != VpnConnectionState.Connected
         ? "Kill switch блокирует интернет. Подключите VPN или восстановите доступ к сети в настройках."
         : ConnectionState == VpnConnectionState.Connected && IsKillSwitchEnabled && engine?.IsNetworkProtectionActive == true
         ? "Kill switch активен"

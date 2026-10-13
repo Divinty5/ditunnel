@@ -11,6 +11,38 @@ public sealed class LinuxProtectionTests
 {
     private const string Owner = "0123456789abcdef0123456789abcdef";
     [Fact]
+    public void Old_policy_defaults_to_ipv4_and_explicit_dual_stack_survives_ipc()
+    {
+        var old = LinuxVpnPolicy.Parse("{\"Mode\":0,\"Domains\":[],\"Processes\":[],\"KillSwitch\":false,\"AllowLan\":false}");
+        Assert.True(old.Ipv4Only);
+        Assert.False(LinuxVpnPolicy.Parse((old with { Ipv4Only = false }).Serialize()).Ipv4Only);
+    }
+    [Theory]
+    [InlineData(SplitTunnelMode.ProxyAll)]
+    [InlineData(SplitTunnelMode.BypassSelected)]
+    [InlineData(SplitTunnelMode.ProxySelected)]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public void Ipv4_dns_and_family_block_precede_lan_and_split_rules(SplitTunnelMode mode)
+    {
+        var profile = ProfileParser.Parse("vless://11111111-1111-1111-1111-111111111111@192.0.2.10:443?security=tls&sni=example.test").Single();
+        var policy = new LinuxVpnPolicy(mode, ["ru", "2001:db8::1"], [], true, true);
+        var config = JsonNode.Parse(LinuxVpnSession.BuildConfiguration(XrayProfileConverter.Convert(profile),
+            IPAddress.Parse("192.0.2.10"), "dtn0123456789", ["1.1.1.1", "2606:4700:4700::1111"], policy))!;
+        var rules = config["routing"]!["rules"]!.AsArray();
+        Assert.Equal("dns-upstream", rules[0]!["inboundTag"]![0]!.ToString());
+        Assert.Equal("proxy", rules[0]!["outboundTag"]!.ToString());
+        Assert.Equal("dns-ipv4", rules[1]!["outboundTag"]!.ToString());
+        Assert.Equal("53", rules[1]!["port"]!.ToString());
+        Assert.Equal("::/0", rules[2]!["ip"]![0]!.ToString());
+        Assert.Equal("block", rules[2]!["outboundTag"]!.ToString());
+        Assert.Equal("direct", rules[3]!["outboundTag"]!.ToString());
+        Assert.Equal("UseIPv4", config["dns"]!["queryStrategy"]!.ToString());
+        Assert.Equal("1.1.1.1", Assert.Single(config["dns"]!["servers"]!.AsArray())!.ToString());
+        var dns = config["outbounds"]!.AsArray().Single(item => item!["tag"]!.ToString() == "dns-ipv4")!;
+        Assert.Equal("proxy", dns["streamSettings"]!["sockopt"]!["dialerProxy"]!.ToString());
+        Assert.Equal(LinuxRouteLease.Mark, dns["streamSettings"]!["sockopt"]!["mark"]!.GetValue<int>());
+    }
+    [Fact]
     public void Process_capability_requires_metadata_for_the_actual_binary()
     {
         var root=Path.Combine(Path.GetTempPath(),"ditunnel-process-runtime-"+Guid.NewGuid().ToString("N"));
@@ -44,7 +76,7 @@ public sealed class LinuxProtectionTests
     public void Split_keeps_dns_in_proxy_and_separates_direct_transport_marks(SplitTunnelMode mode)
     {
         var profile=ProfileParser.Parse("vless://11111111-1111-1111-1111-111111111111@192.0.2.10:443?security=tls&sni=example.test").Single();
-        var policy=new LinuxVpnPolicy(mode,["198.51.100.20","example.test"],["/usr/bin/curl"],true,false);
+        var policy=new LinuxVpnPolicy(mode,["198.51.100.20","example.test"],["/usr/bin/curl"],true,false,Ipv4Only:false);
         var config=JsonNode.Parse(LinuxVpnSession.BuildConfiguration(XrayProfileConverter.Convert(profile),IPAddress.Parse("192.0.2.10"),"dtn0123456789",["1.1.1.1"],policy))!;
         Assert.Equal("proxy",config["routing"]!["rules"]![0]!["outboundTag"]!.ToString());
         Assert.Equal("53",config["routing"]!["rules"]![0]!["port"]!.ToString());

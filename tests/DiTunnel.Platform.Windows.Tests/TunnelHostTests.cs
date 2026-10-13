@@ -7,6 +7,34 @@ namespace DiTunnel.Platform.Windows.Tests;
 
 public sealed class TunnelHostTests
 {
+    [Theory]
+    [InlineData(SplitTunnelMode.BypassSelected)]
+    [InlineData(SplitTunnelMode.ProxySelected)]
+    public async Task DomainZonesConnectWithoutInitialAddresses(SplitTunnelMode mode)
+    {
+        await using var fixture = new Fixture(mode: mode, selectedAddresses: false, domains: ["ru", "xn--p1ai"]);
+        using var host = fixture.Start();
+        await ReadUntilAsync(host, "CONNECTED");
+        Assert.Contains(fixture.Network.Table, route => route.Prefix == "0.0.0.0/1");
+        Assert.Empty(fixture.Network.ResolvedNames);
+        host.RequestStop();
+        Assert.Contains("STOPPED", await DrainAsync(host));
+        Assert.Empty(fixture.Network.Table);
+    }
+
+    [Fact]
+    public async Task DomainZonesAddRoutesForActualCachedHostsOnly()
+    {
+        await using var fixture = new Fixture(mode: SplitTunnelMode.BypassSelected, selectedAddresses: false, domains: ["ru", "xn--p1ai"]);
+        fixture.Network.CachedDomains = ["asuproject.ru", "пример.рф", "example.org", "notru"];
+        using var host = fixture.Start();
+        await ReadUntilAsync(host, "SPLIT_ADDRESS_203.0.113.20");
+        Assert.Equal(["asuproject.ru", "xn--e1afmkfd.xn--p1ai"], fixture.Network.ResolvedNames);
+        Assert.Contains(fixture.Network.Table, route => route.Prefix == "203.0.113.20/32" && route.InterfaceIndex == 2);
+        host.RequestStop();
+        Assert.Contains("STOPPED", await DrainAsync(host));
+        Assert.Empty(fixture.Network.Table);
+    }
     [Fact]
     public async Task AdapterDnsFallbackReportsReadyAndUsesTheTunnelIdentity()
     {
@@ -292,14 +320,14 @@ public sealed class TunnelHostTests
         internal TunnelHostOptions Options { get; }
         internal int CoreStarts;
         private WindowsTunnelHost? host;
-        internal Fixture(bool protection = false, SplitTunnelMode mode = SplitTunnelMode.ProxyAll, bool amnezia = false, bool ipv6 = true, bool applications = false, bool selectedAddresses = true)
+        internal Fixture(bool protection = false, SplitTunnelMode mode = SplitTunnelMode.ProxyAll, bool amnezia = false, bool ipv6 = true, bool applications = false, bool selectedAddresses = true, string[]? domains = null)
         {
             System.IO.Directory.CreateDirectory(Directory);
             var config = Path.Combine(Directory, "config.json");
             File.WriteAllText(config, """{"inbounds":[{"tag":"tun","settings":{"autoOutboundsInterface":"auto"}}],"outbounds":[{"tag":"proxy","protocol":"socks","settings":{"servers":[{"address":"127.0.0.1","port":0}]}},{"tag":"direct"}]}""");
             File.WriteAllText(Path.Combine(Directory, "amneziawg.json"), "{}");
             Options = new("synthetic-xray", config, IPAddress.Parse("192.0.2.11"), "DiTunnel-test", mode,
-                selectedAddresses ? [IPAddress.Parse("203.0.113.20")] : [], [], protection ? Path.Combine(Directory, "kill-switch.ready") : null,
+                selectedAddresses ? [IPAddress.Parse("203.0.113.20")] : [], domains ?? [], protection ? Path.Combine(Directory, "kill-switch.ready") : null,
                 amnezia ? "synthetic-awg" : null, ["10.20.30.1"], SupportsIpv6: ipv6, HasProcessRules: applications);
         }
         internal WindowsTunnelHost Start() => host = new(Options, Network, (path, _) =>
@@ -338,6 +366,8 @@ public sealed class TunnelHostTests
         internal int CleanupCount;
         internal string[]? DnsServers;
         internal List<string> Addresses { get; } = [];
+        internal List<string> ResolvedNames { get; } = [];
+        internal string[] CachedDomains = [];
         public void PrecheckDns()
         {
             if (PrecheckException is not null) throw PrecheckException;
@@ -373,8 +403,12 @@ public sealed class TunnelHostTests
         }
         public void FlushDns() { if (FailingStage == "DNS_CACHE") throw new InvalidOperationException(); }
         public void CleanupDns() => CleanupCount++;
-        public IReadOnlyList<string> CachedNames() => [];
-        public Task<IPAddress[]> ResolveAsync(string name, CancellationToken token) => Task.FromResult(new[] { IPAddress.Parse("203.0.113.20") });
+        public IReadOnlyList<string> CachedNames() => CachedDomains;
+        public Task<IPAddress[]> ResolveAsync(string name, CancellationToken token)
+        {
+            ResolvedNames.Add(name);
+            return Task.FromResult(new[] { IPAddress.Parse("203.0.113.20") });
+        }
         public Task ProbeAsync(uint tunnelIndex, bool ipv6, CancellationToken token) => ProbeException is null ? Task.CompletedTask : Task.FromException(ProbeException);
         private sealed class FakeLease(FakeNetwork network, NetworkRoute? owned) : IAsyncDisposable
         {

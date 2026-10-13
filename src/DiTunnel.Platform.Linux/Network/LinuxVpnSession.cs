@@ -44,7 +44,7 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
         var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
         var addresses = await Dns.GetHostAddressesAsync(awg?.ServerHost ?? converted!.ServerHost, token).ConfigureAwait(false);
         var address = addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetwork)
-            ?? addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetworkV6) ?? throw new InvalidOperationException();
+            ?? (policy.Ipv4Only ? null : addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetworkV6)) ?? throw new InvalidOperationException("Не удалось определить подходящий IP-адрес VPN-сервера.");
         var name = "dtn" + owner[..10];
         routes = new(commands, name, owner);
         await routes.PreflightAsync(token).ConfigureAwait(false);
@@ -68,8 +68,8 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
                 awg is not null ? KillSwitchTransportProtocol.Udp : converted!.ServerTransport, policy.AllowLan, token);
         }
         bridge = awg is null ? null : await runtime.StartAwgAsync(awg, address, directory, token, LinuxRouteLease.Mark).ConfigureAwait(false);
-        var configuration = bridge?.Proxy ?? converted!;
-        var dns = awg?.DnsServers ?? new[] { "1.1.1.1", "1.0.0.1" };
+        var configuration = (bridge?.Proxy ?? converted!).WithIpv4Only(policy.Ipv4Only);
+        var dns = XrayProfileConfiguration.DnsServersFor(policy.Ipv4Only, awg?.DnsServers ?? new[] { "1.1.1.1", "1.0.0.1" });
         var config = BuildConfiguration(configuration, address, name, dns, policy);
         var path = Path.Combine(directory, "xray.json");
         await LinuxRuntimeServerProbe.WritePrivateAsync(path, config, token).ConfigureAwait(false);
@@ -86,6 +86,8 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
     {
         policy ??= LinuxVpnPolicy.Default;
         policy.Validate();
+        configuration = configuration.WithIpv4Only(policy.Ipv4Only);
+        dns = XrayProfileConfiguration.DnsServersFor(policy.Ipv4Only, dns);
         var config = JsonNode.Parse(configuration.Build(endpoint.ToString(), tun: true, tunnelName: name, dnsServers: dns,
             splitTunnel: policy.Split, blockAds: policy.BlockAds, strictAdBlocking: policy.StrictAds))!;
         config["inbounds"]![0]!["settings"]!.AsObject().Remove("autoOutboundsInterface");
@@ -95,7 +97,8 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
             var outbounds = config["outbounds"]!.AsArray();
             if (!outbounds.Any(value => (string?)value?["tag"] == "direct"))
                 outbounds.Add(new JsonObject { ["tag"] = "direct", ["protocol"] = "freedom", ["settings"] = new JsonObject() });
-            config["routing"]!["rules"]!.AsArray().Insert(0, new JsonObject
+            var lanRuleIndex = configuration.Ipv4Only ? 3 : !configuration.SupportsIpv4 || !configuration.SupportsIpv6 ? 1 : 0;
+            config["routing"]!["rules"]!.AsArray().Insert(lanRuleIndex, new JsonObject
             {
                 ["ip"] = new JsonArray("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"),
                 ["outboundTag"] = "direct"
@@ -111,8 +114,10 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
             sockopt["mark"] = (string?)outbound["protocol"] == "freedom" ? LinuxRouteLease.DirectMark : LinuxRouteLease.Mark;
         }
         // Force VPN DNS before user split rules, including a selected DNS server IP.
-        config["routing"]!["rules"]!.AsArray().Insert(0, new JsonObject { ["ip"] = new JsonArray(dns.Select(value => (JsonNode?)value).ToArray()), ["outboundTag"] = "proxy" });
-        config["routing"]!["rules"]!.AsArray().Insert(0, new JsonObject { ["network"] = "tcp,udp", ["port"] = "53", ["outboundTag"] = "proxy" });
+        if (!policy.Ipv4Only)
+            config["routing"]!["rules"]!.AsArray().Insert(0, new JsonObject { ["ip"] = new JsonArray(dns.Select(value => (JsonNode?)value).ToArray()), ["outboundTag"] = "proxy" });
+        if (!policy.Ipv4Only)
+            config["routing"]!["rules"]!.AsArray().Insert(0, new JsonObject { ["network"] = "tcp,udp", ["port"] = "53", ["outboundTag"] = "proxy" });
         return config.ToJsonString();
     }
 

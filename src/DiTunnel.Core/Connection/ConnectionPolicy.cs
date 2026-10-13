@@ -8,7 +8,8 @@ public sealed record ConnectionPolicy(
     bool KillSwitchEnabled,
     bool AllowLocalNetwork,
     bool StartWithWindows,
-    bool AutoConnect)
+    bool AutoConnect,
+    bool Ipv4Only = true)
 {
     public static ConnectionPolicy Default { get; } = new(false, false, false, false);
 

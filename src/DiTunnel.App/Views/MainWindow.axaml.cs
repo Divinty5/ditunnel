@@ -14,6 +14,7 @@ public partial class MainWindow : Window
     private TrayIcon? tray;
     private readonly IDisposable? connectionIcon;
     private WindowPlacement? normal;
+    private PixelRect? hiddenWindowBounds;
     private readonly DispatcherTimer trayTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private NativeMenuItem? trayStatus, showItem, connectItem, exitItem;
     public MainWindow()
@@ -21,11 +22,15 @@ public partial class MainWindow : Window
         InitializeComponent();
         if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) connectionIcon = new VpnWindowIconIndicator(this);
         PropertyChanged += (_, e) => { if (e.Property == IconProperty && tray is not null) tray.Icon = Icon; };
-        ActualThemeVariantChanged += (_, _) => UpdateTitleBarTheme();
+        ActualThemeVariantChanged += (_, _) =>
+        {
+            UpdateTitleBarTheme();
+            Dispatcher.UIThread.Post(UpdateTitleBarTheme);
+        };
         Opened += async (_, _) =>
         {
             UpdateTitleBarTheme();
-            if (ready) return;
+            if (ready) { RestoreHiddenWindowBounds(); return; }
             var saved = UserSettings.Current.Window;
             var screen = saved is null ? Screens.Primary : Screens.ScreenFromPoint(new PixelPoint(saved.X, saved.Y)) ?? Screens.Primary;
             if (screen is not null)
@@ -53,7 +58,11 @@ public partial class MainWindow : Window
             if (action == "ask") action = await Dialogs.AskClose(this);
             if (action == "hide" && App.Platform.SupportsHideToTray && tray is not null)
             {
-                SavePlacement(); Hide(); closing = false; return;
+                SavePlacement();
+                hiddenWindowBounds = null;
+                if (OperatingSystem.IsWindows() && WindowState == WindowState.Normal && TryGetPlatformHandle() is { } platform)
+                    hiddenWindowBounds = WindowsWindowBounds.Capture(platform.Handle);
+                Hide(); closing = false; return;
             }
             if (action == "hide" && DataContext is MainViewModel model) model.Notice = "Трей недоступен. Выберите «Выйти» в настройках.";
             if (action == "exit") await ExitAsync();
@@ -62,20 +71,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => { connectionIcon?.Dispose(); trayTimer.Stop(); tray?.Dispose(); L.Changed -= LanguageChanged; };
         L.Changed += LanguageChanged;
     }
-    private void UpdateTitleBarTheme()
-    {
-        // Avalonia themes the native caption on Windows 11 only. Windows 10
-        // supports the same DWM attribute on the builds required by this app.
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041)
-            || OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
-        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (handle == IntPtr.Zero) return;
-        const int useImmersiveDarkMode = 20;
-        var dark = ActualThemeVariant == ThemeVariant.Dark ? 1 : 0;
-        _ = DwmSetWindowAttribute(handle, useImmersiveDarkMode, ref dark, sizeof(int));
-    }
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+    private void UpdateTitleBarTheme() => DesktopWindowStyle.Update(this);
 
     private void LanguageChanged()
     {
@@ -117,7 +113,16 @@ public partial class MainWindow : Window
     private void Restore()
     {
         Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        RestoreHiddenWindowBounds();
         Activate();
+    }
+    private void RestoreHiddenWindowBounds()
+    {
+        if (OperatingSystem.IsWindows() && hiddenWindowBounds is { } bounds && WindowState == WindowState.Normal && TryGetPlatformHandle() is { } platform)
+        {
+            WindowsWindowBounds.Restore(platform.Handle, bounds);
+            hiddenWindowBounds = null;
+        }
     }
     private void UpdateTray()
     {

@@ -53,7 +53,7 @@ internal static partial class Program
             using var ownedStore = store as IDisposable;
             using var network = new LinuxNetworkClient(args.Contains("--network-session-development") ? DBusAddress.Session : null,
                 policy: () => { var settings = UserSettings.Current; var split = settings.GetSplitTunnelPolicy();
-                    return new(split.Mode, split.Domains.ToArray(), split.Processes.ToArray(), settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled); });
+                    return new(split.Mode, split.Domains.ToArray(), split.Processes.ToArray(), settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled, settings.Ipv4Only); });
             var canProbe = false;
             var canConnect = false;
             var platform = AppPlatform.Linux with { SupportsKillSwitch = false, SupportsAdvancedNetworkSettings = false };
@@ -72,7 +72,7 @@ internal static partial class Program
             {
                 var model = new MainViewModel(canConnect ? network : null, store: store, probe: canProbe ? network : null, platform: platform, installedApplicationProvider: new LinuxInstalledApplications());
                 if (model.CanImport) model.Notice = network.Status.Message ?? (canConnect
-                    ? platform.SupportsAdvancedNetworkSettings ? "Linux VPN доступен. Раздельное туннелирование и kill switch настраиваются в разделе защиты соединения."
+                    ? platform.SupportsAdvancedNetworkSettings ? "Linux VPN доступен. Раздельное туннелирование и kill switch настраиваются в настройках соединения."
                     : "Linux VPN доступен. Для раздельного туннелирования обновите Linux runtime."
                     : canProbe ? "Проверка серверов Linux доступна. Для VPN нужна привилегированная служба и DNS через systemd-resolved."
                     : "Linux-интерфейс готов. Установите сетевую службу для проверки серверов и VPN.");

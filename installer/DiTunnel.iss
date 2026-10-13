@@ -59,8 +59,8 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "Languages\LICENSE-ChineseSimplified"; DestDir: "{app}\Licenses"; DestName: "Inno-Setup-ChineseSimplified-MIT.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"; AppUserModelID: "DiVintyInteractive.DiTunnel"
+Name: "{autodesktop}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{app}"; AppUserModelID: "DiVintyInteractive.DiTunnel"; Tasks: desktopicon
 
 [UninstallRun]
 Filename: "{app}\Di-Tunnel.NetworkHost.exe"; Parameters: "--cleanup-wfp"; Flags: runhidden waituntilterminated; RunOnceId: "CleanupDiTunnelWfp"

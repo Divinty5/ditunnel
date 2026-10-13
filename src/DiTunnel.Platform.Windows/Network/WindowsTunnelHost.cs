@@ -11,7 +11,7 @@ internal sealed record TunnelHostOptions(string Runtime, string Config, IPAddres
     SplitTunnelMode SplitMode, IPAddress[] SplitAddresses, string[] SplitDomains, string? ProtectionReady,
     string? AmneziaRuntime, string[] DnsServers, bool SupportsIpv4 = true, bool SupportsIpv6 = true, bool HasProcessRules = false)
 {
-    internal bool CaptureAllTraffic => SplitMode != SplitTunnelMode.ProxySelected || HasProcessRules;
+    internal bool CaptureAllTraffic => SplitMode != SplitTunnelMode.ProxySelected || HasProcessRules || SplitDomains.Any(SplitTunnelPolicy.IsTopLevelDomain);
 }
 
 /// <summary>Runs in the elevated broker. The GUI can disappear while rollback continues here.</summary>
@@ -151,8 +151,8 @@ internal sealed class WindowsTunnelHost : IDisposable
     private async Task RefreshSplitAsync(PhysicalUplink uplink)
     {
         if (options.SplitMode == SplitTunnelMode.ProxyAll || options.SplitDomains.Length == 0) return;
-        var names = new HashSet<string>(options.SplitDomains, StringComparer.OrdinalIgnoreCase);
-        foreach (var cached in network.CachedNames())
+        var names = new HashSet<string>(options.SplitDomains.Where(d => !SplitTunnelPolicy.IsTopLevelDomain(d)), StringComparer.OrdinalIgnoreCase);
+        foreach (var cached in network.CachedNames().Select(SplitTunnelPolicy.NormalizeDomain))
             if (options.SplitDomains.Any(d => cached.Equals(d, StringComparison.OrdinalIgnoreCase) || cached.EndsWith('.' + d, StringComparison.OrdinalIgnoreCase)))
                 names.Add(cached);
         var addresses = new HashSet<string>();
@@ -234,7 +234,7 @@ internal sealed class WindowsTunnelHost : IDisposable
             if (options.SplitMode == SplitTunnelMode.ProxySelected)
             {
                 Stage("DNS_VERIFY");
-                var domain = options.SplitDomains.FirstOrDefault(d => !IPAddress.TryParse(d, out _));
+                var domain = options.SplitDomains.FirstOrDefault(d => !IPAddress.TryParse(d, out _) && !SplitTunnelPolicy.IsTopLevelDomain(d));
                 if (domain is not null)
                 {
                     var deadline = DateTime.UtcNow.AddSeconds(10);

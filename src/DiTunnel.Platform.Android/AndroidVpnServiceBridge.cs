@@ -40,9 +40,9 @@ internal static class AndroidVpnServiceBridge
         }
     }
 
-    public static Intent CreateStartIntent(Context context, ImportedProfile profile, SplitTunnelPolicy policy, bool blockAds, bool strictAdBlocking)
+    public static Intent CreateStartIntent(Context context, ImportedProfile profile, SplitTunnelPolicy policy, bool blockAds, bool strictAdBlocking, bool ipv4Only = true)
     {
-        var request = new ServiceRequest(profile, policy.Mode, policy.Domains.ToArray(), policy.Processes.ToArray(), blockAds, strictAdBlocking);
+        var request = new ServiceRequest(profile, policy.Mode, policy.Domains.ToArray(), policy.Processes.ToArray(), blockAds, strictAdBlocking, ipv4Only);
         return new Intent(context, typeof(DiTunnelVpnService)).SetAction(DiTunnelVpnService.ActionStart)
             .PutExtra(ExtraRequest, JsonSerializer.Serialize(request, AndroidJsonContext.Default.ServiceRequest));
     }
@@ -112,5 +112,5 @@ internal static class AndroidVpnServiceBridge
         }
     }
 
-    internal sealed record ServiceRequest(ImportedProfile Profile, SplitTunnelMode Mode, string[] Domains, string[] Processes, bool BlockAds, bool StrictAdBlocking);
+    internal sealed record ServiceRequest(ImportedProfile Profile, SplitTunnelMode Mode, string[] Domains, string[] Processes, bool BlockAds, bool StrictAdBlocking, bool Ipv4Only = true);
 }

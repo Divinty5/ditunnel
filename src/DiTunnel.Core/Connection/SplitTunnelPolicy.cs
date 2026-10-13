@@ -9,6 +9,12 @@ public sealed record SplitTunnelPolicy(SplitTunnelMode Mode, IReadOnlyList<strin
 {
     public static SplitTunnelPolicy Default { get; } = new(SplitTunnelMode.ProxyAll, [], []);
 
+    public static bool IsTopLevelDomain(string value)
+    {
+        var domain = NormalizeDomain(value);
+        return domain.Length > 0 && !domain.Contains('.') && !domain.Contains(':') && !IPAddress.TryParse(domain, out _);
+    }
+
     public static string NormalizeDomain(string value)
     {
         var domain = ExtractDomain(value);

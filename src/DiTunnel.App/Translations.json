@@ -582,5 +582,11 @@
   "Проверка: таймаут": "Probe: timed out",
   "Проверка: нет маршрута до сервера": "Probe: no route to server",
   "Проверка: ошибка подключения": "Probe: connection error",
-  "Проверка: ошибка проверки": "Probe: probe error"
+  "Проверка: ошибка проверки": "Probe: probe error",
+  "Соединение": "Connection",
+  "Использовать только IPv4": "Use IPv4 only",
+  "Отключает IPv6 внутри VPN и использует IPv4 для DNS. Изменение применяется при переподключении.": "Disables IPv6 inside the VPN and uses IPv4 for DNS. Reconnect to apply the change.",
+  "Профиль не поддерживает IPv4. Отключите «Использовать только IPv4» или выберите другой профиль.": "The profile does not support IPv4. Turn off Use IPv4 only or choose another profile.",
+  "Не удалось определить подходящий IP-адрес VPN-сервера.": "Could not resolve a compatible VPN server address.",
+  "Linux VPN доступен. Раздельное туннелирование и kill switch настраиваются в настройках соединения.": "Linux VPN is available. Configure split tunneling and the kill switch in connection settings."
 }
