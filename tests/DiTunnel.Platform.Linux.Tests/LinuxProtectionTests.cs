@@ -40,7 +40,7 @@ public sealed class LinuxProtectionTests
         Assert.Equal("1.1.1.1", Assert.Single(config["dns"]!["servers"]!.AsArray())!.ToString());
         var dns = config["outbounds"]!.AsArray().Single(item => item!["tag"]!.ToString() == "dns-ipv4")!;
         Assert.Equal("proxy", dns["streamSettings"]!["sockopt"]!["dialerProxy"]!.ToString());
-        Assert.Equal(LinuxRouteLease.Mark, dns["streamSettings"]!["sockopt"]!["mark"]!.GetValue<int>());
+        Assert.Equal((int)LinuxRouteLease.Mark, dns["streamSettings"]!["sockopt"]!["mark"]!.GetValue<int>());
     }
     [Fact]
     public void Process_capability_requires_metadata_for_the_actual_binary()
