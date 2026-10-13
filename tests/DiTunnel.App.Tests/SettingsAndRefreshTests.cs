@@ -127,6 +127,33 @@ public sealed class SettingsAndRefreshTests
         Assert.Equal(before, settings.NetworkSettingsFingerprint());
     }
 
+    [Theory]
+    [InlineData(SplitTunnelMode.BypassSelected)]
+    [InlineData(SplitTunnelMode.ProxySelected)]
+    public void CyrillicRulesStayReadableAfterSaveButReachRoutingAsAscii(SplitTunnelMode mode)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "settings.json");
+            var settings = new UserSettings { SplitTunnelMode = mode };
+            settings.SetSplitTunnelRules(mode, ["рф", "xn--p1ai", "https://ПРИМЕР.РФ/path", "192.0.2.40"], []);
+            var fingerprint = settings.NetworkSettingsFingerprint();
+            settings.Save(path);
+            var loaded = UserSettings.Load(path);
+
+            Assert.Equal(new[] { "рф", "пример.рф", "192.0.2.40" }, loaded.GetSplitTunnelRules(mode).Domains);
+            Assert.Equal(new[] { "xn--p1ai", "xn--e1afmkfd.xn--p1ai", "192.0.2.40" }, loaded.GetSplitTunnelPolicy().Domains);
+            Assert.Equal(fingerprint, loaded.NetworkSettingsFingerprint());
+            // Existing settings in ASCII and the readable spelling are the same
+            // routing policy, so merely opening the editor must not reconnect VPN.
+            loaded.GetSplitTunnelRules(mode).Domains[0] = "xn--p1ai";
+            Assert.Equal(fingerprint, loaded.NetworkSettingsFingerprint());
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     [Fact] public void ChatGptAndCodexHelpersAreAutoSelectedTogether()
     {
         InstalledApplication[] installed =

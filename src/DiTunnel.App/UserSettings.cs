@@ -33,7 +33,8 @@ public sealed class UserSettings
     {
         var domains = SplitTunnelMode == SplitTunnelMode.ProxySelected ? ProxySelectedSplitTunnelDomains : BypassSplitTunnelDomains;
         var processes = SplitTunnelMode == SplitTunnelMode.ProxySelected ? ProxySelectedSplitTunnelProcesses : BypassSplitTunnelProcesses;
-        return new(SplitTunnelMode, domains.ToArray(), processes.ToArray());
+        return new(SplitTunnelMode, domains.Select(SplitTunnelPolicy.NormalizeDomain)
+            .Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), processes.ToArray());
     }
 
     public (List<string> Domains, List<string> Processes) GetSplitTunnelRules(SplitTunnelMode mode) => mode == SplitTunnelMode.ProxySelected
@@ -53,7 +54,8 @@ public sealed class UserSettings
 
     public void SetSplitTunnelRules(SplitTunnelMode mode, IEnumerable<string> domains, IEnumerable<string> processes)
     {
-        var normalizedDomains = domains.ToList();
+        var normalizedDomains = domains.Select(SplitTunnelPolicy.NormalizeDomainForDisplay)
+            .Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var normalizedProcesses = processes.ToList();
         if (mode == SplitTunnelMode.ProxySelected)
         {

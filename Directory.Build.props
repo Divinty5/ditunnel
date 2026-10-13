@@ -6,11 +6,11 @@
     <Deterministic>true</Deterministic>
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
-    <Version>0.5.19</Version>
-    <WindowsVersion>0.5.24</WindowsVersion>
-    <AndroidVersion>0.5.23</AndroidVersion>
+    <Version>0.6.1</Version>
+    <WindowsVersion>0.6.1</WindowsVersion>
+    <AndroidVersion>0.6.1</AndroidVersion>
     <AndroidMinimumApiLevel>27</AndroidMinimumApiLevel>
-    <LinuxVersion>0.6.0</LinuxVersion>
+    <LinuxVersion>0.6.1</LinuxVersion>
     <Company>Di Vinty Interactive</Company>
     <Authors>Di Vinty Interactive</Authors>
     <Copyright>Copyright © 2026 Di Vinty Interactive</Copyright>

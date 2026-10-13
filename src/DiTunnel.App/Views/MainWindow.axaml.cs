@@ -19,7 +19,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        if (OperatingSystem.IsWindows()) connectionIcon = new VpnWindowIconIndicator(this);
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) connectionIcon = new VpnWindowIconIndicator(this);
         PropertyChanged += (_, e) => { if (e.Property == IconProperty && tray is not null) tray.Icon = Icon; };
         ActualThemeVariantChanged += (_, _) => UpdateTitleBarTheme();
         Opened += async (_, _) =>

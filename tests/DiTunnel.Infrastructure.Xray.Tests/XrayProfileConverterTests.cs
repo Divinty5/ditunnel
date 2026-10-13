@@ -89,6 +89,24 @@ public sealed class XrayProfileConverterTests
         Assert.Contains(rules.EnumerateArray(), rule => rule.TryGetProperty("ip", out var addresses) && addresses[0].GetString() == "192.0.2.40");
     }
 
+    [Theory]
+    [InlineData(SplitTunnelMode.BypassSelected, "direct")]
+    [InlineData(SplitTunnelMode.ProxySelected, "proxy")]
+    public void CyrillicSplitDomainsBecomePunycodeSuffixRules(SplitTunnelMode mode, string outbound)
+    {
+        var converted = XrayProfileConverter.Convert(new("Test", "Hysteria 2", "hy2://pass@example.com:443"));
+        var policy = new SplitTunnelPolicy(mode, ["ru", "рф", "https://пример.рф/path", "192.0.2.40"], []);
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", true, splitTunnel: policy));
+        var rules = config.RootElement.GetProperty("routing").GetProperty("rules");
+        var domainRule = rules.EnumerateArray().Single(rule => rule.TryGetProperty("domain", out _));
+
+        Assert.Equal(outbound, domainRule.GetProperty("outboundTag").GetString());
+        Assert.Equal(new[] { "domain:ru", "domain:xn--p1ai", "domain:xn--e1afmkfd.xn--p1ai" },
+            domainRule.GetProperty("domain").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains(rules.EnumerateArray(), rule => rule.TryGetProperty("ip", out var addresses)
+            && addresses[0].GetString() == "192.0.2.40" && rule.GetProperty("outboundTag").GetString() == outbound);
+    }
+
     [Fact] public void ProxySelectedUsesDirectAsDefaultAndProxiesSelectedDomains()
     {
         var converted = XrayProfileConverter.Convert(new("Test", "VLESS", "vless://00000000-0000-0000-0000-000000000001@example.com:443"));

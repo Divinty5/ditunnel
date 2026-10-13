@@ -5,6 +5,27 @@ namespace DiTunnel.App.Tests;
 
 public sealed class ReleaseCheckerTests
 {
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64, "Di-Tunnel-0.6.1-Setup-x64.exe")]
+    [InlineData(ReleaseTarget.AndroidArm64, "Di-Tunnel-0.6.1-arm64.apk")]
+    [InlineData(ReleaseTarget.LinuxX64, "Di-Tunnel-0.6.1-linux-amd64.deb")]
+    public void Combined061ReleaseOffersEachPlatformItsPackageAndChecksum(ReleaseTarget target, string package)
+    {
+        string[] packages = ["Di-Tunnel-0.6.1-Setup-x64.exe", "Di-Tunnel-0.6.1-arm64.apk", "Di-Tunnel-0.6.1-linux-amd64.deb"];
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            tag_name = "v0.6.1", draft = false, prerelease = false,
+            assets = packages.SelectMany(name => new[] { name, name + ".sha256" })
+                .Select(name => new { name, browser_download_url = "https://github.com/Divinty5/ditunnel/releases/download/v0.6.1/" + name })
+        }));
+        var release = ReleaseChecker.Parse(json.RootElement, new(0, 6, 0), target).Release;
+        Assert.NotNull(release);
+        Assert.Equal(new Version(0, 6, 1), release.Version);
+        Assert.EndsWith("/" + package, release.InstallerUrl);
+        Assert.Equal(release.InstallerUrl + ".sha256", release.ChecksumUrl);
+        Assert.Null(ReleaseChecker.Parse(json.RootElement, new(0, 6, 1), target).Release);
+    }
+
     private static object CombinedRelease513(string? missingChecksum = null)
     {
         const string version = "0.5.13";

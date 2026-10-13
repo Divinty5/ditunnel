@@ -1,14 +1,14 @@
 # Установка Di-Tunnel 0.6.0 для Linux
 
-Первый установочный пакет предназначен для **Ubuntu 24.04 LTS, amd64**, с systemd, systemd-resolved и рабочим столом GNOME/XWayland либо X11. .NET, Xray и userspace AmneziaWG включены в пакет; Android Studio и .NET SDK для запуска не нужны. Linux имеет версию 0.6.0; Windows/Android остаются 0.5.19.
+Установочный пакет предназначен для **Ubuntu 24.04 LTS, amd64**, с systemd, systemd-resolved и рабочим столом GNOME/XWayland либо X11. .NET, Xray и userspace AmneziaWG включены в пакет; Android Studio и .NET SDK для запуска не нужны. Начиная с общего релиза 0.6.1 версии Windows, Android и Linux синхронизированы.
 
 ## Установка
 
 Скачайте `Di-Tunnel-0.6.0-linux-amd64.deb` и соседний `.sha256` из одного релиза. В каталоге загрузки выполните:
 
 ```bash
-sha256sum -c Di-Tunnel-0.6.0-linux-amd64.deb.sha256
-sudo apt install ./Di-Tunnel-0.6.0-linux-amd64.deb
+sha256sum -c Di-Tunnel-0.6.1-linux-amd64.deb.sha256
+sudo apt install ./Di-Tunnel-0.6.1-linux-amd64.deb
 di-tunnel
 ```
 

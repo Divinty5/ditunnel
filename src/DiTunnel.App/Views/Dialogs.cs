@@ -94,7 +94,8 @@ public static class Dialogs
         foreach (var mode in new[] { SplitTunnelMode.BypassSelected, SplitTunnelMode.ProxySelected })
         {
             var rules = UserSettings.Current.GetSplitTunnelRules(mode);
-            draftDomains[mode] = [.. rules.Domains];
+            draftDomains[mode] = rules.Domains.Select(SplitTunnelPolicy.NormalizeDomainForDisplay)
+                .Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             draftApplications[mode] = rules.Processes.ToHashSet(StringComparer.Ordinal);
         }
         var originalNetworkSettings = UserSettings.Current.NetworkSettingsFingerprint();
@@ -317,7 +318,7 @@ public static class Dialogs
             void CaptureDraft()
             {
                 draftDomains[activeMode] = domains.Text?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Select(SplitTunnelPolicy.NormalizeDomain).Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+                    .Select(SplitTunnelPolicy.NormalizeDomainForDisplay).Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
                 draftApplications[activeMode] = new(selectedApplications, StringComparer.Ordinal);
             }
             void UpdateSplitRulesVisibility() => splitRules.IsVisible = splitMode.SelectedIndex != (int)SplitTunnelMode.ProxyAll;

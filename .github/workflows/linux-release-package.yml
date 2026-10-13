@@ -1,0 +1,56 @@
+name: Linux release package
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit or tag to build
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      AVALONIA_TELEMETRY_OPTOUT: '1'
+      DITUNNEL_BUILD_ROOT: ${{ github.workspace }}/artifacts/linux/release/build
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Install build and X11 test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils xvfb libfontconfig1 libfreetype6 libx11-6 libxcb1 libxext6 libxrender1 libxrandr2 libxi6 libxcursor1 libxfixes3 libgl1 libice6 libsm6 libsecret-1-0
+      - name: Build and validate Linux package
+        run: python3 scripts/Build-LinuxPackage.py --test
+      - name: Verify colour changes in the X11 window icon
+        run: xvfb-run -a dotnet run --project tests/DiTunnel.Icon.Smoke/DiTunnel.Icon.Smoke.csproj --configuration Release
+      - name: Record source and check packaged application version
+        run: |
+          git rev-parse HEAD > artifacts/linux/release/source-commit.txt
+          deb=$(find artifacts/linux/release -maxdepth 1 -name 'Di-Tunnel-*-linux-amd64.deb' -print)
+          test -n "$deb"
+          dpkg-deb --extract "$deb" artifacts/linux/version-check
+          expected=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("Directory.Build.props").findtext(".//LinuxVersion"))')
+          actual=$(artifacts/linux/version-check/usr/lib/ditunnel/ui/Di-Tunnel.Linux --version)
+          test "$actual" = "$expected"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-release-package
+          path: |
+            artifacts/linux/release/Di-Tunnel-*-linux-amd64.deb
+            artifacts/linux/release/Di-Tunnel-*-linux-amd64.deb.sha256
+            artifacts/linux/release/source-commit.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
