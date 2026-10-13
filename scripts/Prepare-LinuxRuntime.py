@@ -106,6 +106,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix="xray-source-", dir=build_cache) as temporary:
         xray_source = Path(temporary) / "source"
         shutil.copytree(module["Dir"], xray_source)
+        # Go's module cache is read-only and copytree preserves its modes. Make
+        # only this private copy writable before adding our patches and tests.
+        for path in (xray_source, *xray_source.rglob("*")):
+            path.chmod((path.stat().st_mode & 0o777) | 0o200)
         process_lookup.apply(xray_source, xray)
         run("mod", "download", cwd=xray_source)
         run("mod", "verify", cwd=xray_source)
