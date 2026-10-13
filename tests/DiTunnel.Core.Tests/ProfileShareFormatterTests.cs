@@ -40,7 +40,9 @@ public sealed class ProfileShareFormatterTests
     [InlineData("3.1", "RandomTrailers = true\nDisableCookies = false\nContentPaddingAddition = 10-20")]
     public void SharedAwgLinkPreservesClientConfigurationAndDeclaredVersion(string? version, string extra)
     {
-        var content = Configuration;
+        // Raw literals preserve the source file's line endings, including CRLF
+        // on Linux checkouts. Normalize before replacing the original H1 line.
+        var content = Configuration.ReplaceLineEndings("\n");
         if (extra.Contains("H1 =")) content = content.Replace("H1 = 12345\n", "");
         content = content.Replace("[Peer]", extra + "\n[Peer]");
         var original = new ImportedProfile("Друг · ещё один сервер", AmneziaWgConfiguration.ProfileKind, content,
