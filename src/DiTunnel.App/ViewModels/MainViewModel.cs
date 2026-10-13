@@ -238,7 +238,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public string AppVersion => UserSettings.Version;
     private static bool IsLightTheme => Avalonia.Application.Current?.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light;
     public IBrush PowerBrush => new SolidColorBrush(Color.Parse(IsLightTheme ? "#E9DFFA" : "#292039"));
-    public IBrush PowerBorderBrush => ConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse("#55D784")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse("#F06470")), _ => new SolidColorBrush(Color.Parse("#A58AFF")) };
+    public IBrush PowerBorderBrush => new SolidColorBrush(ConnectionPalette.AccentFor(ConnectionState));
     public IBrush PowerGlowBrush => ConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse("#3830C86D")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse("#40D94A58")), _ => new SolidColorBrush(Color.Parse("#18000000")) };
     public IBrush ConnectionStateBrush => ConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse(IsLightTheme ? "#16804A" : "#66E491")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse(IsLightTheme ? "#C83243" : "#FF7783")), _ => new SolidColorBrush(Color.Parse(IsLightTheme ? "#684096" : "#C9B9FF")) };
     public IBrush DelayBrush => LatencyPalette.For(DisplayDelay);

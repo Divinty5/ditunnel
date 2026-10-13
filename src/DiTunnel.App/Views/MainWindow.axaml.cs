@@ -12,12 +12,15 @@ public partial class MainWindow : Window
 {
     private bool canClose, closing, ready;
     private TrayIcon? tray;
+    private readonly IDisposable? connectionIcon;
     private WindowPlacement? normal;
     private readonly DispatcherTimer trayTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private NativeMenuItem? trayStatus, showItem, connectItem, exitItem;
     public MainWindow()
     {
         InitializeComponent();
+        if (OperatingSystem.IsWindows()) connectionIcon = new VpnWindowIconIndicator(this);
+        PropertyChanged += (_, e) => { if (e.Property == IconProperty && tray is not null) tray.Icon = Icon; };
         ActualThemeVariantChanged += (_, _) => UpdateTitleBarTheme();
         Opened += async (_, _) =>
         {
@@ -56,7 +59,7 @@ public partial class MainWindow : Window
             if (action == "exit") await ExitAsync();
             else closing = false;
         };
-        Closed += (_, _) => { trayTimer.Stop(); tray?.Dispose(); L.Changed -= LanguageChanged; };
+        Closed += (_, _) => { connectionIcon?.Dispose(); trayTimer.Stop(); tray?.Dispose(); L.Changed -= LanguageChanged; };
         L.Changed += LanguageChanged;
     }
     private void UpdateTitleBarTheme()
