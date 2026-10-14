@@ -115,7 +115,7 @@ def main():
         run("mod", "verify", cwd=xray_source)
         if args.test:
             run("test", "./common/net", "./app/router", "-count=1", "-timeout=90s", cwd=xray_source)
-        run("build", "-mod=readonly", "-buildvcs=false", "-trimpath", "-ldflags=-s -w -buildid= -X github.com/xtls/xray-core/core.build=Di-Tunnel-linux-process-v2", "-o", str(output / "xray"), "./main", cwd=xray_source)
+        run("build", "-mod=readonly", "-buildvcs=false", "-trimpath", "-ldflags=-s -w -buildid= -X github.com/xtls/xray-core/core.build=Di-Tunnel-linux-process-v3", "-o", str(output / "xray"), "./main", cwd=xray_source)
         (output / "XRAY-DEPENDENCIES.txt").write_text(run("list", "-m", "-f", "{{.Path}} {{.Version}} {{.Sum}}", "all", capture=True, cwd=xray_source))
         xray_modules = run("list", "-m", "-f", "{{.Dir}}", "all", capture=True, cwd=xray_source).splitlines()
         modified = output / "xray-process-source"
@@ -126,7 +126,7 @@ def main():
         shutil.copyfile(root / "runtime/xray-linux/process_lookup_test.go", modified / "process_lookup_test.go")
         shutil.copyfile(root / "runtime/xray-linux/process_routing_test.go", modified / "process_routing_test.go")
     (output / "XRAY-SOURCE.json").write_text(json.dumps({
-        "linuxProcessLookup": 2, "binarySha256": digest(output / "xray"),
+        "linuxProcessLookup": 3, "binarySha256": digest(output / "xray"),
         "moduleVersion": xray["moduleVersion"], "moduleSum": xray["moduleSum"],
         "patchSha256": digest(root / "runtime/xray-linux/process_lookup.py"),
         "upstream": "https://github.com/XTLS/Xray-core/tree/v" + xray["version"],

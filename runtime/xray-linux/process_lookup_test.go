@@ -10,6 +10,39 @@ import (
     "testing"
 )
 
+func TestDiTunnelFlatpakPathRequiresMatchingExecutableInode(t *testing.T) {
+    root := t.TempDir()
+    proc := filepath.Join(root, "proc")
+    host := filepath.Join(root, "app-files")
+    if err := os.MkdirAll(filepath.Join(proc, "root"), 0700); err != nil { t.Fatal(err) }
+    if err := os.MkdirAll(filepath.Join(host, "bin"), 0700); err != nil { t.Fatal(err) }
+    executable := filepath.Join(host, "bin", "client")
+    if err := os.WriteFile(executable, []byte("synthetic ELF"), 0700); err != nil { t.Fatal(err) }
+    if err := os.Symlink(executable, filepath.Join(proc, "exe")); err != nil { t.Fatal(err) }
+    metadata := filepath.Join(proc, "root", ".flatpak-info")
+    write := func(value string) { t.Helper(); if err := os.WriteFile(metadata, []byte(value), 0600); err != nil { t.Fatal(err) } }
+    write("[Application]\nname=org.example.Client\n[Instance]\napp-path=" + host + "\n")
+    if got := resolveFlatpakExecutable("/app/bin/client", proc); got != executable { t.Fatalf("host mapping: %s", got) }
+    if got := resolveFlatpakExecutable("/usr/bin/client", proc); got != "/usr/bin/client" { t.Fatal("non-app executable remapped") }
+    // A different app's executable must not inherit this app's routing rule.
+    other := filepath.Join(host, "bin", "other")
+    if err := os.WriteFile(other, []byte("other ELF"), 0700); err != nil { t.Fatal(err) }
+    if got := resolveFlatpakExecutable("/app/bin/other", proc); got != "/app/bin/other" { t.Fatal("different inode accepted") }
+    write("[Instance]\napp-path=relative\n")
+    if got := resolveFlatpakExecutable("/app/bin/client", proc); got != "/app/bin/client" { t.Fatal("relative host path accepted") }
+    write("[Instance]\napp-path=" + host + "\n" + strings.Repeat("#", 65536))
+    if got := resolveFlatpakExecutable("/app/bin/client", proc); got != "/app/bin/client" { t.Fatal("oversized metadata accepted") }
+}
+
+func TestDiTunnelLiveFlatpakMountNamespace(t *testing.T) {
+    pid, expected := os.Getenv("DITUNNEL_TEST_FLATPAK_PID"), os.Getenv("DITUNNEL_TEST_FLATPAK_EXE")
+    if pid == "" || expected == "" { t.Skip("requires the isolated VM mount-namespace fixture") }
+    raw, err := os.Readlink("/proc/" + pid + "/exe")
+    if err != nil || !strings.HasPrefix(raw, "/app/") { t.Fatalf("fixture is not a sandbox executable: %s %v", raw, err) }
+    actual, err := getAbsPath(pid)
+    if err != nil || actual != expected { t.Fatalf("live sandbox mapping: %s %v; expected %s", actual, err, expected) }
+}
+
 func TestDiTunnelIPv6ProcWordsAndInputUnchanged(t *testing.T) {
     ip := stdnet.ParseIP("2001:db8:77::1234")
     before := append([]byte(nil), ip...)

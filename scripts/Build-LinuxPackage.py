@@ -28,7 +28,7 @@ def verify_runtime(directory):
         if digest(directory / name) != (directory / (name + ".sha256")).read_text().strip():
             raise RuntimeError("Linux runtime checksum mismatch: " + name)
     metadata = json.loads((directory / "XRAY-SOURCE.json").read_text())
-    if metadata.get("linuxProcessLookup") != 2 or metadata.get("binarySha256") != digest(directory / "xray"):
+    if metadata.get("linuxProcessLookup") != 3 or metadata.get("binarySha256") != digest(directory / "xray"):
         raise RuntimeError("Linux process lookup metadata mismatch")
     for name in ("LICENSE-XRAY", "LICENSE-DITUNNEL", "THIRD-PARTY-NOTICES.txt", "xray-process-source/process_lookup.py"):
         if not (directory / name).is_file():

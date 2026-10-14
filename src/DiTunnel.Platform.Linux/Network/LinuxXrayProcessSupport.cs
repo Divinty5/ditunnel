@@ -13,7 +13,7 @@ public static class LinuxXrayProcessSupport
             if (new FileInfo(path).Length > 4096) return false;
             var metadata = JsonNode.Parse(File.ReadAllBytes(path));
             var expected = (string?)metadata?["binarySha256"];
-            if ((int?)metadata?["linuxProcessLookup"] != 2 || expected?.Length != 64) return false;
+            if ((int?)metadata?["linuxProcessLookup"] != 3 || expected?.Length != 64) return false;
             using var binary = File.OpenRead(Path.Combine(runtimeDirectory, "xray"));
             return Convert.ToHexString(SHA256.HashData(binary)).Equals(expected, StringComparison.OrdinalIgnoreCase);
         }

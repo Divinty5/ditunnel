@@ -51,13 +51,56 @@ INODE = r'''func findInodeInFile(filePath, targetHexAddr string) (string, error)
 }
 '''
 
+FLATPAK = r'''func getAbsPath(pid string) (string, error) {
+    processDir := "/proc/" + pid
+    executable, err := os.Readlink(processDir + "/exe")
+    if err != nil { return "", err }
+    return resolveFlatpakExecutable(executable, processDir), nil
+}
+
+func resolveFlatpakExecutable(executable, processDir string) string {
+    if !strings.HasPrefix(executable, "/app/") || filepath.Clean(executable) != executable { return executable }
+    file, err := os.OpenFile(processDir + "/root/.flatpak-info", os.O_RDONLY|syscall.O_NONBLOCK, 0)
+    if err != nil { return executable }
+    defer file.Close()
+    info, err := file.Stat()
+    if err != nil || !info.Mode().IsRegular() || info.Size() > 65536 { return executable }
+    scanner := bufio.NewScanner(io.LimitReader(file, 65537))
+    instance, appPath := false, ""
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        if strings.HasPrefix(line, "[") { instance = line == "[Instance]"; continue }
+        if instance && strings.HasPrefix(line, "app-path=") { appPath = strings.TrimPrefix(line, "app-path=") }
+    }
+    if scanner.Err() != nil || !filepath.IsAbs(appPath) { return executable }
+    processFile, err := os.Stat(processDir + "/exe")
+    if err != nil { return executable }
+    candidate := filepath.Join(appPath, strings.TrimPrefix(executable, "/app/"))
+    // ProtectHome hides user Flatpak installations from the service namespace.
+    // O_PATH follows the host's mount namespace without opening file contents.
+    const openPath = 0x200000 // Linux O_PATH, asm-generic/fcntl.h
+    for _, path := range []string{candidate, "/proc/1/root" + candidate} {
+        host, err := os.OpenFile(path, openPath|syscall.O_CLOEXEC, 0)
+        if err != nil { continue }
+        hostFile, statErr := host.Stat()
+        canonical, pathErr := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", host.Fd()))
+        host.Close()
+    // Metadata alone is insufficient: the mapped host file must be the very
+    // same inode as the running process, not a shared Flatpak launcher.
+        if statErr == nil && pathErr == nil && filepath.IsAbs(canonical) && os.SameFile(hostFile, processFile) { return canonical }
+    }
+    return executable
+}
+'''
+
 def apply(source, specification):
     source = Path(source)
     path = source / 'common/net/find_process_linux.go'
     if hashlib.sha256(path.read_bytes()).hexdigest() != specification['processSourceSha256']:
         raise RuntimeError('Pinned Xray process source changed; review required')
     text = path.read_text()
-    for name, body in [('formatLittleEndianString', FORMAT), ('findInodeInFile', INODE)]:
+    text = text.replace('"os"', '"os"\n"io"\n"path/filepath"\n"syscall"')
+    for name, body in [('formatLittleEndianString', FORMAT), ('findInodeInFile', INODE), ('getAbsPath', FLATPAK)]:
         text, count = re.subn(r'func '+name+r'\([^\n]*\n.*?\n}\n', lambda _: body, text, flags=re.S)
         if count != 1: raise RuntimeError('Unexpected pinned Xray function layout')
     marker = '\tinode, err := findInodeInFile(procFile, targetHexAddr)\n'

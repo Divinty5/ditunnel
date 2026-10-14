@@ -52,7 +52,7 @@ public sealed class LinuxProtectionTests
             File.WriteAllBytes(Path.Combine(root,"xray"),[1,2,3]);
             Assert.False(LinuxXrayProcessSupport.IsAvailable(root));
             var hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(new byte[]{1,2,3}));
-            File.WriteAllText(Path.Combine(root,"XRAY-SOURCE.json"),new JsonObject{["linuxProcessLookup"]=2,["binarySha256"]=hash}.ToJsonString());
+            File.WriteAllText(Path.Combine(root,"XRAY-SOURCE.json"),new JsonObject{["linuxProcessLookup"]=3,["binarySha256"]=hash}.ToJsonString());
             Assert.True(LinuxXrayProcessSupport.IsAvailable(root));
             File.WriteAllBytes(Path.Combine(root,"xray"),[4,5,6]);
             Assert.False(LinuxXrayProcessSupport.IsAvailable(root));

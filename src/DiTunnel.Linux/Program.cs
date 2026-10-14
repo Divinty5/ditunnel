@@ -40,6 +40,8 @@ internal static partial class Program
             // directories but share the same XDG_DATA_HOME.
             using var instance = LinuxInstanceLock.TryAcquire(paths.DataDirectory);
             if (instance is null) { Console.Error.WriteLine("Di-Tunnel уже запущен. Откройте существующее окно."); return 0; }
+            if (NormalizeProcessRules(UserSettings.Current))
+                try { UserSettings.Current.Save(); } catch { /* Keep the corrected rules in memory if settings are read-only. */ }
             IProfileStore store;
             // No Avalonia dispatcher is running yet; keyring I/O is asynchronous
             // and bounded, before the synchronous IProfileStore is given to the UI.
@@ -53,7 +55,7 @@ internal static partial class Program
             using var ownedStore = store as IDisposable;
             using var network = new LinuxNetworkClient(args.Contains("--network-session-development") ? DBusAddress.Session : null,
                 policy: () => { var settings = UserSettings.Current; var split = settings.GetSplitTunnelPolicy();
-                    return new(split.Mode, split.Domains.ToArray(), split.Processes.ToArray(), settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled, settings.Ipv4Only); });
+                    return new(split.Mode, split.Domains.ToArray(), split.Processes.Select(LinuxInstalledApplications.ResolveProcessPath).Distinct(StringComparer.Ordinal).ToArray(), settings.KillSwitchEnabled, settings.AllowLocalNetwork, settings.BlockAdsEnabled, settings.StrictAdBlockingEnabled, settings.Ipv4Only); });
             var canProbe = false;
             var canConnect = false;
             var platform = AppPlatform.Linux with { SupportsKillSwitch = false, SupportsAdvancedNetworkSettings = false };
@@ -91,4 +93,18 @@ internal static partial class Program
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<SharedApp>()
         .UsePlatformDetect().WithInterFont().LogToTrace();
+
+    internal static bool NormalizeProcessRules(UserSettings settings)
+    {
+        var changed = false;
+        foreach (var mode in new[] { DiTunnel.Core.Connection.SplitTunnelMode.BypassSelected, DiTunnel.Core.Connection.SplitTunnelMode.ProxySelected })
+        {
+            var rules = settings.GetSplitTunnelRules(mode);
+            var paths = rules.Processes.Select(LinuxInstalledApplications.ResolveProcessPath).Distinct(StringComparer.Ordinal).ToArray();
+            if (rules.Processes.SequenceEqual(paths, StringComparer.Ordinal)) continue;
+            settings.SetSplitTunnelRules(mode, rules.Domains, paths);
+            changed = true;
+        }
+        return changed;
+    }
 }
