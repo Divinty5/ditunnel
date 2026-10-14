@@ -451,12 +451,18 @@ public static class Dialogs
         }
     }
 
-    internal static Expander SettingsSection(string title, Control content) => new()
+    internal static Expander SettingsSection(string title, Control content)
     {
-        Header = SectionHeading(title), Content = content, IsExpanded = false,
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        HorizontalContentAlignment = HorizontalAlignment.Stretch
-    };
+        var heading = SectionHeading(title);
+        heading.Margin = new Thickness(0);
+        return new Expander
+        {
+            Classes = { "settings-section" },
+            Header = heading, Content = content, IsExpanded = false,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch
+        };
+    }
 
     public static Task<string?> AskUpdate(ContentControl owner, AppRelease release, bool canInstall)
     {
@@ -564,17 +570,20 @@ public static class Dialogs
             {
                 new Avalonia.Styling.Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
                 new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
-                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d)
+                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d),
+                new Avalonia.Styling.Setter(Control.IsEnabledProperty, new Binding("CanSelectProfile") { Source = vm })
             }
         });
         list.Bind(ItemsControl.ItemsSourceProperty, new Binding("Profiles"));
-        list.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
-        list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.TwoWay });
+        // Keep the ListBox and its ScrollViewer enabled while probes run. Only
+        // selecting a row is blocked; mouse wheel and touch scrolling stay active.
+        list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.OneWay });
         // ListBox owns the touch gesture on Android, so child Tapped handlers are not
         // reliable. SelectionChanged is raised after the gesture has selected the row.
         list.SelectionChanged += (_, _) =>
         {
-            if (list.SelectedItem is ServerItemViewModel selected) vm.SelectProfileFromUser(selected);
+            if (vm.CanSelectProfile && list.SelectedItem is ServerItemViewModel selected) vm.SelectProfileFromUser(selected);
+            else if (!ReferenceEquals(list.SelectedItem, vm.SelectedProfile)) list.SelectedItem = vm.SelectedProfile;
         };
         ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Hidden);
         ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);

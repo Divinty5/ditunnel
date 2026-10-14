@@ -52,6 +52,45 @@
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="Expander.settings-section">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <StackPanel>
+            <ToggleButton Name="PART_HeaderSite" Classes="settings-section-header"
+                          Content="{TemplateBinding Header}" Foreground="{DynamicResource AccentTextBrush}"
+                          IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="0,8" MinHeight="44">
+              <ToggleButton.Template>
+                <ControlTemplate>
+                  <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                    <DockPanel HorizontalAlignment="Left">
+                      <Path Name="Chevron" DockPanel.Dock="Right" Width="12" Height="6" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Stretch="Fill"
+                            Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"/>
+                      <ContentPresenter Content="{TemplateBinding Content}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                  </Border>
+                </ControlTemplate>
+              </ToggleButton.Template>
+            </ToggleButton>
+            <ContentPresenter Name="PART_ContentSite" Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              IsVisible="{TemplateBinding IsExpanded}"/>
+          </StackPanel>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector="ToggleButton.settings-section-header /template/ Path#Chevron">
+      <Setter Property="Data" Value="M 0,0 L 6,6 L 12,0"/>
+    </Style>
+    <Style Selector="ToggleButton.settings-section-header:checked /template/ Path#Chevron">
+      <Setter Property="Data" Value="M 0,6 L 6,0 L 12,6"/>
+    </Style>
+    <Style Selector="ToggleButton.settings-section-header:pointerover /template/ DockPanel">
+      <Setter Property="Opacity" Value="0.8"/>
+    </Style>
     <Style Selector="Window"><Setter Property="Background" Value="{DynamicResource PageBrush}"/></Style>
     <Style Selector="Button"><Setter Property="Background" Value="{DynamicResource ButtonBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/></Style>
     <Style Selector="Button:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource ButtonHoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/></Style>
