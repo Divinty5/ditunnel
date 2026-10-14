@@ -19,16 +19,16 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
     private readonly Func<LinuxVpnPolicy> policy;
     public bool IsNetworkProtectionActive { get; private set; }
     private readonly SemaphoreSlim probes = new(1, 1);
+    private readonly SemaphoreSlim control = new(1, 1);
     public LinuxNetworkClient(string? busAddress = null, string destination = LinuxNetworkProtocol.Service, Func<LinuxVpnPolicy>? policy = null)
     {
-        connection = new(busAddress ?? DBusAddress.System ?? throw new InvalidOperationException("Системная шина D-Bus недоступна."));
+        connection = new(new DBusConnectionOptions(busAddress ?? DBusAddress.System ?? throw new InvalidOperationException("Системная шина D-Bus недоступна.")) { AutoConnect = true });
         this.destination = destination;
         this.policy = policy ?? (() => LinuxVpnPolicy.Default);
     }
 
     public async Task<LinuxNetworkCapabilities> GetCapabilitiesAsync(CancellationToken token = default)
     {
-        await connection.ConnectAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
         return await connection.CallMethodAsync(CreateCapabilities(), static (message, _) =>
         {
             var reader = message.GetBodyReader();
@@ -65,7 +65,6 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
         try
         {
             _ = LinuxNetworkProtocol.ParseProfile(LinuxNetworkProtocol.Version, profile.Content, (uint)mode);
-            await connection.ConnectAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
             var call = connection.CallMethodAsync(CreateProbe(id, profile.Content, mode), static (message, _) =>
             {
                 var reader = message.GetBodyReader();
@@ -81,7 +80,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
             catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
             {
                 try { await CancelAsync(id).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
-                catch { Dispose(); }
+                catch { /* The service bounds probe lifetime; recovery must remain available. */ }
                 // Observe the original task even when a broken bus prevents its reply.
                 _ = call.ContinueWith(task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
                 throw;
@@ -114,9 +113,16 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        await control.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false); }
+        finally { control.Release(); }
+    }
+
+    private async Task ConnectCoreAsync(ImportedProfile profile, CancellationToken cancellationToken)
+    {
         _ = LinuxNetworkProtocol.ParseProfile(LinuxNetworkProtocol.Version, profile.Content, 0);
-        if (sessionId is not null) throw new InvalidOperationException("Сначала отключите текущую сессию VPN.");
-        await connection.ConnectAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        if (sessionId is not null) throw new InvalidOperationException(Status.State == VpnConnectionState.Error
+            ? "Служба не подтвердила очистку сети. Нажмите «Восстановить сеть»." : "Сначала отключите текущую сессию VPN.");
         var id = Guid.NewGuid();
         sessionId = id;
         Publish(new(VpnConnectionState.Connecting));
@@ -131,8 +137,8 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
         catch (Exception ex)
         {
             _ = call.ContinueWith(task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
-            try { await DisconnectAsync().ConfigureAwait(false); }
-            catch { connection.Dispose(); Publish(new(VpnConnectionState.Error, "Служба не подтвердила очистку сети. Перезапустите приложение и восстановите сеть.")); }
+            try { await DisconnectCoreAsync().ConfigureAwait(false); }
+            catch { await PublishCleanupFailureAsync().ConfigureAwait(false); }
             if (ex is OperationCanceledException) throw;
             throw new InvalidOperationException(IsNetworkProtectionActive ? "Kill switch сохраняет блокировку. Нажмите «Восстановить сеть» для её снятия."
                 : "Не удалось подключить VPN. Проверьте профиль, права polkit и состояние сетевой службы.");
@@ -141,17 +147,39 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
+        await control.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await DisconnectCoreAsync().ConfigureAwait(false); }
+        catch { await PublishCleanupFailureAsync().ConfigureAwait(false); throw; }
+        finally { control.Release(); }
+    }
+
+    private async Task PublishCleanupFailureAsync()
+    {
+        // A failed Connect may already have enabled KS. Read its actual state
+        // without treating an unavailable reply as proof that protection is off.
+        try { _ = await ReadStatusAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
+        Publish(new(VpnConnectionState.Error, "Служба не подтвердила очистку сети. Нажмите «Восстановить сеть»."));
+    }
+
+    private async Task DisconnectCoreAsync()
+    {
         if (sessionId is not { } id) return;
         Publish(new(VpnConnectionState.Disconnecting));
         // Once requested, cleanup must finish even if the UI cancels its operation.
-        await connection.CallMethodAsync(CreateControl("Disconnect", id)).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+        await connection.CallMethodAsync(CreateControl("Disconnect", id)).WaitAsync(TimeSpan.FromSeconds(95)).ConfigureAwait(false);
         sessionId = null;
         Publish(await ReadStatusAsync(CancellationToken.None).ConfigureAwait(false));
     }
 
     public async Task RestoreNetworkAsync(CancellationToken cancellationToken = default)
     {
-        await connection.ConnectAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+        await control.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await RestoreNetworkCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { control.Release(); }
+    }
+
+    private async Task RestoreNetworkCoreAsync(CancellationToken cancellationToken)
+    {
         await connection.CallMethodAsync(CreateControl("RestoreNetwork")).WaitAsync(TimeSpan.FromSeconds(95), cancellationToken).ConfigureAwait(false);
         sessionId = null;
         IsNetworkProtectionActive = false;
@@ -174,8 +202,9 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
         var state = reader.ReadUInt32();
         var since = reader.ReadInt64();
         var text = reader.ReadString();
-        IsNetworkProtectionActive = reader.ReadBool();
+        var protectedNetwork = reader.ReadBool();
         if (state > (uint)VpnConnectionState.Error || text.Length > 512) throw new InvalidOperationException();
+        IsNetworkProtectionActive = protectedNetwork;
         return new VpnStatus((VpnConnectionState)state, text.Length == 0 ? null : text, since == 0 ? null : DateTimeOffset.FromUnixTimeSeconds(since));
     }).WaitAsync(TimeSpan.FromSeconds(5), token);
 
@@ -189,14 +218,19 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
             {
                 await Task.Delay(1000, monitoring.Token).ConfigureAwait(false);
                 if (sessionId is null || Status.State != VpnConnectionState.Connected) continue;
-                var status = await ReadStatusAsync(monitoring.Token).ConfigureAwait(false);
-                if (Status.State != VpnConnectionState.Connected) continue;
-                Publish(status);
-                if (status.State is VpnConnectionState.Disconnected or VpnConnectionState.Error) sessionId = null;
+                if (!await control.WaitAsync(0, monitoring.Token).ConfigureAwait(false)) continue;
+                try
+                {
+                    var status = await ReadStatusAsync(monitoring.Token).ConfigureAwait(false);
+                    Publish(status);
+                    if (status.State is VpnConnectionState.Disconnected or VpnConnectionState.Error) sessionId = null;
+                }
+                catch (OperationCanceledException) when (monitoring.IsCancellationRequested) { throw; }
+                catch { Publish(new(VpnConnectionState.Error, "Связь с сетевой службой потеряна. Нажмите «Восстановить сеть».")); }
+                finally { control.Release(); }
             }
         }
         catch (OperationCanceledException) when (monitoring.IsCancellationRequested) { }
-        catch { connection.Dispose(); Publish(new(VpnConnectionState.Error, "Связь с сетевой службой потеряна. Перезапустите приложение.")); }
     }
 
     private MessageBuffer CreateControl(string member, Guid? id = null, string? content = null)

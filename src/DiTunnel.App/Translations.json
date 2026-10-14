@@ -1,4 +1,6 @@
 {
+  "Служба не подтвердила очистку сети. Нажмите «Восстановить сеть».": "The service has not confirmed network cleanup. Use Restore network access.",
+  "Связь с сетевой службой потеряна. Нажмите «Восстановить сеть».": "Connection to the network service was lost. Use Restore network access.",
   "Домены или IP-адреса, по одному в строке": "Domains or IP addresses, one per line",
   "Linux VPN доступен. Для раздельного туннелирования обновите Linux runtime.": "Linux VPN is available. Update the Linux runtime for split tunneling.",
   "Прямой трафик правил РТ разрешён при работающем VPN. После аварии он блокируется; настройка локальной сети остаётся в силе.": "Direct split traffic is allowed while the VPN is running. After a failure it is blocked; the local network setting remains in effect.",

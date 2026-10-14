@@ -27,6 +27,7 @@ internal static class Program
             await CheckXrayLoopbackAsync(args[2], directory, token);
             await CheckAwgOwnerAsync(args[2], directory, token);
             await CheckAuthorizationAsync(token);
+            await LinuxClientRecoverySmoke.RunAsync(token);
             await CheckServiceAsync(args[0], args[1], args[2], directory, token);
         }
         finally { Directory.Delete(directory, recursive: true); }
@@ -199,7 +200,7 @@ internal static class Program
             if (ready != "READY_DITUNNEL_NETWORK1_PROBE_ONLY") throw new InvalidOperationException("Service readiness missing: " + await service.StandardError.ReadToEndAsync(token));
             using var client = new LinuxNetworkClient(DBusAddress.Session);
             var capabilities = await client.GetCapabilitiesAsync(token);
-            if (capabilities != new LinuxNetworkCapabilities(1, true, false, false)) throw new InvalidOperationException("Unsafe capabilities.");
+            if (capabilities != new LinuxNetworkCapabilities(LinuxNetworkProtocol.Version, true, false, false)) throw new InvalidOperationException("Unsafe capabilities.");
             using var raw = new DBusConnection(DBusAddress.Session!);
             await raw.ConnectAsync();
             foreach (var value in new[] { "{}", new string('a', LinuxNetworkProtocol.MaximumProfileBytes + 1) })

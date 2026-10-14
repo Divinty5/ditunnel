@@ -1,4 +1,6 @@
 {
+  "The service has not confirmed network cleanup. Use Restore network access.": { "es": "El servicio no ha confirmado la limpieza de la red. Usa Restaurar acceso a la red.", "zh-Hans": "服务尚未确认网络清理完成。请点击“恢复网络访问”。" },
+  "Connection to the network service was lost. Use Restore network access.": { "es": "Se perdió la conexión con el servicio de red. Usa Restaurar acceso a la red.", "zh-Hans": "与网络服务的连接已断开。请点击“恢复网络访问”。" },
   "Connection": { "es": "Conexión", "zh-Hans": "连接" },
   "Use IPv4 only": { "es": "Usar solo IPv4", "zh-Hans": "仅使用 IPv4" },
   "Disables IPv6 inside the VPN and uses IPv4 for DNS. Reconnect to apply the change.": { "es": "Desactiva IPv6 dentro de la VPN y usa IPv4 para DNS. Vuelva a conectarse para aplicar el cambio.", "zh-Hans": "禁用 VPN 内的 IPv6，并使用 IPv4 进行 DNS 查询。重新连接后生效。" },
