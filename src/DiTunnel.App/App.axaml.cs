@@ -15,6 +15,7 @@ public partial class App : Application
 
     public override void Initialize()
     {
+        if (OperatingSystem.IsWindows()) WindowsTaskbarIcon.InitializeProcess();
         AvaloniaXamlLoader.Load(this);
         UserSettings.Current.ApplyTheme();
         L.Apply();

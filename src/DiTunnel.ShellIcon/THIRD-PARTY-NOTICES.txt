@@ -1,0 +1,7 @@
+DiTunnel.ShellIcon uses MinHook 1.3.4 (statically linked).
+Source: https://github.com/TsudaKageyu/minhook/releases/tag/v1.3.4
+Downloaded source archive SHA256:
+172708123DAA0C98D20D3A980B16A50BE14AF243DC95DEE6F79C24193AD010E4
+The complete MinHook and included HDE license notices follow in LICENSE-MINHOOK.txt.
+
+The Di-Tunnel component does not include Windhawk code or require Windhawk.

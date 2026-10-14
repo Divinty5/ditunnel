@@ -24,6 +24,9 @@
 
   <ItemGroup>
     <Content Include="..\..\.tools\amneziawg\1\windows-x64\*" Link="Runtime\AmneziaWG\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\.tools\shell-icon\Release\DiTunnel.ShellIcon.dll" Link="DiTunnel.ShellIcon.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\.tools\shell-icon\Release\LICENSE-MINHOOK.txt" Link="Licenses\ShellIcon\LICENSE-MINHOOK.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\.tools\shell-icon\Release\THIRD-PARTY-NOTICES.txt" Link="Licenses\ShellIcon\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\geoip.dat" Link="Runtime\geoip.dat" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\geoip.dat')" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\geosite.dat" Link="Runtime\geosite.dat" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\geosite.dat')" />
     <Content Include="..\..\.tools\xray\26.3.27\windows-x64\xray.exe" Link="Runtime\xray.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\.tools\xray\26.3.27\windows-x64\xray.exe')" />
@@ -38,6 +41,9 @@
       <NetworkHostFiles Include="@(NetworkHostAssembly);@(NetworkHostAssembly->'%(RootDir)%(Directory)Di-Tunnel.NetworkHost.exe');@(NetworkHostAssembly->'%(RootDir)%(Directory)Di-Tunnel.NetworkHost.deps.json');@(NetworkHostAssembly->'%(RootDir)%(Directory)Di-Tunnel.NetworkHost.runtimeconfig.json')" />
     </ItemGroup>
     <Copy SourceFiles="@(NetworkHostFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="BuildShellIcon" BeforeTargets="PrepareForBuild" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\Build-ShellIcon.ps1&quot;" />
   </Target>
   <Target Name="PublishNetworkHost" AfterTargets="Publish">
     <MSBuild Projects="..\DiTunnel.NetworkHost\DiTunnel.NetworkHost.csproj" Targets="Publish"

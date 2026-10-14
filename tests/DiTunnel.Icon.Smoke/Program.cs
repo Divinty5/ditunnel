@@ -3,6 +3,11 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Presenters;
+using Avalonia.Media.Imaging;
+using Avalonia.VisualTree;
+using Avalonia.Input;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.Styling;
@@ -14,21 +19,36 @@ using DiTunnel.Core.Profiles;
 
 internal static class Program
 {
+    private static readonly string TestApplicationId = "DiVintyInteractive.DiTunnel.Smoke." + Guid.NewGuid().ToString("N");
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
-        try { Run(); return 0; }
+        try { Run(args); return 0; }
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
     }
 
-    private static void Run()
+    private static void Run(string[] args)
     {
         System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
-        AppBuilder.Configure<Application>().UsePlatformDetect().SetupWithoutStarting();
+        var settingsPath = Path.Combine(Path.GetTempPath(), "DiTunnel-icon-settings-" + Guid.NewGuid().ToString("N"));
+        AppPaths.Configure(settingsPath, settingsPath, settingsPath);
+        AppBuilder.Configure<DiTunnel.App.App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
+        if (OperatingSystem.IsWindows())
+        {
+            Require(ReadProcessApplicationId() == WindowsTaskbarIcon.ApplicationId, "Application identity initialized before creating windows");
+            WindowsTaskbarIcon.InitializeProcess(TestApplicationId);
+            VerifyLegacyShortcutRepair();
+        }
         using var stream = AssetLoader.Open(new Uri("avares://DiTunnel.App/Assets/icon.png"));
         var original = new WindowIcon(stream);
         var window = new Window { Icon = original };
         VerifyWindowThemeAndBounds(window);
+        if (args is ["--render-settings", var output])
+        {
+            VerifySettingsPresentation(window, Path.GetFullPath(output));
+            VerifySubscriptionsScrolling(window);
+            if (OperatingSystem.IsWindows()) VerifyTaskbarRefresh(window);
+        }
         var draft = new TextBox { Text = "ru\nрф" };
         var section = Dialogs.SettingsSection("Соединение", draft);
         Require(!section.IsExpanded, "Settings sections start collapsed");
@@ -36,41 +56,18 @@ internal static class Program
         Require(ReferenceEquals(section.Content, draft) && draft.Text == "example.ru", "Collapsing keeps settings drafts");
         var model = new MainViewModel(null, new EmptyStore());
         window.DataContext = model;
-        var taskbarPath = Path.Combine(Path.GetTempPath(), "DiTunnel-icon-" + Guid.NewGuid().ToString("N"), "taskbar.ico");
-        var ourShortcut = Path.ChangeExtension(taskbarPath, ".lnk");
-        var foreignShortcut = Path.ChangeExtension(taskbarPath, ".foreign.lnk");
-        var foreignTarget = Path.Combine(Path.GetDirectoryName(taskbarPath)!, "other-application.exe");
-        if (OperatingSystem.IsWindows())
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(taskbarPath)!);
-            var installedShortcut = Path.ChangeExtension(taskbarPath, ".installed.lnk");
-            CreateShortcut(installedShortcut, Environment.ProcessPath!, (Environment.ProcessPath!, 0));
-            var installedBytes = File.ReadAllBytes(installedShortcut);
-            File.SetAttributes(installedShortcut, File.GetAttributes(installedShortcut) | FileAttributes.ReadOnly);
-            WindowsTaskbarIcon.EnsureUserShortcut(installedShortcut, ourShortcut);
-            Require(File.Exists(ourShortcut) && installedBytes.SequenceEqual(File.ReadAllBytes(installedShortcut)), "User copy preserves installed shortcut");
-            Require((File.GetAttributes(ourShortcut) & FileAttributes.ReadOnly) == 0, "User shortcut remains writable");
-            CreateShortcut(foreignShortcut, foreignTarget, (foreignTarget, 7));
-            WindowsTaskbarIcon.EnsureUserShortcut(foreignShortcut, Path.ChangeExtension(taskbarPath, ".foreign-copy.lnk"));
-            Require(!File.Exists(Path.ChangeExtension(taskbarPath, ".foreign-copy.lnk")), "Other applications never copied to user Start menu");
-        }
-        var shortcutPaths = new List<string> { ourShortcut, foreignShortcut };
-        using var indicator = new VpnWindowIconIndicator(window, taskbarPath, shortcutPaths);
+        using var indicator = new VpnWindowIconIndicator(window, enableShellHook: false);
         original = window.Icon!;
         // Linux runs this test only under Xvfb; Windows never shows a test window.
         if (OperatingSystem.IsLinux()) window.Show();
         Require(ReferenceEquals(window.Icon, original), "Disconnected icon");
         var purple = ReadX11Icon(window);
         var purpleWindows = ReadWindowsIcon(window);
-        var purpleFile = OperatingSystem.IsWindows() ? File.ReadAllBytes(ReadShortcutIcon(ourShortcut).Path) : [];
-        var purpleResource = OperatingSystem.IsWindows() ? ReadShortcutIcon(ourShortcut).Path : "";
         model.ConnectionState = VpnConnectionState.Connected;
         var green = window.Icon;
         Require(!ReferenceEquals(green, original), "Connected icon");
         var greenPixels = ReadX11Icon(window);
         var greenWindows = ReadWindowsIcon(window);
-        var greenFile = OperatingSystem.IsWindows() ? File.ReadAllBytes(ReadShortcutIcon(ourShortcut).Path) : [];
-        var greenResource = OperatingSystem.IsWindows() ? ReadShortcutIcon(ourShortcut).Path : "";
         model.ConnectionState = VpnConnectionState.Error;
         var red = window.Icon;
         Require(!ReferenceEquals(red, green) && !ReferenceEquals(red, original), "Error icon");
@@ -78,18 +75,8 @@ internal static class Program
         var redWindows = ReadWindowsIcon(window);
         if (OperatingSystem.IsWindows())
         {
-            var redResource = ReadShortcutIcon(ourShortcut).Path;
-            Require(purpleResource != greenResource && greenResource != redResource, "Each colour uses a fresh Shell image resource");
-            Require(!purpleFile.SequenceEqual(greenFile), "Shortcut resource pixels change");
-            Require(!greenFile.SequenceEqual(File.ReadAllBytes(redResource)), "Shortcut red icon pixels");
-            Require(ReadShortcutIcon(foreignShortcut) == (foreignTarget, 7), "Other application shortcuts untouched");
-            Require(ReadShellString(window, 5) == "DiVintyInteractive.DiTunnel", "Shell application identity");
-            Require(ReadShellString(window, 3) == redResource + ",0", "Shell pinned group icon resource");
-            Require(ReadShellString(window, 2) == $"\"{Environment.ProcessPath}\"", "Shell relaunch command");
-            SendMessage(window.TryGetPlatformHandle()!.Handle, RegisterWindowMessage("TaskbarButtonCreated"), IntPtr.Zero, IntPtr.Zero);
-            Dispatcher.UIThread.RunJobs();
-            Require(ReadShellString(window, 3) == redResource + ",0", "Shell icon restored after Explorer recreates its button");
-            Require(!purpleFile.SequenceEqual(greenFile) && !greenFile.SequenceEqual(File.ReadAllBytes(redResource)), "Persistent pinned icon changes");
+            Require(ReadShellString(window, 5) is null && ReadShellString(window, 3) is null && ReadShellString(window, 2) is null,
+                "Native window icon does not set relaunch properties");
             Require(!purpleWindows.SequenceEqual(greenWindows) && !greenWindows.SequenceEqual(redWindows), "Native Windows large icon updates");
             Require(greenWindows.Count(pixel => Channel(pixel, 8) > Channel(pixel, 16) + 20 && Channel(pixel, 8) > Channel(pixel, 0) + 20) > 10, "Windows green tunnel");
             Require(redWindows.Count(pixel => Channel(pixel, 16) > Channel(pixel, 8) + 20 && Channel(pixel, 16) > Channel(pixel, 0) + 20) > 10, "Windows red tunnel");
@@ -111,30 +98,163 @@ internal static class Program
         var replacement = new MainViewModel(null, new EmptyStore()) { ConnectionState = VpnConnectionState.Error };
         window.DataContext = replacement;
         Require(ReferenceEquals(window.Icon, red), "DataContext replacement");
-        var lateShortcut = Path.ChangeExtension(taskbarPath, ".pinned-late.lnk");
-        if (OperatingSystem.IsWindows())
-        {
-            // Pinning can copy the current resource after the last state update.
-            CreateShortcut(lateShortcut, Environment.ProcessPath!, ReadShortcutIcon(ourShortcut));
-            shortcutPaths.Add(lateShortcut);
-        }
         indicator.Dispose(); indicator.Dispose();
-        if (OperatingSystem.IsWindows())
-        {
-            Require(ReadShortcutIcon(ourShortcut) == (Environment.ProcessPath!, 0), "Original shortcut icon restored on exit");
-            Require(ReadShortcutIcon(lateShortcut) == (Environment.ProcessPath!, 0), "Shortcut pinned after last update restored on exit");
-            Require(ReadShortcutIcon(foreignShortcut) == (foreignTarget, 7), "Foreign shortcut unchanged after exit");
-            foreach (var path in Directory.GetFiles(Path.GetDirectoryName(taskbarPath)!))
-            {
-                File.SetAttributes(path, FileAttributes.Normal);
-                File.Delete(path);
-            }
-            Directory.Delete(Path.GetDirectoryName(taskbarPath)!);
-        }
         replacement.ConnectionState = VpnConnectionState.Connected;
         Require(ReferenceEquals(window.Icon, red), "Disposal unsubscribes state changes");
         window.Close();
-        Console.WriteLine(OperatingSystem.IsLinux() ? "PASS_NATIVE_X11_VPN_ICON_COLOURS_CACHE_DISPOSAL" : "PASS_NATIVE_WINDOWS_VPN_ICON_COLOURS_SHELL_SHORTCUTS_FOREIGN_ISOLATION_RESTORATION");
+        Console.WriteLine(OperatingSystem.IsLinux() ? "PASS_NATIVE_X11_VPN_ICON_COLOURS_CACHE_DISPOSAL" : "PASS_NATIVE_WINDOWS_VPN_ICON_COLOURS_CACHE_DISPOSAL");
+    }
+
+    private static void VerifySettingsPresentation(Window window, string output)
+    {
+        Directory.CreateDirectory(output);
+        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14 };
+        var drafts = new List<TextBox>();
+        var sections = new List<Expander>();
+        foreach (var title in new[] { "Интерфейс", "Соединение", "Раздельное туннелирование", "Диагностика", "Обновления" })
+        {
+            var draft = new TextBox { Text = "example.ru" };
+            drafts.Add(draft);
+            var content = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 4) };
+            content.Children.Add(new TextBlock { Text = "Настройки раздела" });
+            content.Children.Add(draft);
+            var section = Dialogs.SettingsSection(title, content);
+            sections.Add(section);
+            panel.Children.Add(section);
+        }
+        var root = new Border { Child = panel };
+        root.Bind(Border.BackgroundProperty, root.GetResourceObservable("PageBrush"));
+        window.Content = root;
+        window.ShowInTaskbar = false;
+        window.Width = 900; window.Height = 850;
+        window.Show();
+        foreach (var theme in new[] { ThemeVariant.Dark, ThemeVariant.Light })
+        {
+            window.RequestedThemeVariant = theme;
+            foreach (var width in new[] { 900, 360 })
+            {
+                window.Width = width;
+                foreach (var expanded in new[] { false, true })
+                {
+                    foreach (var section in sections) section.IsExpanded = expanded;
+                    window.UpdateLayout();
+                    Dispatcher.UIThread.RunJobs();
+                    foreach (var section in sections)
+                    {
+                        var toggle = section.GetVisualDescendants().OfType<ToggleButton>().Single(control => control.Name == "PART_HeaderSite");
+                        var presenter = section.GetVisualDescendants().OfType<ContentPresenter>().Single(control => control.Name == "PART_ContentSite");
+                        var arrow = toggle.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single();
+                        var heading = (TextBlock)section.Header!;
+                        Require(toggle.IsChecked == expanded && presenter.IsVisible == expanded, "Settings header and content track expansion");
+                        Require(arrow.TranslatePoint(default, section)!.Value.X >= heading.TranslatePoint(default, section)!.Value.X + heading.Bounds.Width,
+                            "Settings chevron follows the title");
+                        Require(arrow.TranslatePoint(default, section)!.Value.X + arrow.Bounds.Width <= section.Bounds.Width + 1,
+                            "Settings chevron fits narrow screens");
+                        Require(drafts.All(draft => draft.Text == "example.ru"), "Settings drafts survive theme and expansion changes");
+                    }
+                    using var bitmap = new RenderTargetBitmap(new PixelSize((int)root.Bounds.Width, (int)root.Bounds.Height));
+                    bitmap.Render(root);
+                    bitmap.Save(Path.Combine(output, $"settings-{theme}-{width}-{(expanded ? "expanded" : "collapsed")}.png"), new PngBitmapEncoderOptions());
+                }
+            }
+        }
+        var first = sections[0];
+        var header = first.GetVisualDescendants().OfType<ToggleButton>().Single();
+        header.IsChecked = false;
+        Require(!first.IsExpanded, "Header collapses settings");
+        header.IsChecked = true;
+        Require(first.IsExpanded, "Header expands settings");
+        header.Focus();
+        header.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Space });
+        header.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyUpEvent, Key = Key.Space });
+        Require(!first.IsExpanded, "Space key collapses settings");
+        window.Hide();
+        window.Content = null;
+        Console.WriteLine("PASS_MINIMAL_SETTINGS_DARK_LIGHT_DESKTOP_NARROW_EXPANSION_DRAFTS");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void VerifyTaskbarRefresh(Window window)
+    {
+        // Native icon checks run without loading code into Explorer.
+        using (var taskbar = new WindowsTaskbarIcon(window, enableShellHook: false))
+        {
+            window.Icon = VpnWindowIconIndicator.CreateIcon(null);
+            taskbar.Update(window.Icon);
+            window.ShowInTaskbar = true;
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var handle = window.TryGetPlatformHandle()!.Handle;
+            var bounds = WindowsWindowBounds.Capture(handle);
+            foreach (var state in new[] { VpnConnectionState.Connected, VpnConnectionState.Error, VpnConnectionState.Disconnected })
+            {
+                window.Icon = VpnWindowIconIndicator.CreateIcon(state == VpnConnectionState.Disconnected ? null : ConnectionPalette.AccentFor(state));
+                var foreground = GetForegroundWindow();
+                taskbar.Update(window.Icon);
+                Dispatcher.UIThread.RunJobs();
+                Require(window.IsVisible && WindowsWindowBounds.Capture(handle) == bounds, "Taskbar refresh preserves visible window and bounds");
+                Require(GetForegroundWindow() == foreground, "Taskbar refresh preserves foreground window");
+                Require(ReadShellString(window, 5) is null && ReadShellString(window, 3) is null, "Taskbar refresh uses the native window icon");
+                Require(ReadProcessApplicationId() == TestApplicationId, "Taskbar refresh preserves process group identity");
+                Require(window.TryGetPlatformHandle()!.Handle == handle && window.ShowInTaskbar, "Taskbar refresh keeps the existing window registered");
+            }
+            window.Hide();
+            window.ShowInTaskbar = false;
+        }
+
+
+        Console.WriteLine("PASS_VISIBLE_WINDOWS_NATIVE_ICON_BOUNDS_FOCUS_SAME_WINDOW_NO_RELAUNCH_OVERRIDE");
+    }
+
+    private static void VerifySubscriptionsScrolling(Window window)
+    {
+        foreach (var platform in new[] { AppPlatform.Windows, AppPlatform.Android, AppPlatform.Linux })
+        {
+            var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: platform);
+            Dialogs.Subscriptions(window, model).GetAwaiter().GetResult();
+            window.ShowInTaskbar = false;
+            window.Width = 420; window.Height = 850; window.Show();
+            window.UpdateLayout(); Dispatcher.UIThread.RunJobs();
+            var list = window.GetVisualDescendants().OfType<ListBox>().Single();
+            var scroll = list.GetVisualDescendants().OfType<ScrollViewer>().Single();
+            var selected = model.SelectedProfile;
+            var checking = model.ProbeAllCommand.ExecuteAsync(null);
+            Dispatcher.UIThread.RunJobs();
+            Require(model.IsProbing && !model.CanSelectProfile, "Probe is pending and profile selection is blocked");
+            Require(list.IsEffectivelyEnabled && scroll.IsEffectivelyEnabled, "Server list remains scrollable during probes");
+            Require(!list.GetVisualDescendants().OfType<ListBoxItem>().First().IsEffectivelyEnabled, "Server rows cannot be selected during probes");
+            Require(scroll.Extent.Height > scroll.Viewport.Height, "Server list has scrollable content");
+            scroll.Offset = new Vector(0, 100);
+            Require(scroll.Offset.Y > 0, "Server list offset changes during probes");
+            list.SelectedItem = model.Profiles[1];
+            Require(ReferenceEquals(selected, model.SelectedProfile) && ReferenceEquals(selected, list.SelectedItem), "Blocked selection preserves the active profile");
+            model.CancelProbesCommand.Execute(null);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (!checking.IsCompleted && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+            Require(checking.IsCompleted, "Synthetic probe cancellation completes");
+            checking.GetAwaiter().GetResult(); Dispatcher.UIThread.RunJobs();
+            Require(model.CanSelectProfile && list.GetVisualDescendants().OfType<ListBoxItem>().First().IsEffectivelyEnabled, "Selection reenabled after probes");
+            list.SelectedItem = model.Profiles[1];
+            Require(ReferenceEquals(model.SelectedProfile, model.Profiles[1]), "User selection works after probes");
+            window.Hide(); window.Content = null;
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine("PASS_SUBSCRIPTIONS_SCROLL_DURING_PROBES_WINDOWS_ANDROID_LINUX_SELECTION_GUARDS");
+    }
+
+    private sealed class ManyServersStore : IProfileStore
+    {
+        public IReadOnlyList<ImportedProfile> Load() => Enumerable.Range(1, 30)
+            .Select(index => new ImportedProfile("Test " + index, "VLESS", "synthetic-" + index, "test", "Test subscription")).ToArray();
+        public void Save(IEnumerable<ImportedProfile> profiles) { }
+    }
+    private sealed class PendingProbe : IServerProbe
+    {
+        public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new ServerProbeResult(null, "synthetic");
+        }
     }
 
     private static void VerifyWindowThemeAndBounds(Window window)
@@ -186,6 +306,37 @@ internal static class Program
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 
     [SupportedOSPlatform("windows")]
+    private static void VerifyLegacyShortcutRepair()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "DiTunnel-launcher-migration-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var cached = Path.Combine(directory, "taskbar.ico");
+        var target = Environment.ProcessPath!;
+        var ours = Path.Combine(directory, "ours.lnk");
+        var foreign = Path.Combine(directory, "foreign.lnk");
+        var custom = Path.Combine(directory, "custom.lnk");
+        try
+        {
+            CreateShortcut(ours, target, (cached, 0));
+            CreateShortcut(foreign, Path.Combine(directory, "other.exe"), (cached, 0));
+            CreateShortcut(custom, target, (Path.Combine(directory, "custom.ico"), 3));
+            Require(WindowsShellShortcut.RepairLegacyIcon(ours, directory, target), "Legacy launcher migrated");
+            Require(ReadShortcutIcon(ours) == (target, 0), "Idle launcher uses original application icon");
+            Require(!WindowsShellShortcut.RepairLegacyIcon(ours, directory, target), "Migration is idempotent");
+            Require(!WindowsShellShortcut.RepairLegacyIcon(foreign, directory, target), "Foreign launcher remains unchanged");
+            Require(ReadShortcutIcon(foreign) == (cached, 0), "Foreign icon preserved");
+            Require(!WindowsShellShortcut.RepairLegacyIcon(custom, directory, target), "Custom icon remains unchanged");
+            Require(ReadShortcutIcon(custom) == (Path.Combine(directory, "custom.ico"), 3), "Custom resource index preserved");
+        }
+        finally
+        {
+            foreach (var path in new[] { ours, foreign, custom }) if (File.Exists(path)) File.Delete(path);
+            Directory.Delete(directory);
+        }
+        Console.WriteLine("PASS_LEGACY_LAUNCHER_MIGRATION_FOREIGN_CUSTOM_ISOLATION_IDEMPOTENCE");
+    }
+
+    [SupportedOSPlatform("windows")]
     private static void CreateShortcut(string path, string target, (string Path, int Index) icon)
     {
         using var shortcut = new WindowsShellShortcut { Target = target, Icon = icon };
@@ -201,6 +352,14 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
+    private static string? ReadProcessApplicationId()
+    {
+        Marshal.ThrowExceptionForHR(GetCurrentProcessExplicitAppUserModelID(out var value));
+        try { return Marshal.PtrToStringUni(value); }
+        finally { Marshal.FreeCoTaskMem(value); }
+    }
+
+    [SupportedOSPlatform("windows")]
     private static string? ReadShellString(Window window, uint id)
     {
         var iid = typeof(IPropertyStore).GUID;
@@ -209,7 +368,7 @@ internal static class Program
         {
             var key = new PropertyKey { Format = new("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), Id = id };
             Marshal.ThrowExceptionForHR(store.GetValue(ref key, out var value));
-            try { Require(value.Type == 31, "Shell property string ABI"); return Marshal.PtrToStringUni(value.Pointer); }
+            try { if (value.Type == 0) return null; Require(value.Type == 31, "Shell property string ABI"); return Marshal.PtrToStringUni(value.Pointer); }
             finally { PropVariantClear(ref value); }
         }
         finally { Marshal.ReleaseComObject(store); }
@@ -231,8 +390,10 @@ internal static class Program
         [PreserveSig] int Commit();
     }
     [DllImport("shell32.dll")] private static extern int SHGetPropertyStoreForWindow(IntPtr window, ref Guid iid, out IPropertyStore store);
+    [DllImport("shell32.dll")] private static extern int GetCurrentProcessExplicitAppUserModelID(out IntPtr applicationId);
     [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropertyVariant value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string message);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
 
     private static ulong[] ReadWindowsIcon(Window window)
     {

@@ -34,7 +34,25 @@ internal sealed class WindowsShellShortcut : IDisposable
         }
         set => Link.SetIconLocation(value.Path, value.Index);
     }
-    internal void SetApplicationId() => WindowsTaskbarIcon.SetShortcutApplicationId(instance);
+    internal void SetApplicationId(string applicationId = WindowsTaskbarIcon.ApplicationId) => WindowsTaskbarIcon.SetShortcutApplicationId(instance, applicationId);
+
+    internal static bool RepairLegacyIcon(string path, string cacheDirectory, string target)
+    {
+        using var shortcut = new WindowsShellShortcut();
+        shortcut.Load(path);
+        if (!string.Equals(Path.GetFullPath(shortcut.Target), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return false;
+        var icon = Environment.ExpandEnvironmentVariables(shortcut.Icon.Path);
+        if (!Path.IsPathFullyQualified(icon) ||
+            !string.Equals(Path.GetDirectoryName(Path.GetFullPath(icon)), Path.GetFullPath(cacheDirectory), StringComparison.OrdinalIgnoreCase)) return false;
+        var name = Path.GetFileName(icon);
+        if (!string.Equals(name, "taskbar.ico", StringComparison.OrdinalIgnoreCase) &&
+            !(name.StartsWith("taskbar-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))) return false;
+        shortcut.Load(path, writable: true);
+        shortcut.Icon = (target, 0);
+        shortcut.SetApplicationId();
+        shortcut.Save(path);
+        return true;
+    }
     public void Dispose() => Marshal.ReleaseComObject(instance);
 
     [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

@@ -19,13 +19,13 @@ internal sealed class VpnWindowIconIndicator : IDisposable
     private readonly WindowsTaskbarIcon? taskbar;
     private bool disposed;
 
-    public VpnWindowIconIndicator(Window window, string? taskbarIconPath = null, IReadOnlyList<string>? shortcutPaths = null)
+    public VpnWindowIconIndicator(Window window, bool enableShellHook = true)
     {
         this.window = window;
         originalIcon = OperatingSystem.IsWindows() ? CreateIcon(null) : window.Icon;
         if (OperatingSystem.IsWindows())
         {
-            taskbar = new WindowsTaskbarIcon(window, taskbarIconPath, shortcutPaths);
+            taskbar = new WindowsTaskbarIcon(window, enableShellHook);
             try { taskbar.Update(originalIcon!); }
             catch (Exception error) { Trace.TraceWarning("Unable to initialize VPN taskbar icon: {0}", error.Message); }
         }
@@ -59,16 +59,12 @@ internal sealed class VpnWindowIconIndicator : IDisposable
                 if (!icons.TryGetValue(accent, out icon))
                     icons[accent] = icon = CreateIcon(accent);
             }
-            // Refresh the Shell resource before Avalonia sends WM_SETICON and
-            // prompts Explorer to redraw the taskbar group.
+            // The shell component uses this same full icon for the running group.
+            if (!ReferenceEquals(window.Icon, icon)) window.Icon = icon;
             if (OperatingSystem.IsWindows() && icon is not null)
             {
                 try { taskbar?.Update(icon); }
                 catch (Exception error) { Trace.TraceWarning("Unable to update VPN taskbar icon: {0}", error.Message); }
-            }
-            if (!ReferenceEquals(window.Icon, icon))
-            {
-                window.Icon = icon;
             }
         }
         catch (Exception error)
