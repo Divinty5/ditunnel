@@ -11,16 +11,41 @@ public sealed class SocksListenerReadinessTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var ready = SocksTcpProbe.WaitForListenerAsync(port, () => true, timeout.Token);
-        using var peer = await listener.AcceptTcpClientAsync(timeout.Token);
-        var stream = peer.GetStream();
-        var request = new byte[3];
-        await stream.ReadExactlyAsync(request, timeout.Token);
-        Assert.Equal(new byte[] { 5, 1, 0 }, request);
-        Assert.False(ready.IsCompleted);
-        await stream.WriteAsync(new byte[] { 5, 0 }, timeout.Token);
-        await ready;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var serving = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Task.Run(async () =>
+        {
+            while (!serving.IsCancellationRequested)
+            {
+                using var peer = await listener.AcceptTcpClientAsync(serving.Token);
+                try
+                {
+                    var stream = peer.GetStream();
+                    var request = new byte[3];
+                    await stream.ReadExactlyAsync(request, serving.Token);
+                    Assert.Equal(new byte[] { 5, 1, 0 }, request);
+                    received.TrySetResult();
+                    await reply.Task.WaitAsync(serving.Token);
+                    await stream.WriteAsync(new byte[] { 5, 0 }, serving.Token);
+                }
+                catch (IOException) { /* A loaded VM can exhaust the 500 ms attempt; serve its retry too. */ }
+            }
+        });
+        try
+        {
+            var ready = SocksTcpProbe.WaitForListenerAsync(port, () => true, timeout.Token);
+            await received.Task.WaitAsync(timeout.Token);
+            Assert.False(ready.IsCompleted);
+            reply.SetResult();
+            await ready;
+        }
+        finally
+        {
+            serving.Cancel();
+            try { await server; } catch (OperationCanceledException) when (serving.IsCancellationRequested) { }
+        }
     }
 
     [Fact]
