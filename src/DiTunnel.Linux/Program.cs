@@ -91,8 +91,11 @@ internal static partial class Program
         }
     }
 
+#pragma warning disable AVALONIA_X11_FORCE_CSD // Avalonia is pinned; forced decorations keep all Linux captions in the application theme.
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<SharedApp>()
-        .UsePlatformDetect().WithInterFont().LogToTrace();
+        .UsePlatformDetect().With(new X11PlatformOptions { ForceDrawnDecorations = true })
+        .WithInterFont().LogToTrace();
+#pragma warning restore AVALONIA_X11_FORCE_CSD
 
     internal static bool NormalizeProcessRules(UserSettings settings)
     {

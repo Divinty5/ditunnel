@@ -12,13 +12,17 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     public string Protocol => Profile.Kind.Equals("SS", StringComparison.OrdinalIgnoreCase) ? "Shadowsocks" : Profile.ProtocolName;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
+    [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
     private string probeText = "Не проверен";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
+    [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
     private double? probeMilliseconds;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private bool probeTimedOut;
+    public string ProbeDisplayText => ProbeText == "Проверяем…" || ProbeMilliseconds is not { } delay
+        ? ProbeText : $"{delay:0} мс";
     public IBrush ProbeBrush => ProbeText == "Проверяем…"
         ? LatencyPalette.For(null)
         : LatencyPalette.For(ProbeMilliseconds, ProbeTimedOut);

@@ -17,6 +17,7 @@ internal sealed class VpnWindowIconIndicator : IDisposable
     private readonly Dictionary<Color, WindowIcon> icons = [];
     private MainViewModel? model;
     private readonly WindowsTaskbarIcon? taskbar;
+    private readonly LinuxDockIcon? dock;
     private bool disposed;
 
     public VpnWindowIconIndicator(Window window, bool enableShellHook = true)
@@ -28,6 +29,17 @@ internal sealed class VpnWindowIconIndicator : IDisposable
             taskbar = new WindowsTaskbarIcon(window, enableShellHook);
             try { taskbar.Update(originalIcon!); }
             catch (Exception error) { Trace.TraceWarning("Unable to initialize VPN taskbar icon: {0}", error.Message); }
+        }
+        if (OperatingSystem.IsLinux() && enableShellHook)
+        {
+            try
+            {
+                var data = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+                if (string.IsNullOrEmpty(data) || !Path.IsPathFullyQualified(data))
+                    data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local/share");
+                dock = new LinuxDockIcon(data, AppPaths.StateDirectory);
+            }
+            catch (Exception error) { Trace.TraceWarning("Unable to initialize Linux dock icon: {0}", error.Message); }
         }
         window.DataContextChanged += DataContextChanged;
         DataContextChanged(null, EventArgs.Empty);
@@ -61,6 +73,7 @@ internal sealed class VpnWindowIconIndicator : IDisposable
             }
             // The shell component uses this same full icon for the running group.
             if (!ReferenceEquals(window.Icon, icon)) window.Icon = icon;
+            if (icon is not null) dock?.Update(icon);
             if (OperatingSystem.IsWindows() && icon is not null)
             {
                 try { taskbar?.Update(icon); }
@@ -133,6 +146,8 @@ internal sealed class VpnWindowIconIndicator : IDisposable
         if (disposed) return;
         disposed = true;
         if (OperatingSystem.IsWindows()) taskbar?.Dispose();
+        try { dock?.Dispose(); }
+        catch (Exception error) { Trace.TraceWarning("Unable to restore Linux dock icon: {0}", error.Message); }
         window.DataContextChanged -= DataContextChanged;
         if (model is not null) model.PropertyChanged -= ModelPropertyChanged;
         model = null;

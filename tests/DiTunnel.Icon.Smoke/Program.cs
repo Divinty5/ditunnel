@@ -32,7 +32,17 @@ internal static class Program
         System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
         var settingsPath = Path.Combine(Path.GetTempPath(), "DiTunnel-icon-settings-" + Guid.NewGuid().ToString("N"));
         AppPaths.Configure(settingsPath, settingsPath, settingsPath);
-        AppBuilder.Configure<DiTunnel.App.App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
+        var builder = AppBuilder.Configure<DiTunnel.App.App>().UsePlatformDetect().WithInterFont();
+#pragma warning disable AVALONIA_X11_FORCE_CSD
+        if (OperatingSystem.IsLinux()) builder.With(new X11PlatformOptions { ForceDrawnDecorations = true, WmClass = "Di-Tunnel.Linux" });
+#pragma warning restore AVALONIA_X11_FORCE_CSD
+        builder.SetupWithoutStarting();
+        if (OperatingSystem.IsLinux() && args is ["--linux-desktop", var desktopOutput])
+        {
+            VerifyLinuxDesktop(Path.GetFullPath(desktopOutput));
+            return;
+        }
+        if (OperatingSystem.IsLinux()) VerifyLinuxDockLease();
         if (OperatingSystem.IsWindows())
         {
             Require(ReadProcessApplicationId() == WindowsTaskbarIcon.ApplicationId, "Application identity initialized before creating windows");
@@ -236,10 +246,87 @@ internal static class Program
             Require(model.CanSelectProfile && list.GetVisualDescendants().OfType<ListBoxItem>().First().IsEffectivelyEnabled, "Selection reenabled after probes");
             list.SelectedItem = model.Profiles[1];
             Require(ReferenceEquals(model.SelectedProfile, model.Profiles[1]), "User selection works after probes");
+            model.Profiles[1].ProbeText = "Сервер ответил через туннель за 428 мс";
+            model.Profiles[1].ProbeMilliseconds = 428;
+            Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
+            Require(list.GetVisualDescendants().OfType<TextBlock>().Any(text => text.Text == L.T("428 мс") && text.Bounds.Width >= 35), "Numeric latency is visible in a narrow server tile");
             window.Hide(); window.Content = null;
             model.ShutdownAsync().GetAwaiter().GetResult();
         }
         Console.WriteLine("PASS_SUBSCRIPTIONS_SCROLL_DURING_PROBES_WINDOWS_ANDROID_LINUX_SELECTION_GUARDS");
+    }
+
+    private static void VerifyLinuxDesktop(string output)
+    {
+        Directory.CreateDirectory(output);
+        using var stream = AssetLoader.Open(new Uri("avares://DiTunnel.App/Assets/icon.png"));
+        var model = new MainViewModel(null, new EmptyStore());
+        var label = new TextBlock { Margin = new Thickness(24), FontSize = 24 };
+        var window = new Window { Title = "Di-Tunnel · Linux desktop test", Icon = new WindowIcon(stream),
+            Width = 700, Height = 500, Content = label, DataContext = model };
+        using var indicator = new VpnWindowIconIndicator(window);
+        window.Show();
+        var states = new[] { VpnConnectionState.Disconnected, VpnConnectionState.Connected, VpnConnectionState.Error, VpnConnectionState.Disconnected };
+        for (var index = 0; index < states.Length; index++)
+        {
+            window.RequestedThemeVariant = index % 2 == 0 ? ThemeVariant.Light : ThemeVariant.Dark;
+            model.ConnectionState = states[index];
+            label.Text = $"{states[index]} · {window.RequestedThemeVariant}";
+            var readyAt = DateTime.UtcNow.AddSeconds(5);
+            var stopAt = DateTime.UtcNow.AddSeconds(35);
+            var ready = Path.Combine(output, $"{index}.ready");
+            var next = Path.Combine(output, $"{index}.continue");
+            while (!File.Exists(next) && DateTime.UtcNow < stopAt)
+            {
+                Dispatcher.UIThread.RunJobs(); Thread.Sleep(10);
+                if (DateTime.UtcNow >= readyAt && !File.Exists(ready)) File.WriteAllText(ready, states[index].ToString());
+            }
+            Require(File.Exists(next), "GNOME screenshot collector acknowledged " + index);
+        }
+        indicator.Dispose();
+        window.Close();
+        Console.WriteLine("PASS_LINUX_DESKTOP_PINNED_ICON_COLOURS_AND_THEME_CAPTURED");
+    }
+
+    private static void VerifyLinuxDockLease()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ditunnel-dock-lease-" + Guid.NewGuid().ToString("N"));
+        var data = Path.Combine(root, "data");
+        var state = Path.Combine(root, "state");
+        var path = Path.Combine(data, "icons/hicolor/256x256/apps/di-tunnel.png");
+        var desktop = Path.Combine(data, "applications/di-tunnel.desktop");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(desktop)!);
+        using var bytes = new MemoryStream();
+        VpnWindowIconIndicator.CreateIcon(null).Save(bytes);
+        var original = bytes.ToArray();
+        File.WriteAllBytes(path, original);
+        File.WriteAllText(desktop, "[Desktop Entry]\nType=Application\nName=Custom Di-Tunnel\nExec=di-tunnel\nIcon=di-tunnel\n");
+        var desktopBytes = File.ReadAllBytes(desktop);
+        var mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead;
+        if (OperatingSystem.IsLinux()) File.SetUnixFileMode(desktop, mode);
+        try
+        {
+            var abandoned = new LinuxDockIcon(data, state);
+            abandoned.Update(VpnWindowIconIndicator.CreateIcon(ConnectionPalette.AccentFor(VpnConnectionState.Connected)));
+            Require(!File.ReadAllBytes(path).SequenceEqual(original), "Dock icon is recoloured");
+            using (var recovered = new LinuxDockIcon(data, state))
+            {
+                Require(File.ReadAllBytes(path).SequenceEqual(original), "A stale lease restores the original icon after a crash");
+                recovered.Update(VpnWindowIconIndicator.CreateIcon(ConnectionPalette.AccentFor(VpnConnectionState.Error)));
+            }
+            Require(File.ReadAllBytes(path).SequenceEqual(original), "Normal disposal restores a custom icon");
+            Require(File.ReadAllBytes(desktop).SequenceEqual(desktopBytes), "Custom desktop entry is preserved");
+            if (OperatingSystem.IsLinux()) Require(File.GetUnixFileMode(desktop) == mode, "Custom desktop entry permissions are preserved");
+            using (var edited = new LinuxDockIcon(data, state))
+            {
+                edited.Update(VpnWindowIconIndicator.CreateIcon(ConnectionPalette.AccentFor(VpnConnectionState.Connected)));
+                File.WriteAllText(path, "user edit");
+            }
+            Require(File.ReadAllText(path) == "user edit", "User edits made during execution are preserved");
+        }
+        finally { Directory.Delete(root, true); }
+        Console.WriteLine("PASS_LINUX_DOCK_CUSTOM_ICON_LEASE_CRASH_RECOVERY_PERMISSIONS_AND_USER_EDITS");
     }
 
     private sealed class ManyServersStore : IProfileStore

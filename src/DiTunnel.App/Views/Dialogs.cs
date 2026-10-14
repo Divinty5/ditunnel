@@ -542,7 +542,8 @@ public static class Dialogs
                 var summary = new TextBlock { FontSize = 11, Foreground = Brushes.Gray, TextTrimming = TextTrimming.CharacterEllipsis };
                 summary.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Protocol)) { Converter = new TranslationConverter() });
                 var latency = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
-                latency.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.ProbeText)) { Converter = new TranslationConverter() });
+                latency.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.ProbeDisplayText)) { Converter = new TranslationConverter() });
+                latency.Bind(ToolTip.TipProperty, new Binding(nameof(ServerItemViewModel.ProbeText)) { Converter = new TranslationConverter() });
                 latency.Bind(TextBlock.ForegroundProperty, new MultiBinding
                 {
                     Converter = LatencyThemeConverter.Instance,
