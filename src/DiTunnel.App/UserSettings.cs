@@ -20,6 +20,7 @@ public sealed class UserSettings
     public bool LowestMode { get; set; }
     public ServerProbeMode ServerProbeMode { get; set; } = ServerProbeMode.Fast;
     public string? SelectedSourceId { get; set; }
+    public Dictionary<string, ServerSelection> SelectedServers { get; set; } = [];
     public SplitTunnelMode SplitTunnelMode { get; set; } = SplitTunnelMode.ProxyAll;
     // Legacy 0.4.2 fields retained for one-way settings migration.
     public List<string> SplitTunnelDomains { get; set; } = [];
@@ -118,6 +119,7 @@ public sealed class UserSettings
         try
         {
             var settings = JsonSerializer.Deserialize(File.ReadAllText(path), AppJsonContext.Default.UserSettings) ?? new();
+            settings.SelectedServers ??= [];
             if (settings.Language is not ("ru" or "en" or "es" or "zh-Hans")) settings.Language = "ru";
             if (settings.Theme is not ("system" or "dark" or "light")) settings.Theme = "system";
             if (settings.CloseAction is not ("ask" or "hide" or "exit")) settings.CloseAction = "ask";

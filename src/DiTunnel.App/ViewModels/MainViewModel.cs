@@ -27,6 +27,8 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly List<ImportedProfile> allProfiles = [];
     private readonly IProfileVpnEngine? engine;
     private readonly IProfileStore profileStore;
+    private readonly UserSettings selectionSettings;
+    private readonly Action persistSelection;
     public AppPlatform Platform { get; }
     private bool storageAvailable = true;
     private readonly IServerProbe? probe;
@@ -269,9 +271,11 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public MainViewModel() : this(null) { }
     public MainViewModel(IProfileVpnEngine? engine, IProfileStore? store = null, IServerProbe? probe = null, IServerCountryResolver? countryResolver = null,
-        IInstalledApplicationProvider? installedApplicationProvider = null, AppPlatform? platform = null)
+        IInstalledApplicationProvider? installedApplicationProvider = null, AppPlatform? platform = null, UserSettings? selectionSettings = null, Action? persistSelection = null)
     {
         this.engine = engine;
+        this.selectionSettings = selectionSettings ?? UserSettings.Current;
+        this.persistSelection = persistSelection ?? (() => this.selectionSettings.Save());
         Platform = platform ?? App.Platform;
         this.probe = probe;
         this.countryResolver = countryResolver;
@@ -466,10 +470,10 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     partial void OnSelectedGroupChanged(ProfileGroup? value)
     {
-        if (value is not null && UserSettings.Current.SelectedSourceId != value.Id)
+        if (value is not null && selectionSettings.SelectedSourceId != value.Id)
         {
-            UserSettings.Current.SelectedSourceId = value.Id;
-            try { UserSettings.Current.Save(); } catch { }
+            selectionSettings.SelectedSourceId = value.Id;
+            try { persistSelection(); } catch { }
         }
         var wasSuppressingReconnect = suppressProfileReconnect;
         suppressProfileReconnect = true;
@@ -488,7 +492,10 @@ public sealed partial class MainViewModel : ViewModelBase
                 }
                 Profiles.Add(row);
             }
+            selectionSettings.SelectedServers.TryGetValue(value?.Id ?? "", out var saved);
             SelectedProfile = Profiles.FirstOrDefault(row => activeProfile is not null && row.Profile.Content == activeProfile.Profile.Content)
+                ?? Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).ContentHash == saved.ContentHash)
+                ?? Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).IdentityHash == saved.IdentityHash)
                 ?? Profiles.FirstOrDefault();
         }
         finally { suppressProfileReconnect = wasSuppressingReconnect; }
@@ -519,6 +526,15 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     partial void OnSelectedProfileChanged(ServerItemViewModel? value)
     {
+        if (value is not null && !suppressProfileReconnect)
+        {
+            var selected = ServerSelection.From(value.Profile);
+            if (selectionSettings.SelectedServers.GetValueOrDefault(value.Profile.SourceId) != selected)
+            {
+                selectionSettings.SelectedServers[value.Profile.SourceId] = selected;
+                try { persistSelection(); } catch { }
+            }
+        }
         OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag));
         OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
         OnPropertyChanged(nameof(SelectedServerUri)); OnPropertyChanged(nameof(CanShareServer));
@@ -590,7 +606,7 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     private void RebuildGroups(string? preferred = null)
     {
-        preferred ??= SelectedGroup?.Id ?? UserSettings.Current.SelectedSourceId;
+        preferred ??= SelectedGroup?.Id ?? selectionSettings.SelectedSourceId;
         Groups.Clear();
         foreach (var group in allProfiles.GroupBy(p => p.SourceId)) Groups.Add(new(group.Key, group.First().SourceName));
         SelectedGroup = Groups.FirstOrDefault(g => g.Id == preferred) ?? Groups.FirstOrDefault();
