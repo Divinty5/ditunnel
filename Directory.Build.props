@@ -7,7 +7,7 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
     <Version>0.6.4</Version>
-    <WindowsVersion>0.6.4</WindowsVersion>
+    <WindowsVersion>0.6.5</WindowsVersion>
     <AndroidVersion>0.6.4</AndroidVersion>
     <AndroidMinimumApiLevel>27</AndroidMinimumApiLevel>
     <LinuxVersion>0.6.5</LinuxVersion>
