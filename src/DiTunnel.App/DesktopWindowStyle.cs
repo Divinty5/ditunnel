@@ -12,12 +12,17 @@ internal static class DesktopWindowStyle
         var platform = window.TryGetPlatformHandle();
         if (platform is null || platform.Handle == IntPtr.Zero) return;
         var dark = window.ActualThemeVariant == ThemeVariant.Dark;
-        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
         {
+            // Windows 10 caches non-client theme parts separately from DWM.
+            // Invalidate those parts before setting the new caption theme.
+            SetWindowTheme(platform.Handle, dark ? "DarkMode_Explorer" : null, null);
             var value = dark ? 1 : 0;
-            if (DwmSetWindowAttribute(platform.Handle, 20, ref value, sizeof(int)) != 0) return;
-            // Changing the DWM attribute alone does not repaint an existing caption.
-            SetWindowPos(platform.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);
+            var attribute = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18985) ? 20 : 19;
+            DwmSetWindowAttribute(platform.Handle, attribute, ref value, sizeof(int));
+            // Repaint the existing frame without recalculating or recreating it.
+            // Preserve activation, styles, bounds and all native caption buttons.
+            SendMessage(platform.Handle, 0x0086, GetForegroundWindow() == platform.Handle ? 1 : 0, 0); // WM_NCACTIVATE
             RedrawWindow(platform.Handle, IntPtr.Zero, IntPtr.Zero, 0x0001 | 0x0100 | 0x0400);
         }
         else if (OperatingSystem.IsLinux() && platform.HandleDescriptor == "XID")
@@ -37,7 +42,9 @@ internal static class DesktopWindowStyle
     }
 
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
-    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] private static extern int SetWindowTheme(IntPtr window, string? appName, string? idList);
+    [DllImport("user32.dll")] private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool RedrawWindow(IntPtr window, IntPtr rect, IntPtr region, uint flags);
     [DllImport("libX11.so.6")] private static extern IntPtr XOpenDisplay(IntPtr name);
     [DllImport("libX11.so.6")] private static extern int XCloseDisplay(IntPtr display);

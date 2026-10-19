@@ -46,6 +46,12 @@ public partial class MainWindow : Window
             await CheckForUpdatesAsync(false);
         };
         PositionChanged += (_, _) => RememberNormal();
+        Activated += (_, _) => UpdateTitleBarTheme();
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == WindowStateProperty && WindowState != WindowState.Minimized)
+                Dispatcher.UIThread.Post(UpdateTitleBarTheme);
+        };
         SizeChanged += (_, _) => RememberNormal();
         Closing += async (_, e) =>
         {
