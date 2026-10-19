@@ -202,6 +202,12 @@ internal static class Program
                 var foreground = GetForegroundWindow();
                 taskbar.Update(window.Icon);
                 Dispatcher.UIThread.RunJobs();
+                var before = ReadWindowsIcon(window);
+                var oldIcon = SendMessage(handle, 0x7f, new IntPtr(1), IntPtr.Zero);
+                taskbar.RefreshCurrentIcon(); // Simulate symbols finishing after a state change.
+                Dispatcher.UIThread.RunJobs();
+                Require(SendMessage(handle, 0x7f, new IntPtr(1), IntPtr.Zero) != oldIcon, "Late attachment replaces the native icon handle");
+                Require(ReadWindowsIcon(window).SequenceEqual(before), "Late attachment replays the current colour");
                 Require(window.IsVisible && WindowsWindowBounds.Capture(handle) == bounds, "Taskbar refresh preserves visible window and bounds");
                 Require(GetForegroundWindow() == foreground, "Taskbar refresh preserves foreground window");
                 Require(ReadShellString(window, 5) is null && ReadShellString(window, 3) is null, "Taskbar refresh uses the native window icon");

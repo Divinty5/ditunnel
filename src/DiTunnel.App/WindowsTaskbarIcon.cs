@@ -21,6 +21,7 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     private uint attachedProcess;
     private bool resolving, disposed, repaired;
     private DateTime nextAttempt;
+    private int failures;
 
     internal static void InitializeProcess(string applicationId = ApplicationId) =>
         Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(applicationId));
@@ -84,6 +85,7 @@ internal sealed class WindowsTaskbarIcon : IDisposable
         WindowsShellSymbols.GetWindowThreadProcessId(FindWindow("Shell_TrayWnd", null), out var currentProcess);
         if (currentProcess != 0 && currentProcess == attachedProcess && GetProp(handle, "DiTunnel.ShellIcon.Status.v1") == 1) return;
         resolving = true;
+        WriteStatus("STAGE_SHELL_ICON_RESOLVING");
         try
         {
             var resolved = await Task.Run(() => WindowsShellSymbols.ResolveAsync(lifetime.Token), lifetime.Token);
@@ -95,18 +97,41 @@ internal sealed class WindowsTaskbarIcon : IDisposable
             var status = DiTunnelShellAttach(handle, mode, ref symbols);
             if (status != 0) throw new InvalidOperationException($"Taskbar icon component returned {status}.");
             attachedProcess = currentProcess;
-            // The first update may predate symbol resolution. Re-send the same
-            // HICON without changing the HWND, taskbar button, order or focus.
-            var icon = SendMessage(handle, 0x7f, 1, 0);
-            if (icon != 0) SendMessage(handle, 0x80, 1, icon);
+            failures = 0;
+            // The state may have changed while the first PDB was downloading.
+            // Replacing the icon implementation invalidates both Win32 icon caches;
+            // re-sending an unchanged HICON can leave the old group image cached.
+            RefreshCurrentIcon();
+            WriteStatus("STAGE_SHELL_ICON_READY");
         }
         catch (OperationCanceledException) when (disposed) { }
         catch (Exception error)
         {
-            nextAttempt = DateTime.UtcNow.AddMinutes(1);
+            nextAttempt = DateTime.UtcNow.AddSeconds(RetryDelay(++failures));
+            WriteStatus("ERROR_SHELL_ICON_" + error.GetType().Name);
             Trace.TraceWarning("Unable to enable VPN taskbar icon: {0}", error.Message);
         }
         finally { resolving = false; }
+    }
+
+    internal void RefreshCurrentIcon()
+    {
+        if (window.Icon is not { } current) return;
+        using var bytes = new MemoryStream();
+        current.Save(bytes); bytes.Position = 0;
+        window.Icon = new WindowIcon(bytes);
+    }
+
+    internal static int RetryDelay(int attempt) => attempt switch { <= 1 => 5, 2 => 10, 3 => 20, _ => 60 };
+
+    private static void WriteStatus(string stage)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppPaths.StateDirectory);
+            File.WriteAllText(Path.Combine(AppPaths.StateDirectory, "taskbar-icon.log"), $"{DateTimeOffset.UtcNow:O} {stage}\n");
+        }
+        catch { }
     }
 
     public void Dispose()
@@ -133,7 +158,6 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string message);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string name, string? title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetProp(nint window, string name);
-    [DllImport("user32.dll")] private static extern nint SendMessage(nint window, uint message, nint wParam, nint lParam);
     internal static void SetShortcutApplicationId(object shortcut, string applicationId = ApplicationId)
     {
         var store = (IPropertyStore)shortcut;

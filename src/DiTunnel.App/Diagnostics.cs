@@ -20,6 +20,8 @@ public static partial class Diagnostics
         if (File.Exists(current)) files.Add(current);
         var xray = Path.Combine(directory, "last-xray.log");
         if (File.Exists(xray)) files.Add(xray);
+        var shell = Path.Combine(directory, "taskbar-icon.log");
+        if (File.Exists(shell)) files.Add(shell);
         var history = Path.Combine(directory, "logs");
         if (Directory.Exists(history)) files.AddRange(Directory.GetFiles(history, "network-*.log").OrderByDescending(File.GetLastWriteTimeUtc).Take(30));
         foreach (var file in files)

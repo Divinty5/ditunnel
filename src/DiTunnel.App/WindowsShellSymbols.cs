@@ -61,7 +61,7 @@ internal static class WindowsShellSymbols
         var name = Path.GetFileName(codeView.Path);
         if (!string.Equals(name, "taskbar.pdb", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "explorer.pdb", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Unexpected shell PDB name.");
-        var key = codeView.Guid.ToString("N") + codeView.Age.ToString("X");
+        var key = codeView.Guid.ToString("N").ToUpperInvariant() + codeView.Age.ToString("X");
         var directory = Path.Combine(UserSettings.DataDirectory, "ShellSymbols", name, key);
         Directory.CreateDirectory(directory);
         await using var hashStream = File.OpenRead(image);
@@ -81,28 +81,8 @@ internal static class WindowsShellSymbols
         {
             // Only the public Windows PDB identity is sent. No application/user data.
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
-            using var response = await http.GetAsync($"https://msdl.microsoft.com/download/symbols/{name}/{key}/{name}",
-                HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            const long maximum = 128 * 1024 * 1024;
-            if (response.Content.Headers.ContentLength > maximum) throw new InvalidDataException("Shell PDB exceeds the size limit.");
-            var temporary = pdb + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            try
-            {
-                await using (var output = File.Create(temporary))
-                await using (var input = await response.Content.ReadAsStreamAsync(cancellation).ConfigureAwait(false))
-                {
-                    var buffer = new byte[65536]; long total = 0; int count;
-                    while ((count = await input.ReadAsync(buffer, cancellation).ConfigureAwait(false)) != 0)
-                    {
-                        total += count;
-                        if (total > maximum) throw new InvalidDataException("Shell PDB exceeds the size limit.");
-                        await output.WriteAsync(buffer.AsMemory(0, count), cancellation).ConfigureAwait(false);
-                    }
-                }
-                File.Move(temporary, pdb, overwrite: true);
-            }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            await DownloadPdbAsync(http, new Uri($"https://msdl.microsoft.com/download/symbols/{name}/{key}/{name}"),
+                pdb, cancellation, TimeSpan.FromSeconds(60)).ConfigureAwait(false);
         }
         cancellation.ThrowIfCancellationRequested();
         var value = ResolvePdb(image, directory, headers, kind);
@@ -112,6 +92,38 @@ internal static class WindowsShellSymbols
         await File.WriteAllTextAsync(cacheTemporary, json, cancellation).ConfigureAwait(false);
         File.Move(cacheTemporary, metadata, overwrite: true);
         return value;
+    }
+
+    internal static async Task DownloadPdbAsync(HttpClient http, Uri uri, string pdb, CancellationToken cancellation, TimeSpan timeout)
+    {
+        // ResponseHeadersRead only bounds the headers with HttpClient.Timeout.
+        // Bound the entire body too, so a stalled first download can retry.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(timeout);
+        var downloadToken = deadline.Token;
+        // Only the public Windows PDB identity is sent. No application/user data.
+        using var response = await http.GetAsync(uri,
+            HttpCompletionOption.ResponseHeadersRead, downloadToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        const long maximum = 128 * 1024 * 1024;
+        if (response.Content.Headers.ContentLength > maximum) throw new InvalidDataException("Shell PDB exceeds the size limit.");
+        var temporary = pdb + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await using (var output = File.Create(temporary))
+            await using (var input = await response.Content.ReadAsStreamAsync(downloadToken).ConfigureAwait(false))
+            {
+                var buffer = new byte[65536]; long total = 0; int count;
+                while ((count = await input.ReadAsync(buffer, downloadToken).ConfigureAwait(false)) != 0)
+                {
+                    total += count;
+                    if (total > maximum) throw new InvalidDataException("Shell PDB exceeds the size limit.");
+                    await output.WriteAsync(buffer.AsMemory(0, count), downloadToken).ConfigureAwait(false);
+                }
+            }
+            File.Move(temporary, pdb, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     internal static bool Valid(PEHeaders headers, Symbols value, uint kind)

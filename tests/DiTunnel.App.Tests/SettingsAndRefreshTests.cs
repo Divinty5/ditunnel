@@ -261,11 +261,15 @@ public sealed class SettingsAndRefreshTests
         {
             File.WriteAllText(Path.Combine(dir, "last-network.log"), "2026-09-06T00:00:00Z CONNECTED\nsecret https://example.com/token\n2026-09-06T00:00:01Z ERROR_STAGE_DNS\n");
             File.WriteAllText(Path.Combine(dir, "profiles.dat"), "secret");
+            File.WriteAllText(Path.Combine(dir, "taskbar-icon.log"), "2026-10-17T00:00:00Z STAGE_SHELL_ICON_READY\nsecret https://example.test/private\n");
             var output = Path.Combine(dir, "export.zip"); Diagnostics.Export(output, dir);
             using var zip = ZipFile.OpenRead(output);
-            Assert.Equal(2, zip.Entries.Count);
+            Assert.Equal(3, zip.Entries.Count);
             using var reader = new StreamReader(zip.GetEntry("last-network.log")!.Open()); var text = reader.ReadToEnd();
             Assert.Contains("CONNECTED", text); Assert.DoesNotContain("secret", text);
+            using var shellReader = new StreamReader(zip.GetEntry("taskbar-icon.log")!.Open());
+            var shellText = shellReader.ReadToEnd();
+            Assert.Contains("STAGE_SHELL_ICON_READY", shellText); Assert.DoesNotContain("secret", shellText);
         }
         finally { Directory.Delete(dir, true); }
     }
