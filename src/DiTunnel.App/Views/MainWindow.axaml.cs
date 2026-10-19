@@ -17,10 +17,11 @@ public partial class MainWindow : Window
     private PixelRect? hiddenWindowBounds;
     private readonly DispatcherTimer trayTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private NativeMenuItem? trayStatus, showItem, connectItem, exitItem;
-    public MainWindow()
+    public MainWindow() : this(enableShellHook: true) { }
+    internal MainWindow(bool enableShellHook)
     {
         InitializeComponent();
-        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) connectionIcon = new VpnWindowIconIndicator(this);
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) connectionIcon = new VpnWindowIconIndicator(this, enableShellHook);
         PropertyChanged += (_, e) => { if (e.Property == IconProperty && tray is not null) tray.Icon = Icon; };
         ActualThemeVariantChanged += (_, _) =>
         {
@@ -38,9 +39,10 @@ public partial class MainWindow : Window
                 normal = WindowLayout.Fit(saved, screen.WorkingArea, screen.Scaling);
                 MinWidth = Math.Min(360, normal.Width); MinHeight = Math.Min(500, normal.Height);
                 Width = normal.Width; Height = normal.Height; Position = new PixelPoint(normal.X, normal.Y);
-                if (normal.Maximized) WindowState = WindowState.Maximized;
+                if (normal.Maximized && !App.ShouldStartMinimized) WindowState = WindowState.Maximized;
             }
             ready = true; SetupTray();
+            if (App.ShouldStartMinimized && tray is not null) Hide();
             if (DataContext is MainViewModel settingsModel) await settingsModel.InitializeSplitDefaultsAsync();
             if (DataContext is MainViewModel vm) await vm.RefreshSubscriptionsAsync(showToast: false);
             await CheckForUpdatesAsync(false);
@@ -92,7 +94,7 @@ public partial class MainWindow : Window
     private void SavePlacement()
     {
         if (normal is null) return;
-        UserSettings.Current.Window = normal with { Maximized = WindowState == WindowState.Maximized };
+        UserSettings.Current.Window = normal with { Maximized = WindowState == WindowState.Maximized || WindowState == WindowState.Minimized && normal.Maximized };
         try { UserSettings.Current.Save(); }
         catch { if (DataContext is MainViewModel vm) vm.Notice = "Не удалось сохранить настройки."; }
     }
@@ -118,7 +120,7 @@ public partial class MainWindow : Window
     }
     private void Restore()
     {
-        Show(); if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Show(); if (WindowState == WindowState.Minimized) WindowState = normal?.Maximized == true ? WindowState.Maximized : WindowState.Normal;
         RestoreHiddenWindowBounds();
         Activate();
     }

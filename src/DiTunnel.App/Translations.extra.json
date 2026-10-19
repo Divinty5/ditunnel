@@ -1,4 +1,7 @@
 {
+  "Start when signing in to Windows": { "es": "Iniciar al iniciar sesión en Windows", "zh-Hans": "登录 Windows 时启动" },
+  "Start minimized": { "es": "Iniciar minimizado", "zh-Hans": "最小化启动" },
+  "Could not change Windows startup settings.": { "es": "No se pudo cambiar el inicio automático de Windows.", "zh-Hans": "无法更改 Windows 启动设置。" },
   "The service has not confirmed network cleanup. Use Restore network access.": { "es": "El servicio no ha confirmado la limpieza de la red. Usa Restaurar acceso a la red.", "zh-Hans": "服务尚未确认网络清理完成。请点击“恢复网络访问”。" },
   "Connection to the network service was lost. Use Restore network access.": { "es": "Se perdió la conexión con el servicio de red. Usa Restaurar acceso a la red.", "zh-Hans": "与网络服务的连接已断开。请点击“恢复网络访问”。" },
   "Connection": { "es": "Conexión", "zh-Hans": "连接" },

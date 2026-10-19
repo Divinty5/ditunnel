@@ -74,6 +74,7 @@ public sealed class UserSettings
     public bool StrictAdBlockingEnabled { get; set; }
     public bool AllowLocalNetwork { get; set; }
     public bool StartWithWindows { get; set; }
+    public bool StartMinimized { get; set; }
     public bool AutoConnect { get; set; }
     public bool Ipv4Only { get; set; } = true;
     public bool CheckForUpdatesAutomatically { get; set; } = true;

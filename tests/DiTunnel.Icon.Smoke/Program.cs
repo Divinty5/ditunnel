@@ -49,6 +49,54 @@ internal static class Program
             WindowsTaskbarIcon.InitializeProcess(TestApplicationId);
             VerifyLegacyShortcutRepair();
         }
+        if (OperatingSystem.IsWindows() && args is ["--windows-ui"])
+        {
+            UserSettings.Current.CheckForUpdatesAutomatically = false;
+            UserSettings.Current.CloseAction = "exit";
+            App.Platform = AppPlatform.Windows;
+            App.SetWindowsAutostart = _ => { }; // Isolated UI test; never register real logon startup.
+            var test = new MainWindow(enableShellHook: false) { DataContext = new MainViewModel(null, new EmptyStore()), Title = "Di-Tunnel · Windows UI test" };
+            using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            test.Closed += (_, _) => lifetime.Cancel();
+            test.Show();
+            Dispatcher.UIThread.MainLoop(lifetime.Token);
+            if (test.IsVisible) test.Close();
+            Console.WriteLine("PASS_ISOLATED_WINDOWS_UI_NO_NETWORK_NO_EXPLORER_HOOK_NO_AUTOSTART_REGISTRATION");
+            return;
+        }
+        if (OperatingSystem.IsWindows() && args is ["--windows-startup"])
+        {
+            UserSettings.Current.CheckForUpdatesAutomatically = false;
+            UserSettings.Current.CloseAction = "exit";
+            UserSettings.Current.StartWithWindows = true;
+            UserSettings.Current.StartMinimized = true;
+            foreach (var automatic in new[] { true, false })
+            {
+                App.IsAutostartLaunch = automatic;
+                Require(App.ShouldStartMinimized == automatic, "Only logon startup uses the minimized preference");
+                var test = new MainWindow(enableShellHook: false)
+                {
+                    DataContext = new MainViewModel(null, new EmptyStore()), ShowActivated = !App.ShouldStartMinimized,
+                    WindowState = App.ShouldStartMinimized ? WindowState.Minimized : WindowState.Normal
+                };
+                test.Show(); Dispatcher.UIThread.RunJobs();
+                Require(automatic ? !test.IsVisible || test.WindowState == WindowState.Minimized : test.IsVisible && test.WindowState == WindowState.Normal,
+                    "Automatic launch minimizes; manual launch opens a visible window");
+                if (automatic)
+                {
+                    test.Show(); test.WindowState = WindowState.Normal; Dispatcher.UIThread.RunJobs();
+                    Require(test.IsVisible && test.WindowState == WindowState.Normal, "The minimized startup window can be restored");
+                }
+                using var closed = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var completed = false;
+                test.Closed += (_, _) => { completed = true; closed.Cancel(); };
+                test.Close();
+                if (!completed) Dispatcher.UIThread.MainLoop(closed.Token);
+                Require(completed, "Startup test closed and disposed its tray");
+            }
+            Console.WriteLine("PASS_WINDOWS_AUTOSTART_MINIMIZED_MANUAL_VISIBLE_AND_RESTORE_NO_REGISTRATION");
+            return;
+        }
         using var stream = AssetLoader.Open(new Uri("avares://DiTunnel.App/Assets/icon.png"));
         var original = new WindowIcon(stream);
         var window = new Window { Icon = original };

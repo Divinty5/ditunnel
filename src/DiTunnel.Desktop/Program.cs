@@ -39,7 +39,11 @@ internal static class Program
     {
         using var instance = new Mutex(true, "DiTunnel.Desktop", out var firstInstance);
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset, "DiTunnel.ShowWindow");
-        if (!firstInstance) { show.Set(); return; }
+        if (!firstInstance)
+        {
+            if (!args.Contains("--autostart", StringComparer.OrdinalIgnoreCase)) show.Set();
+            return;
+        }
         var timer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         timer.Tick += (_, _) =>
         {
@@ -52,6 +56,8 @@ internal static class Program
         };
         timer.Start();
         App.App.Platform = App.AppPlatform.Windows;
+        App.App.IsAutostartLaunch = args.Contains("--autostart", StringComparer.OrdinalIgnoreCase);
+        App.App.SetWindowsAutostart = enabled => App.WindowsAutostart.SetEnabled(enabled, Environment.ProcessPath!);
         App.App.UpdateInstaller = new WindowsUpdateInstaller();
         App.App.CreateMainViewModel = () =>
         {

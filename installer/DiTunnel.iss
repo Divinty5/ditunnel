@@ -65,6 +65,10 @@ Name: "{autodesktop}\Di-Tunnel"; Filename: "{app}\Di-Tunnel.exe"; WorkingDir: "{
 [UninstallRun]
 Filename: "{app}\Di-Tunnel.NetworkHost.exe"; Parameters: "--cleanup-wfp"; Flags: runhidden waituntilterminated; RunOnceId: "CleanupDiTunnelWfp"
 
+[Registry]
+; Startup remains opt-in in the application. Track only its value for uninstall.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Di-Tunnel"; Flags: dontcreatekey uninsdeletevalue
+
 [Run]
 Filename: "{app}\Di-Tunnel.exe"; Description: "{cm:LaunchProgram,Di-Tunnel}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 

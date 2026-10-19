@@ -12,6 +12,10 @@ public partial class App : Application
     public static Func<MainViewModel> CreateMainViewModel { get; set; } = () => new MainViewModel();
     public static IUpdateInstaller? UpdateInstaller { get; set; }
     public static Func<Task<string?>>? ReadClipboardTextAsync { get; set; }
+    public static Action<bool>? SetWindowsAutostart { get; set; }
+    public static bool IsAutostartLaunch { get; set; }
+    internal static bool ShouldStartMinimized => OperatingSystem.IsWindows() && IsAutostartLaunch
+        && UserSettings.Current.StartWithWindows && UserSettings.Current.StartMinimized;
 
     public override void Initialize()
     {
@@ -29,7 +33,9 @@ public partial class App : Application
             desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnExplicitShutdown;
             desktop.MainWindow = new MainWindow
             {
-                DataContext = CreateMainViewModel()
+                DataContext = CreateMainViewModel(),
+                ShowActivated = !ShouldStartMinimized,
+                WindowState = ShouldStartMinimized ? Avalonia.Controls.WindowState.Minimized : Avalonia.Controls.WindowState.Normal
             };
         }
         else if (ApplicationLifetime is IActivityApplicationLifetime activity)

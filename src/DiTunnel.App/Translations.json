@@ -1,4 +1,7 @@
 {
+  "Запускать при входе в Windows": "Start when signing in to Windows",
+  "Запускать в свёрнутом режиме": "Start minimized",
+  "Не удалось изменить автозапуск Windows.": "Could not change Windows startup settings.",
   "Служба не подтвердила очистку сети. Нажмите «Восстановить сеть».": "The service has not confirmed network cleanup. Use Restore network access.",
   "Связь с сетевой службой потеряна. Нажмите «Восстановить сеть».": "Connection to the network service was lost. Use Restore network access.",
   "Домены или IP-адреса, по одному в строке": "Domains or IP addresses, one per line",

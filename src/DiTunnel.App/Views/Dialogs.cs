@@ -177,6 +177,35 @@ public static class Dialogs
             appearance.Children.Add(theme); Grid.SetRow(theme, 1);
             if (!OperatingSystem.IsAndroid()) { appearance.Children.Add(close); Grid.SetColumn(close, 1); Grid.SetRow(close, 1); }
             panel.Children.Add(appearance);
+            if (vm.Platform.ReleaseTarget == ReleaseTarget.WindowsX64)
+            {
+                var autostart = new CheckBox { Content = L.T("Запускать при входе в Windows"), IsChecked = UserSettings.Current.StartWithWindows };
+                var minimized = new CheckBox { Content = L.T("Запускать в свёрнутом режиме"), IsChecked = UserSettings.Current.StartMinimized,
+                    IsEnabled = UserSettings.Current.StartWithWindows };
+                var changingAutostart = false;
+                autostart.IsCheckedChanged += (_, _) =>
+                {
+                    if (changingAutostart) return;
+                    var enabled = autostart.IsChecked == true;
+                    try
+                    {
+                        if (App.SetWindowsAutostart is not { } register) throw new InvalidOperationException();
+                        register(enabled);
+                        UserSettings.Current.StartWithWindows = enabled;
+                        minimized.IsEnabled = enabled;
+                        Save();
+                    }
+                    catch
+                    {
+                        changingAutostart = true;
+                        autostart.IsChecked = UserSettings.Current.StartWithWindows;
+                        changingAutostart = false;
+                        status.Text = L.T("Не удалось изменить автозапуск Windows.");
+                    }
+                };
+                minimized.IsCheckedChanged += (_, _) => { UserSettings.Current.StartMinimized = minimized.IsChecked == true; Save(); };
+                panel.Children.Add(autostart); panel.Children.Add(minimized);
+            }
             BeginSection("Соединение");
             var ipv4Only = new CheckBox { Content = L.T("Использовать только IPv4"), IsChecked = UserSettings.Current.Ipv4Only };
             ipv4Only.IsCheckedChanged += (_, _) =>
