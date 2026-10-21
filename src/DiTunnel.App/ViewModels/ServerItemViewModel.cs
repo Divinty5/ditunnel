@@ -22,7 +22,15 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private bool probeTimedOut;
     public string ProbeDisplayText => ProbeText == "Проверяем…" || ProbeMilliseconds is not { } delay
-        ? ProbeText : $"{delay:0} мс";
+        ? ProbeText : $"{delay:0} мс{ProbeMethod}";
+    private string ProbeMethod
+    {
+        get
+        {
+            var method = ProbeText.Split('·', 2)[0].Trim();
+            return method is "TCP" or "TLS" or "HTTP" or "HTTPS" ? $" · {method}" : "";
+        }
+    }
     public IBrush ProbeBrush => ProbeText == "Проверяем…"
         ? LatencyPalette.For(null)
         : LatencyPalette.For(ProbeMilliseconds, ProbeTimedOut);

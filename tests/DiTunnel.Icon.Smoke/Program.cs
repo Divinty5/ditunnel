@@ -104,6 +104,7 @@ internal static class Program
         if (args is ["--render-settings", var output])
         {
             VerifySettingsPresentation(window, Path.GetFullPath(output));
+            VerifyMainCountryFlag(window, Path.GetFullPath(output));
             VerifySubscriptionsScrolling(window);
             if (OperatingSystem.IsWindows()) VerifyTaskbarRefresh(window);
         }
@@ -270,6 +271,29 @@ internal static class Program
         Console.WriteLine("PASS_VISIBLE_WINDOWS_NATIVE_ICON_BOUNDS_FOCUS_SAME_WINDOW_NO_RELAUNCH_OVERRIDE");
     }
 
+    private sealed class SyntheticCountryResolver : IServerCountryResolver
+    {
+        public Task<string?> ResolveAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.FromResult<string?>("SE");
+    }
+
+    private static void VerifyMainCountryFlag(Window window, string output)
+    {
+        var model = new MainViewModel(null, new ManyServersStore(), countryResolver: new SyntheticCountryResolver(), platform: AppPlatform.Linux,
+            selectionSettings: new(), persistSelection: () => { });
+        var view = new MainView { DataContext = model };
+        window.Content = view;
+        window.Width = 920; window.Height = 900; window.Show();
+        Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
+        Require(model.HasSelectedFlag && view.GetVisualDescendants().OfType<Image>().Any(image =>
+            image.IsEffectivelyVisible && ReferenceEquals(image.Source, model.SelectedFlag) && image.Bounds.Width > 0), "Resolved country flag is visible on the main screen");
+        using var bitmap = new RenderTargetBitmap(new PixelSize((int)view.Bounds.Width, (int)view.Bounds.Height));
+        bitmap.Render(view);
+        bitmap.Save(Path.Combine(output, "main-country-flag.png"), new PngBitmapEncoderOptions());
+        window.Hide(); window.Content = null;
+        model.ShutdownAsync().GetAwaiter().GetResult();
+        Console.WriteLine("PASS_MAIN_COUNTRY_FLAG_RENDERED");
+    }
+
     private static void VerifySubscriptionsScrolling(Window window)
     {
         foreach (var platform in new[] { AppPlatform.Windows, AppPlatform.Android, AppPlatform.Linux })
@@ -300,10 +324,15 @@ internal static class Program
             Require(model.CanSelectProfile && list.GetVisualDescendants().OfType<ListBoxItem>().First().IsEffectivelyEnabled, "Selection reenabled after probes");
             list.SelectedItem = model.Profiles[1];
             Require(ReferenceEquals(model.SelectedProfile, model.Profiles[1]), "User selection works after probes");
-            model.Profiles[1].ProbeText = "Сервер ответил через туннель за 428 мс";
+            model.Profiles[1].ProbeText = "HTTP · 428 мс";
             model.Profiles[1].ProbeMilliseconds = 428;
+            model.Profiles[1].CountryCode = "SE";
             Dispatcher.UIThread.RunJobs(); window.UpdateLayout();
-            Require(list.GetVisualDescendants().OfType<TextBlock>().Any(text => text.Text == L.T("428 мс") && text.Bounds.Width >= 35), "Numeric latency is visible in a narrow server tile");
+            var latency = list.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == L.T("428 мс · HTTP"));
+            var measurement = new TextBlock { Text = latency.Text, FontSize = latency.FontSize, FontFamily = latency.FontFamily };
+            measurement.Measure(Size.Infinity);
+            Require(latency.Bounds.Width >= measurement.DesiredSize.Width - 1, "Numeric latency and actual method are visible in a narrow server tile");
+            Require(model.Profiles[1].HasFlag && list.GetVisualDescendants().OfType<Image>().Any(image => image.IsEffectivelyVisible && ReferenceEquals(image.Source, model.Profiles[1].FlagImage)), "Country flag is visible next to the probed server");
             window.Hide(); window.Content = null;
             model.ShutdownAsync().GetAwaiter().GetResult();
         }
