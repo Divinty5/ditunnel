@@ -237,11 +237,11 @@ public sealed class ConnectionInteractionTests
         public event EventHandler<VpnStatus>? StatusChanged;
         public bool RequiresAdministrator => false;
         public bool IsNetworkProtectionActive => Status.State == VpnConnectionState.Connected;
-        public List<string> ConnectedProfiles { get; } = [];
+        public System.Collections.Concurrent.ConcurrentQueue<string> ConnectedProfiles { get; } = new();
         public int Disconnects { get; private set; }
         public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
         {
-            ConnectedProfiles.Add(profile.Name);
+            ConnectedProfiles.Enqueue(profile.Name);
             Status = new(VpnConnectionState.Connected);
             StatusChanged?.Invoke(this, Status);
             return Task.CompletedTask;
@@ -287,15 +287,17 @@ public sealed class ConnectionInteractionTests
     [Fact] public async Task SelectingAnotherProfileReconnectsActiveVpn()
     {
         var engine = new SwitchingEngine();
-        var vm = new MainViewModel(engine, new TwoProfileStore());
-        await vm.ConnectCommand.ExecuteAsync(null);
-
-        vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
-        await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(2)), WaitForAsync(() => engine.ConnectedProfiles.Count == 2));
-
-        Assert.Equal(["A", "B"], engine.ConnectedProfiles);
-        Assert.Equal(1, engine.Disconnects);
-        Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+        var vm = new MainViewModel(engine, new TwoProfileStore(), selectionSettings: new(), persistSelection: () => { });
+        try
+        {
+            await vm.ConnectCommand.ExecuteAsync(null);
+            vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
+            await WaitForAsync(() => engine.ConnectedProfiles.Count == 2 && !vm.IsConnecting).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(["A", "B"], engine.ConnectedProfiles.ToArray());
+            Assert.Equal(1, engine.Disconnects);
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
 
     [Fact] public async Task ApplyingNetworkSettingsReconnectsActiveVpn()
@@ -326,14 +328,16 @@ public sealed class ConnectionInteractionTests
     [Fact] public async Task SelectingProfileAfterFailedConnectionStartsItImmediately()
     {
         var engine = new SwitchingEngine();
-        var vm = new MainViewModel(engine, new TwoProfileStore()) { ConnectionState = VpnConnectionState.Error };
-
-        vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
-        await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(2)), WaitForAsync(() => engine.ConnectedProfiles.Count == 1));
-
-        Assert.Equal(["B"], engine.ConnectedProfiles);
-        Assert.Equal(0, engine.Disconnects);
-        Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+        var vm = new MainViewModel(engine, new TwoProfileStore(), selectionSettings: new(), persistSelection: () => { }) { ConnectionState = VpnConnectionState.Error };
+        try
+        {
+            vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
+            await WaitForAsync(() => engine.ConnectedProfiles.Count == 1 && !vm.IsConnecting).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(["B"], engine.ConnectedProfiles.ToArray());
+            Assert.Equal(0, engine.Disconnects);
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
 
     private static async Task WaitForAsync(Func<bool> condition)
