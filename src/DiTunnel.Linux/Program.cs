@@ -72,7 +72,9 @@ internal static partial class Program
             SharedApp.Platform = platform;
             SharedApp.CreateMainViewModel = () =>
             {
-                var model = new MainViewModel(canConnect ? network : null, store: store, probe: canProbe ? network : null, platform: platform, installedApplicationProvider: new LinuxInstalledApplications());
+                var model = new MainViewModel(canConnect ? network : null, store: store, probe: canProbe ? network : null,
+                    countryResolver: new LinuxServerCountryResolver("/usr/lib/ditunnel/runtime/geoip.dat"),
+                    platform: platform, installedApplicationProvider: new LinuxInstalledApplications());
                 if (model.CanImport) model.Notice = network.Status.Message ?? (canConnect
                     ? platform.SupportsAdvancedNetworkSettings ? "Linux VPN доступен. Раздельное туннелирование и kill switch настраиваются в настройках соединения."
                     : "Linux VPN доступен. Для раздельного туннелирования обновите Linux runtime."

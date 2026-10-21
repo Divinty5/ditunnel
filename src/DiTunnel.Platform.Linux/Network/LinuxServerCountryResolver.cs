@@ -1,0 +1,39 @@
+using System.Collections.Concurrent;
+using System.Net;
+using DiTunnel.Core.Connection;
+using DiTunnel.Core.Profiles;
+using DiTunnel.Infrastructure.Xray;
+
+namespace DiTunnel.Platform.Linux.Network;
+
+public sealed class LinuxServerCountryResolver(string databasePath) : IServerCountryResolver
+{
+    private readonly Lazy<Task<GeoIpDatabase>> database = new(() => Task.Run(() => GeoIpDatabase.Load(File.ReadAllBytes(databasePath))));
+    private readonly ConcurrentDictionary<string, Task<string?>> cache = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<string?> ResolveAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var host = AmneziaWgProfileConverter.IsAmneziaWg(profile)
+                ? AmneziaWgProfileConverter.Convert(profile).ServerHost : XrayProfileConverter.Convert(profile).ServerHost;
+            var task = cache.GetOrAdd(host, LookupAsync);
+            var code = await task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (code is null) cache.TryRemove(new KeyValuePair<string, Task<string?>>(host, task));
+            return code;
+        }
+        catch { return null; }
+    }
+
+    private async Task<string?> LookupAsync(string host)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            var addresses = await Dns.GetHostAddressesAsync(host, timeout.Token).ConfigureAwait(false);
+            var geo = await database.Value.WaitAsync(timeout.Token).ConfigureAwait(false);
+            return addresses.Select(geo.FindCountry).FirstOrDefault(code => code is not null);
+        }
+        catch { return null; }
+    }
+}
