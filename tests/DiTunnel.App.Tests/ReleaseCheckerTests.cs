@@ -6,6 +6,22 @@ namespace DiTunnel.App.Tests;
 public sealed class ReleaseCheckerTests
 {
     [Theory]
+    [InlineData(ReleaseTarget.WindowsX64)]
+    [InlineData(ReleaseTarget.AndroidArm64)]
+    public void Linux_only_release_does_not_hide_previous_platform_package(ReleaseTarget target)
+    {
+        var name = "Di-Tunnel-0.6.6-linux-amd64.deb";
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new object[]
+        {
+            new { tag_name = "v0.6.6", draft = false, prerelease = false,
+                assets = new[] { name, name + ".sha256" }.Select(name => new { name, browser_download_url = "https://github.com/Divinty5/ditunnel/releases/download/v0.6.6/" + name }) },
+            Release("0.6.4", target == ReleaseTarget.AndroidArm64)
+        }));
+        Assert.Null(ReleaseChecker.ParseReleases(json.RootElement, new(0, 6, 4), target).Release);
+        Assert.Equal(new Version(0, 6, 4), ReleaseChecker.ParseReleases(json.RootElement, new(0, 6, 3), target).Release?.Version);
+        Assert.Equal(new Version(0, 6, 6), ReleaseChecker.ParseReleases(json.RootElement, new(0, 6, 5), ReleaseTarget.LinuxX64).Release?.Version);
+    }
+    [Theory]
     [InlineData(ReleaseTarget.WindowsX64, "Di-Tunnel-0.6.1-Setup-x64.exe")]
     [InlineData(ReleaseTarget.AndroidArm64, "Di-Tunnel-0.6.1-arm64.apk")]
     [InlineData(ReleaseTarget.LinuxX64, "Di-Tunnel-0.6.1-linux-amd64.deb")]
