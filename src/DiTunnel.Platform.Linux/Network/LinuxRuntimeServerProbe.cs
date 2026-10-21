@@ -12,9 +12,17 @@ using DiTunnel.Infrastructure.Xray;
 namespace DiTunnel.Platform.Linux.Network;
 
 [SupportedOSPlatform("linux")]
-public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stateDirectory, uint transportMark = 0) : IServerProbe
+public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stateDirectory, uint transportMark = 0,
+    ILinuxFirewallCommands? firewall = null, SemaphoreSlim? operations = null, LinuxEndpointResolver? endpoints = null) : IServerProbe
 {
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+    {
+        if (operations is not null) await operations.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await ProbeCoreAsync(profile, cancellationToken, mode).ConfigureAwait(false); }
+        finally { operations?.Release(); }
+    }
+
+    private async Task<ServerProbeResult> ProbeCoreAsync(ImportedProfile profile, CancellationToken cancellationToken, ServerProbeMode mode)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var budget = TimeSpan.FromSeconds(mode == ServerProbeMode.Fast ? 8 : 12);
@@ -28,11 +36,10 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
             var isAwg = AmneziaWgProfileConverter.IsAmneziaWg(profile);
             var awg = isAwg ? AmneziaWgProfileConverter.Convert(profile) : null;
             var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
-            var host = awg?.ServerHost ?? converted!.ServerHost;
-            var addresses = await Dns.GetHostAddressesAsync(host, timeout.Token).ConfigureAwait(false);
-            var address = addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetwork)
-                ?? addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetworkV6)
-                ?? throw new InvalidOperationException();
+            var address = await (endpoints ?? new()).ResolveAsync(profile, false, timeout.Token).ConfigureAwait(false);
+            await using var permit = new LinuxProbeFirewallLease(firewall);
+            await permit.PermitAsync(address, awg?.ServerPort ?? converted!.ServerPort,
+                awg is not null ? KillSwitchTransportProtocol.Udp : converted!.ServerTransport, timeout.Token).ConfigureAwait(false);
             // Linux AWG supports both transport families; IPv6 sockets are explicit.
             await using var bridge = awg is null ? null : await StartAwgAsync(awg, address, directory, timeout.Token, transportMark).ConfigureAwait(false);
             configuration = bridge?.Proxy ?? converted!;
@@ -52,7 +59,8 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
             var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, xray, path, timeout.Token,
                 useHttps: mode == ServerProbeMode.Https, tcpOnly: awg is not null && mode == ServerProbeMode.Fast, probeTimeout: budget,
                 processLifetimeFactory: static process => new LinuxProcessLifetime(process)).ConfigureAwait(false);
-            return new(milliseconds, "Сервер ответил через туннель.");
+            var method = mode == ServerProbeMode.Https ? "HTTPS" : awg is not null ? "TLS" : "HTTP";
+            return new(milliseconds, $"{method} · {milliseconds:F0} мс");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (OperationCanceledException) { return new(null, "Время проверки сервера истекло."); }

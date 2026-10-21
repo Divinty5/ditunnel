@@ -9,8 +9,9 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
     private Operation? active;
     private bool stopping;
     private bool recovering;
+    private bool switching;
     private bool retainedProtection;
-    public bool ProtectionActive { get { lock (gate) return active?.Session?.IsProtectionActive ?? retainedProtection; } }
+    public bool ProtectionActive { get { lock (gate) return active?.Session?.IsProtectionActive == true || retainedProtection; } }
     public void RecordRetainedProtection()
     {
         lock (gate) { retainedProtection = true; status = new(VpnConnectionState.Error, "Kill switch сохраняет блокировку. Нажмите «Восстановить сеть» для её снятия."); }
@@ -36,6 +37,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
         public TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ILinuxVpnSession? Session { get; set; }
         public bool ReleaseProtection { get; set; }
+        public bool CancelledByClient { get; set; }
     }
 
     public Task ConnectAsync(string sender, Guid id, ImportedProfile profile, Func<CancellationToken, Task<bool>> authorize, LinuxVpnPolicy? policy = null)
@@ -43,14 +45,50 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
         Operation operation;
         lock (gate)
         {
-            if (retainedProtection) throw new InvalidOperationException("Kill switch сохраняет блокировку. Сначала восстановите сеть.");
-            if (stopping || recovering || active is not null) throw new InvalidOperationException("Сетевая служба уже обслуживает сессию VPN.");
+            if (stopping || recovering || switching || active is not null) throw new InvalidOperationException("Сетевая служба уже обслуживает сессию VPN.");
             active = operation = new(sender, id);
             status = new(VpnConnectionState.Connecting);
         }
         // Reserve ownership synchronously, before authorization can yield.
         _ = RunAsync(operation, profile, authorize, policy ?? LinuxVpnPolicy.Default);
         return operation.Ready.Task;
+    }
+
+    public async Task SwitchAsync(string sender, Guid id, ImportedProfile profile,
+        Func<CancellationToken, Task<bool>> authorize, LinuxVpnPolicy policy)
+    {
+        Operation operation;
+        lock (gate)
+        {
+            operation = active ?? throw new InvalidOperationException("Нет активной сессии VPN.");
+            if (operation.Sender != sender || operation.Id != id) throw new UnauthorizedAccessException();
+            if (stopping || recovering || switching || !operation.Ready.Task.IsCompletedSuccessfully) throw new InvalidOperationException();
+            switching = true;
+        }
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            if (!await authorize(timeout.Token).ConfigureAwait(false)) throw new UnauthorizedAccessException();
+            await operation.Session!.PrepareAsync(profile, policy, timeout.Token).ConfigureAwait(false);
+            lock (gate)
+            {
+                if (active != operation) throw new InvalidOperationException("Предыдущая сессия завершилась.");
+                // Keep the old kernel firewall and ownership journal throughout teardown.
+                operation.ReleaseProtection = false;
+                operation.Cancellation.Cancel();
+            }
+            await operation.Completed.Task.ConfigureAwait(false);
+            Operation next;
+            lock (gate)
+            {
+                if (stopping || recovering || active is not null || operation.CancelledByClient) throw new OperationCanceledException();
+                active = next = new(sender, id);
+                status = new(VpnConnectionState.Reconnecting);
+            }
+            _ = RunAsync(next, profile, authorize, policy);
+            await next.Ready.Task.ConfigureAwait(false);
+        }
+        finally { lock (gate) switching = false; }
     }
 
     private async Task RunAsync(Operation operation, ImportedProfile profile, Func<CancellationToken, Task<bool>> authorize, LinuxVpnPolicy policy)
@@ -64,7 +102,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
             deadline.Token.ThrowIfCancellationRequested();
             operation.Session = createSession();
             await operation.Session.StartAsync(profile, policy, deadline.Token).ConfigureAwait(false);
-            lock (gate) status = new(VpnConnectionState.Connected, ConnectedAt: DateTimeOffset.UtcNow);
+            lock (gate) { retainedProtection = false; status = new(VpnConnectionState.Connected, ConnectedAt: DateTimeOffset.UtcNow); }
             operation.Ready.TrySetResult();
             await operation.Session.WaitForExitAsync(operation.Cancellation.Token).ConfigureAwait(false);
         }
@@ -97,7 +135,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
             lock (gate)
             {
                 active = null;
-                retainedProtection = operation.Session?.IsProtectionActive == true;
+                retainedProtection |= operation.Session?.IsProtectionActive == true;
                 status = retainedProtection ? new(VpnConnectionState.Error, "Kill switch сохраняет блокировку. Нажмите «Восстановить сеть» для её снятия.")
                     : failure is null ? VpnStatus.Disconnected : new(VpnConnectionState.Error, "Подключение VPN завершилось с ошибкой; собственные сетевые объекты очищены.");
             }
@@ -118,6 +156,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
             if (operation is null) return;
             if (operation.Sender != sender || operation.Id != id) throw new UnauthorizedAccessException();
             // A failed Connect reply must not let automatic client cleanup release a retained KS.
+            operation.CancelledByClient = true;
             operation.ReleaseProtection = operation.Ready.Task.IsCompletedSuccessfully;
             status = new(VpnConnectionState.Disconnecting);
             operation.Cancellation.Cancel();
@@ -158,7 +197,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
     {
         lock (gate)
         {
-            if (stopping || recovering) throw new InvalidOperationException();
+            if (stopping || recovering || switching) throw new InvalidOperationException();
             recovering = true;
         }
         try
@@ -168,6 +207,12 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
             await RestoreAsync(sender, authorizedRecovery: true).ConfigureAwait(false);
             await recover().ConfigureAwait(false);
             lock (gate) { retainedProtection = false; status = VpnStatus.Disconnected; }
+        }
+        catch (UnauthorizedAccessException) { throw; }
+        catch
+        {
+            lock (gate) status = new(VpnConnectionState.Error, "Очистка сети не завершена. Нажмите «Восстановить сеть».");
+            throw;
         }
         finally { lock (gate) recovering = false; }
     }

@@ -19,6 +19,6 @@
   <action id="org.divinty5.ditunnel.recover">
     <description>Restore the network objects owned by Di-Tunnel</description>
     <message>Authentication is required to restore Di-Tunnel network settings.</message>
-    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin_keep</allow_active></defaults>
   </action>
 </policyconfig>

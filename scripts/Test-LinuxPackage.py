@@ -26,6 +26,7 @@ def main():
             raise RuntimeError("Unexpected package " + field)
     binaries = {"./usr/lib/ditunnel/ui/Di-Tunnel.Linux", "./usr/lib/ditunnel/host/DiTunnel.NetworkHost.Linux", "./usr/lib/ditunnel/runtime/xray", "./usr/lib/ditunnel/runtime/ditunnel-awg"}
     found = set()
+    bus_policy_found = False
     # Stream the payload without extracting paths into the caller's filesystem.
     with subprocess.Popen(["dpkg-deb", "--fsys-tarfile", args.package], stdout=subprocess.PIPE) as process:
         with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
@@ -38,9 +39,18 @@ def main():
                     if not member.isfile() or member.mode & 0o111 != 0o111 or archive.extractfile(member).read(4) != b"\x7fELF":
                         raise RuntimeError("Missing executable Linux ELF: " + member.name)
                     found.add(member.name)
+                if member.name == "./usr/share/dbus-1/system.d/org.divinty5.DiTunnel.Network1.conf":
+                    policy = ET.fromstring(archive.extractfile(member).read())
+                    allowed = {entry.get("send_member") for group in policy.findall("policy") if group.get("context") == "default"
+                               for entry in group.findall("allow") if entry.get("send_interface") == "org.divinty5.DiTunnel.Network1"
+                               and entry.get("send_destination") == "org.divinty5.DiTunnel.Network1"}
+                    expected = {"GetCapabilities", "Probe", "CancelProbe", "Connect", "Switch", "Disconnect", "GetStatus", "RestoreNetwork"}
+                    if allowed != expected:
+                        raise RuntimeError("D-Bus method whitelist does not match the shipped network client")
+                    bus_policy_found = True
         if process.wait() != 0:
             raise RuntimeError("Cannot read payload")
-    if found != binaries:
+    if found != binaries or not bus_policy_found:
         raise RuntimeError("Incomplete executable payload")
     with tempfile.TemporaryDirectory(prefix="ditunnel-control-") as directory:
         subprocess.run(["dpkg-deb", "--control", args.package, directory], check=True)

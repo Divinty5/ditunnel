@@ -59,6 +59,16 @@ public sealed class LinuxKillSwitch(ILinuxFirewallCommands commands, string owne
             $"add rule inet {table} forward iifname \"{name}\" accept"
         };
         lines.InsertRange(5, transports.Select(transport => $"add rule inet {table} output {trusted} meta mark {LinuxRouteLease.Mark} {family} daddr {endpoint} {transport} dport {port} accept"));
+        foreach (var (suffix, type, addressExpression, transport) in new[]
+        {
+            ("4tcp", "ipv4_addr", "ip daddr", "tcp"), ("4udp", "ipv4_addr", "ip daddr", "udp"),
+            ("6tcp", "ipv6_addr", "ip6 daddr", "tcp"), ("6udp", "ipv6_addr", "ip6 daddr", "udp")
+        })
+        {
+            lines.Insert(1, $"add set inet {table} probe{suffix} {{ type {type} . inet_service; flags timeout; timeout 30s; }}");
+            var dnsDrop = lines.FindIndex(line => line.Contains("th dport 53 drop", StringComparison.Ordinal));
+            lines.Insert(dnsDrop, $"add rule inet {table} output {trusted} meta mark {LinuxRouteLease.Mark} {addressExpression} . {transport} dport @probe{suffix} accept");
+        }
         if (allowLan)
         {
             lines.Add($"add rule inet {table} output ip daddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 }} accept");
@@ -70,9 +80,12 @@ public sealed class LinuxKillSwitch(ILinuxFirewallCommands commands, string owne
     public async Task ActivateAsync(string name, IPAddress endpoint, ushort port, KillSwitchTransportProtocol protocol, bool allowLan, CancellationToken token)
     {
         var rules = JsonNode.Parse(await commands.ReadAsync(token))!["nftables"]!.AsArray();
-        if (rules.Any(entry => entry?["table"]?["name"]?.ToString().StartsWith("dtks_", StringComparison.Ordinal) == true))
+        var tables = rules.Select(entry => entry?["table"]).Where(entry => entry?["name"]?.ToString().StartsWith("dtks_", StringComparison.Ordinal) == true).ToArray();
+        if (tables.Any(table => table?["family"]?.ToString() != "inet" || table?["name"]?.ToString() != Table || table?["comment"]?.ToString() != Identity))
             throw new InvalidOperationException("Предыдущий kill switch требует восстановления сети.");
-        try { await commands.ApplyAsync(Build(owner, name, endpoint, port, protocol, allowLan, CurrentCgroup()), token); }
+        // nft commits the delete/rebuild as one transaction, with no unprotected gap.
+        var replace = tables.Length == 0 ? "" : $"delete table inet {Table}\n";
+        try { await commands.ApplyAsync(replace + Build(owner, name, endpoint, port, protocol, allowLan, CurrentCgroup()), token); }
         catch
         {
             // An interrupted nft invocation may already have committed its atomic batch.

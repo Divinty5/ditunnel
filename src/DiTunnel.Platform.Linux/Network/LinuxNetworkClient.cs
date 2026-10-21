@@ -121,6 +121,12 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
     private async Task ConnectCoreAsync(ImportedProfile profile, CancellationToken cancellationToken)
     {
         _ = LinuxNetworkProtocol.ParseProfile(LinuxNetworkProtocol.Version, profile.Content, 0);
+        if (sessionId is not null && Status.State == VpnConnectionState.Error)
+        {
+            var current = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+            Publish(current);
+            if (current.State is VpnConnectionState.Error or VpnConnectionState.Disconnected) sessionId = null;
+        }
         if (sessionId is not null) throw new InvalidOperationException(Status.State == VpnConnectionState.Error
             ? "Служба не подтвердила очистку сети. Нажмите «Восстановить сеть»." : "Сначала отключите текущую сессию VPN.");
         var id = Guid.NewGuid();
@@ -175,6 +181,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
     {
         await control.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { await RestoreNetworkCoreAsync(cancellationToken).ConfigureAwait(false); }
+        catch { await PublishCleanupFailureAsync().ConfigureAwait(false); throw; }
         finally { control.Release(); }
     }
 
@@ -188,12 +195,33 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
 
     public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
-        // The generic disconnect/connect sequence releases KS between sessions.
-        // Until an atomic policy handoff is available, require an explicit disconnect.
-        if (IsNetworkProtectionActive && policy().KillSwitch)
-            throw new NotSupportedException("С активным kill switch сначала отключите VPN вручную, затем подключитесь с новыми настройками.");
-        await DisconnectAsync(cancellationToken).ConfigureAwait(false);
-        await ConnectAsync(profile, cancellationToken).ConfigureAwait(false);
+        _ = LinuxNetworkProtocol.ParseProfile(LinuxNetworkProtocol.Version, profile.Content, 0);
+        await control.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (sessionId is not { } id) { await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false); return; }
+            Publish(new(VpnConnectionState.Reconnecting));
+            var call = connection.CallMethodAsync(CreateControl("Switch", id, profile.Content));
+            try
+            {
+                await call.WaitAsync(TimeSpan.FromSeconds(95), cancellationToken).ConfigureAwait(false);
+                ActiveProfile = profile;
+                Publish(await ReadStatusAsync(cancellationToken).ConfigureAwait(false));
+            }
+            catch
+            {
+                _ = call.ContinueWith(task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                if (cancellationToken.IsCancellationRequested) await DisconnectCoreAsync().ConfigureAwait(false);
+                else
+                {
+                    var status = await ReadStatusAsync(CancellationToken.None).ConfigureAwait(false);
+                    Publish(status);
+                    if (status.State is VpnConnectionState.Error or VpnConnectionState.Disconnected) sessionId = null;
+                }
+                throw;
+            }
+        }
+        finally { control.Release(); }
     }
 
     private Task<VpnStatus> ReadStatusAsync(CancellationToken token) => connection.CallMethodAsync(CreateControl("GetStatus"), (message, _) =>
@@ -217,7 +245,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
             while (!monitoring.IsCancellationRequested)
             {
                 await Task.Delay(1000, monitoring.Token).ConfigureAwait(false);
-                if (sessionId is null || Status.State != VpnConnectionState.Connected) continue;
+                if (sessionId is null || Status.State is not (VpnConnectionState.Connected or VpnConnectionState.Error)) continue;
                 if (!await control.WaitAsync(0, monitoring.Token).ConfigureAwait(false)) continue;
                 try
                 {

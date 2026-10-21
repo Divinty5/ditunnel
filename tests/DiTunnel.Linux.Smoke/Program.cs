@@ -16,6 +16,8 @@ internal static class Program
 {
     public static async Task Main(string[] args)
     {
+        if (OperatingSystem.IsLinux() && args is ["--protected-switch-vm"]) { await LinuxProtectedSwitchSmoke.RunAsync(); return; }
+        if (OperatingSystem.IsLinux() && args is ["--private-subscription-vm", var subscription]) { await LinuxPrivateSubscriptionSmoke.RunAsync(subscription); return; }
         if (args.Length == 3 && args[0] == "--vpn-namespace") { await LinuxVpnSmoke.RunAsync(args[1], int.Parse(args[2])); return; }
         if (!OperatingSystem.IsLinux() || args.Length != 3) throw new ArgumentException("Expected dotnet, host DLL, runtime directory on Linux.");
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -47,6 +49,26 @@ internal static class Program
         authority.Allow = true;
         if (!await authorization.AuthorizeAsync(caller.UniqueName!, token)) throw new InvalidOperationException("Polkit subject or decision invalid.");
         if (await authorization.AuthorizeAsync("org.example.ForgedSender", token)) throw new InvalidOperationException("Nonunique bus sender accepted.");
+        authority.ExpectedAction = LinuxNetworkProtocol.ConnectAction;
+        authority.Interactive = true;
+        if (!await authorization.AuthorizeAsync(caller.UniqueName!, LinuxNetworkProtocol.ConnectAction, true, token)) throw new Exception("Initial authorization denied");
+        authority.ExpectedAction = LinuxNetworkProtocol.ProbeAction;
+        authority.Interactive = false;
+        if (!await authorization.AuthorizeAsync(caller.UniqueName!, LinuxNetworkProtocol.RecoverAction, true, token)) throw new Exception("Same active client asked for a second control authorization");
+        using var other = new DBusConnection(DBusAddress.Session!);
+        await other.ConnectAsync();
+        authority.ExpectedSender = other.UniqueName!;
+        authority.ExpectedAction = LinuxNetworkProtocol.ConnectAction;
+        authority.Interactive = true;
+        authority.Allow = false;
+        if (await authorization.AuthorizeAsync(other.UniqueName!, LinuxNetworkProtocol.ConnectAction, true, token)) throw new Exception("Another client inherited the control authorization");
+        authority.ExpectedSender = caller.UniqueName!;
+        authorization.SenderDisconnected(caller.UniqueName!);
+        authority.ExpectedAction = LinuxNetworkProtocol.RecoverAction;
+        authority.Interactive = true;
+        authority.Allow = false;
+        if (await authorization.AuthorizeAsync(caller.UniqueName!, LinuxNetworkProtocol.RecoverAction, true, token)) throw new Exception("Disconnected client retained authorization");
+        Console.WriteLine("PASS_CONTROL_AUTHORIZATION_REUSED_ONLY_FOR_SAME_ACTIVE_BUS_CLIENT_AND_REVOKED_ON_EXIT");
         Console.WriteLine("PASS_POLKIT_WIRE_SUBJECT_AND_ALLOW_DENY_ON_ISOLATED_BUS");
     }
 
@@ -55,6 +77,9 @@ internal static class Program
         public string Path => "/org/freedesktop/PolicyKit1/Authority";
         public bool HandlesChildPaths => false;
         public bool Allow { get; set; }
+        public string ExpectedAction { get; set; } = LinuxNetworkProtocol.ProbeAction;
+        public bool Interactive { get; set; }
+        public string ExpectedSender { get; set; } = sender;
         public ValueTask HandleMethodAsync(MethodContext context)
         {
             if (context.Request.MemberAsString != "CheckAuthorization" || context.Request.SignatureAsString != "(sa{sv})sa{ss}us")
@@ -66,13 +91,13 @@ internal static class Program
             var names = 0;
             while (reader.HasNext(subject))
             {
-                if (reader.ReadString() != "name" || reader.ReadVariantValue().GetString() != sender)
+                if (reader.ReadString() != "name" || reader.ReadVariantValue().GetString() != ExpectedSender)
                     throw new InvalidOperationException("Polkit sender is not broker-authenticated name.");
                 names++;
             }
-            if (names != 1 || reader.ReadString() != LinuxNetworkProtocol.ProbeAction) throw new InvalidOperationException("Unexpected polkit action.");
+            if (names != 1 || reader.ReadString() != ExpectedAction) throw new InvalidOperationException("Unexpected polkit action.");
             var details = reader.ReadDictionaryStart();
-            if (reader.HasNext(details) || reader.ReadUInt32() != 0 || reader.ReadString() != "") throw new InvalidOperationException("Unexpected authorization details.");
+            if (reader.HasNext(details) || reader.ReadUInt32() != (Interactive ? 1u : 0u) || reader.ReadString() != "") throw new InvalidOperationException("Unexpected authorization details.");
             using var writer = context.CreateReplyWriter("(bba{ss})");
             writer.WriteStructureStart();
             writer.WriteBool(Allow);

@@ -4,6 +4,8 @@ namespace DiTunnel.NetworkHost.Linux;
 
 internal sealed class LinuxProbeAuthorization(DBusConnection connection, uint? developmentUid)
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> authorizedClients = new();
+    public void SenderDisconnected(string sender) => authorizedClients.TryRemove(sender, out _);
     public async Task<bool> AuthorizeAsync(string sender, CancellationToken token)
         => await AuthorizeAsync(sender, DiTunnel.Platform.Linux.Network.LinuxNetworkProtocol.ProbeAction, false, token).ConfigureAwait(false);
 
@@ -13,13 +15,25 @@ internal sealed class LinuxProbeAuthorization(DBusConnection connection, uint? d
         var uid = await connection.CallMethodAsync(CreateCredentials(sender), static (message, _) =>
             message.GetBodyReader().ReadUInt32()).WaitAsync(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
         if (developmentUid is { } expected) return uid == expected;
-        return await connection.CallMethodAsync(CreateAuthorization(sender, action, interactive), static (message, _) =>
+        var control = interactive && action is DiTunnel.Platform.Linux.Network.LinuxNetworkProtocol.ConnectAction or DiTunnel.Platform.Linux.Network.LinuxNetworkProtocol.RecoverAction;
+        if (control && authorizedClients.ContainsKey(sender)
+            && await CheckAsync(sender, DiTunnel.Platform.Linux.Network.LinuxNetworkProtocol.ProbeAction, false, token).ConfigureAwait(false)) return true;
+        var allowed = await CheckAsync(sender, action, interactive, token).ConfigureAwait(false);
+        if (allowed && control)
+        {
+            if (authorizedClients.Count >= 128) authorizedClients.Clear();
+            authorizedClients[sender] = 0;
+        }
+        return allowed;
+    }
+
+    private async Task<bool> CheckAsync(string sender, string action, bool interactive, CancellationToken token)
+        => await connection.CallMethodAsync(CreateAuthorization(sender, action, interactive), static (message, _) =>
         {
             var reader = message.GetBodyReader();
             reader.AlignStruct();
             return reader.ReadBool();
         }).WaitAsync(TimeSpan.FromSeconds(60), token).ConfigureAwait(false);
-    }
 
     private MessageBuffer CreateCredentials(string sender)
     {

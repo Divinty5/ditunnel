@@ -58,13 +58,16 @@ internal static partial class Program
                 try { retainedProtection = await LinuxVpnSession.RecoverAsync(stateDirectory, commands, CancellationToken.None, releaseProtection: false); }
                 catch { recoveryFailed = true; } // Keep the authorized recovery endpoint available.
             }
-            await using var coordinator = new LinuxProbeCoordinator(new LinuxRuntimeServerProbe(runtimeDirectory, stateDirectory, canConnect ? LinuxRouteLease.Mark : 0));
-            await using var vpn = new LinuxVpnCoordinator(() => new LinuxVpnSession(runtimeDirectory, stateDirectory, commands));
+            using var operations = new SemaphoreSlim(1, 1);
+            var endpoints = new LinuxEndpointResolver();
+            await using var coordinator = new LinuxProbeCoordinator(new LinuxRuntimeServerProbe(runtimeDirectory, stateDirectory, canConnect ? LinuxRouteLease.Mark : 0,
+                canConnect ? commands : null, operations, endpoints));
+            await using var vpn = new LinuxVpnCoordinator(() => new LinuxVpnSession(runtimeDirectory, stateDirectory, commands, endpoints));
             if (recoveryFailed) vpn.RecordRecoveryFailure();
             if (retainedProtection) vpn.RecordRetainedProtection();
             var authorization = new LinuxProbeAuthorization(connection, development ? geteuid() : null);
             connection.AddMethodHandler(new LinuxNetworkService(coordinator, authorization, canConnect ? new LinuxVpnMethods(vpn, authorization,
-                () => LinuxVpnSession.RecoverAsync(stateDirectory, commands, CancellationToken.None)) : null,
+                () => LinuxVpnSession.RecoverAsync(stateDirectory, commands, CancellationToken.None), operations) : null,
                 supportsSplit: LinuxXrayProcessSupport.IsAvailable(runtimeDirectory)));
             using var disappeared = await connection.AddMatchAsync(new MatchRule
             {
@@ -75,6 +78,8 @@ internal static partial class Program
                 return (Name: reader.ReadString(), OldOwner: reader.ReadString(), NewOwner: reader.ReadString());
             }, (Notification<(string Name, string OldOwner, string NewOwner)> notification) =>
             {
+                if (notification.HasValue && notification.Value.Name.StartsWith(':') && notification.Value.NewOwner.Length == 0)
+                    authorization.SenderDisconnected(notification.Value.Name);
                 if (notification.HasValue && notification.Value.Name.StartsWith(':') && notification.Value.NewOwner.Length == 0)
                     _ = coordinator.SenderDisconnectedAsync(notification.Value.Name);
                 if (notification.HasValue && notification.Value.Name.StartsWith(':') && notification.Value.NewOwner.Length == 0)

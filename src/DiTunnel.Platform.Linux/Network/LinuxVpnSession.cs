@@ -15,12 +15,14 @@ public interface ILinuxVpnSession : IAsyncDisposable
     bool IsProtectionActive => false;
     Task StartAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token) => StartAsync(profile, token);
     Task ReleaseProtectionAsync() => Task.CompletedTask;
+    Task PrepareAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token) => Task.CompletedTask;
 }
 
 [SupportedOSPlatform("linux")]
-public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirectory, ILinuxNetworkCommands commands) : ILinuxVpnSession
+public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirectory, ILinuxNetworkCommands commands, LinuxEndpointResolver? endpoints = null) : ILinuxVpnSession
 {
-    private readonly string owner = Guid.NewGuid().ToString("N");
+    private string owner = Guid.NewGuid().ToString("N");
+    private readonly LinuxEndpointResolver endpoints = endpoints ?? new();
     private LinuxRouteLease? routes;
     private XrayProcessManager? xray;
     private LinuxRuntimeServerProbe.AwgLease? bridge;
@@ -31,37 +33,57 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
     private string Journal => Path.Combine(stateDirectory, "vpn-owner.json");
 
     public Task StartAsync(ImportedProfile profile, CancellationToken token) => StartAsync(profile, LinuxVpnPolicy.Default, token);
+    public async Task PrepareAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token)
+    {
+        policy.Validate();
+        _ = await endpoints.ResolveAsync(profile, policy.Ipv4Only, token).ConfigureAwait(false);
+    }
 
     public async Task StartAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token)
     {
         policy.Validate();
         if (policy.Mode != SplitTunnelMode.ProxyAll && policy.Processes.Length > 0 && !LinuxXrayProcessSupport.IsAvailable(runtimeDirectory))
             throw new NotSupportedException("Для правил приложений нужен обновлённый Linux runtime Di-Tunnel.");
-        if (File.Exists(Journal)) throw new InvalidOperationException("Необходимо восстановить предыдущую сессию.");
+        if (File.Exists(Journal))
+        {
+            // Only a validated, root-owned KS journal can be adopted for a protected
+            // reconnect. Preflight below still rejects any leftover routes or links.
+            var bytes = await File.ReadAllBytesAsync(Journal, token).ConfigureAwait(false);
+            if (bytes.Length > 1024) throw new InvalidOperationException("Некорректный журнал владения.");
+            var data = JsonNode.Parse(bytes)!;
+            var previous = (string?)data["owner"];
+            if ((int?)data["version"] != 2 || (bool?)data["killSwitch"] != true || previous is null || !Guid.TryParseExact(previous, "N", out _))
+                throw new InvalidOperationException("Необходимо восстановить предыдущую сессию.");
+            owner = previous;
+            protection = new(commands as ILinuxFirewallCommands ?? throw new InvalidOperationException(), owner);
+            if (!await protection.ExistsAsync(token)) throw new InvalidOperationException("Необходимо восстановить предыдущую сессию.");
+            journalWritten = true;
+        }
         var runtime = new LinuxRuntimeServerProbe(runtimeDirectory, stateDirectory);
         var executable = runtime.VerifyRuntime("xray");
         var awg = AmneziaWgProfileConverter.IsAmneziaWg(profile) ? AmneziaWgProfileConverter.Convert(profile) : null;
         var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
-        var addresses = await Dns.GetHostAddressesAsync(awg?.ServerHost ?? converted!.ServerHost, token).ConfigureAwait(false);
-        var address = addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetwork)
-            ?? (policy.Ipv4Only ? null : addresses.FirstOrDefault(value => value.AddressFamily == AddressFamily.InterNetworkV6)) ?? throw new InvalidOperationException("Не удалось определить подходящий IP-адрес VPN-сервера.");
+        var address = await endpoints.ResolveAsync(profile, policy.Ipv4Only, token, protectedRetry: protection is not null).ConfigureAwait(false);
         var name = "dtn" + owner[..10];
         routes = new(commands, name, owner);
         await routes.PreflightAsync(token).ConfigureAwait(false);
-        if (File.Exists(Journal)) throw new InvalidOperationException("Необходимо восстановить предыдущую сессию.");
+        if (!journalWritten && File.Exists(Journal)) throw new InvalidOperationException("Необходимо восстановить предыдущую сессию.");
         // Write intent before the first mutation. This journal contains no endpoint or credentials.
         token.ThrowIfCancellationRequested();
         var temporaryJournal = Path.Combine(stateDirectory, "vpn-owner-" + owner + ".tmp");
         try
         {
-            await LinuxRuntimeServerProbe.WritePrivateAsync(temporaryJournal, new JsonObject { ["version"] = 2, ["owner"] = owner, ["killSwitch"] = policy.KillSwitch }.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
-            File.Move(temporaryJournal, Journal, overwrite: false);
-            journalWritten = true;
+            if (!journalWritten)
+            {
+                await LinuxRuntimeServerProbe.WritePrivateAsync(temporaryJournal, new JsonObject { ["version"] = 2, ["owner"] = owner, ["killSwitch"] = policy.KillSwitch }.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+                File.Move(temporaryJournal, Journal, overwrite: false);
+                journalWritten = true;
+            }
         }
         finally { File.Delete(temporaryJournal); }
         directory = Path.Combine(stateDirectory, "vpn-" + owner);
         Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        if (policy.KillSwitch)
+        if (policy.KillSwitch || protection is not null)
         {
             protection = new(commands as ILinuxFirewallCommands ?? throw new InvalidOperationException("nftables недоступен."), owner);
             await protection.ActivateAsync(name, address, awg?.ServerPort ?? converted!.ServerPort,
@@ -80,6 +102,15 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
         await routes.ClaimLinkAsync(token).ConfigureAwait(false);
         await routes.ActivateAsync(dns, token).ConfigureAwait(false);
         if (!xray.IsRunning || bridge is { IsRunning: false }) throw new InvalidOperationException("Ядро VPN завершилось.");
+        // Disabling KS during a settings handoff takes effect only after the new
+        // tunnel is ready. Failures before this point retain the old protection.
+        if (!policy.KillSwitch && protection is not null)
+        {
+            await protection.ReleaseAsync(token).ConfigureAwait(false);
+            var data = new JsonObject { ["version"] = 2, ["owner"] = owner, ["killSwitch"] = false };
+            await LinuxRuntimeServerProbe.WritePrivateAsync(temporaryJournal, data.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+            File.Move(temporaryJournal, Journal, overwrite: true);
+        }
     }
 
     public static string BuildConfiguration(XrayProfileConfiguration configuration, IPAddress endpoint, string name, IReadOnlyList<string> dns, LinuxVpnPolicy? policy = null)

@@ -157,7 +157,7 @@ public sealed class LinuxProtectionTests
         if(lost) Assert.Contains("Kill switch",coordinator.Status.Message);
         if(lost)
         {
-            await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ConnectAsync(":1.2",Guid.NewGuid(),new("Synthetic","VLESS","unused"),_=>Task.FromResult(true)));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.ConnectAsync(":1.2",Guid.NewGuid(),new("Synthetic","VLESS","unused"),_=>Task.FromResult(false)));
             Assert.True(coordinator.ProtectionActive);
         }
     }

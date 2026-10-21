@@ -16,6 +16,7 @@ internal sealed class LinuxNetworkService(LinuxProbeCoordinator coordinator, Lin
           <method name="Probe"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="u" name="mode"/><arg direction="out" type="b" name="success"/><arg direction="out" type="d" name="milliseconds"/><arg direction="out" type="s" name="message"/><arg direction="out" type="b" name="deferred"/></method>
           <method name="CancelProbe"><arg direction="in" type="s" name="id"/></method>
           <method name="Connect"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="s" name="policy"/></method>
+          <method name="Switch"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="s" name="policy"/></method>
           <method name="Disconnect"><arg direction="in" type="s" name="id"/></method>
           <method name="GetStatus"><arg direction="out" type="u" name="state"/><arg direction="out" type="x" name="connectedAt"/><arg direction="out" type="s" name="message"/><arg direction="out" type="b" name="protectionActive"/></method>
           <method name="RestoreNetwork"/>
