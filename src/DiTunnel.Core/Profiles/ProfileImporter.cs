@@ -179,6 +179,13 @@ public static class ProfileParser
 public sealed class ProfileImporter
 {
     private static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(25) };
+    private static readonly string UserAgent = $"DiTunnel/{typeof(ProfileImporter).Assembly.GetName().Version?.ToString(3) ?? "1.0"} (compatible; v2rayN)";
+    private readonly HttpClient client;
+
+    // An injected client must also have automatic redirects disabled so HTTPS is checked on every hop.
+    public ProfileImporter() : this(Client) { }
+    public ProfileImporter(HttpClient client) => this.client = client ?? throw new ArgumentNullException(nameof(client));
+
     public int SkippedEntries { get; private set; }
 
     public async Task<IReadOnlyList<ImportedProfile>> ImportAsync(string input, CancellationToken cancellationToken = default)
@@ -212,12 +219,17 @@ public sealed class ProfileImporter
         return profiles.Select(p => p with { Usage = usage }).ToArray();
     }
 
-    private static async Task<HttpResponseMessage> GetFollowingRedirectsAsync(Uri initial, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> GetFollowingRedirectsAsync(Uri initial, CancellationToken cancellationToken)
     {
         var current = initial;
         for (var redirects = 0; redirects <= 5; redirects++)
         {
-            var response = await Client.GetAsync(current, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, current);
+            // Some providers fail without a User-Agent, or select HTML / client-specific JSON.
+            // Identify ourselves and request the URI/Base64 format compatible with v2rayN.
+            request.Headers.UserAgent.ParseAdd(UserAgent);
+            request.Headers.Accept.ParseAdd("text/plain");
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if ((int)response.StatusCode is not (301 or 302 or 303 or 307 or 308)) return response;
             var location = response.Headers.Location;
             response.Dispose();
