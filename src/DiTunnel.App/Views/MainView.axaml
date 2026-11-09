@@ -50,7 +50,7 @@
     </Grid>
     <Grid x:Name="ContentGrid" Margin="12,72,12,10" RowDefinitions="Auto,*,Auto" MaxWidth="840" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsImportOpen}">
         <Button Click="SubscriptionsClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" MaxWidth="720" Background="{DynamicResource CardBrush}" CornerRadius="18" Padding="14,8" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1">
-          <Grid ColumnDefinitions="Auto,*"><Grid Width="72" Height="48" Margin="0,0,14,0" VerticalAlignment="Center"><Image Source="{Binding SelectedFlag}" IsVisible="{Binding HasSelectedFlag}" Stretch="Uniform"/><TextBlock Text="🌐" IsVisible="{Binding !HasSelectedFlag}" FontSize="36" HorizontalAlignment="Center"/></Grid><StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding SelectedSummary, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><TextBlock Text="{Binding SubscriptionLimits, Converter={StaticResource Translate}}" FontSize="12"/></StackPanel></Grid>
+          <Grid ColumnDefinitions="Auto,*"><Grid Width="72" Height="48" Margin="0,0,14,0" VerticalAlignment="Center"><Image Source="{Binding SelectedFlag}" IsVisible="{Binding HasSelectedFlag}" Stretch="Uniform"/><TextBlock Text="🌐" IsVisible="{Binding !HasSelectedFlag}" FontSize="36" HorizontalAlignment="Center"/></Grid><StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{Binding SelectedName}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding SelectedSummary, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><WrapPanel><TextBlock Text="{Binding SubscriptionTraffic, Converter={StaticResource Translate}}" Foreground="{Binding SubscriptionTrafficBrush}" FontSize="12"/><TextBlock Text=" · " IsVisible="{Binding HasBothSubscriptionLimits}" FontSize="12"/><TextBlock Text="{Binding SubscriptionDays, Converter={StaticResource Translate}}" Foreground="{Binding SubscriptionDaysBrush}" FontSize="12"/></WrapPanel></StackPanel></Grid>
         </Button>
         <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4" Margin="0,6">
           <Grid Width="178" Height="178"><Border Width="166" Height="166" CornerRadius="83" Background="{Binding PowerGlowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"><Border.Effect><BlurEffect Radius="26"/></Border.Effect></Border><Button Classes="power" Background="{DynamicResource PowerBrush}" BorderBrush="{Binding PowerBorderBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Command="{Binding ConnectCommand}" IsEnabled="{Binding CanConnect}" AutomationProperties.Name="{Binding PowerText, Converter={StaticResource Translate}}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
@@ -67,7 +67,7 @@
         </StackPanel>
         <Grid Grid.Row="2" ColumnDefinitions="Auto,*">
           <Button IsVisible="{Binding HasConnectionError}" Content="{Binding CopyErrorText}" ToolTip.Tip="{DynamicResource Text1ECDDF40BFEB}" Click="CopyErrorClick" Margin="0,0,8,0" Padding="12,8" FontSize="20" VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-          <Border Grid.Column="1" Background="{DynamicResource NoticeBrush}" CornerRadius="12" Padding="14,10"><TextBlock Text="{Binding Notice, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12"/></Border>
+          <Border Grid.Column="1" Background="{DynamicResource NoticeBrush}" CornerRadius="12" Padding="14,10"><TextBlock Text="{Binding DisplayNotice, Converter={StaticResource Translate}}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12"/></Border>
         </Grid>
     </Grid>
     <Border Background="#D9000000" IsVisible="{Binding IsImportOpen}" PointerPressed="ImportBackdropPressed">
@@ -118,8 +118,6 @@
           </Grid>
         </Border>
     </Border>
-    <Border IsVisible="{Binding IsRefreshToastVisible}" Background="{Binding RefreshToastBackground}" CornerRadius="12" Padding="18,12" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,16,16,28">
-      <TextBlock Text="{Binding RefreshToast, Converter={StaticResource Translate}}" FontWeight="SemiBold"/>
-    </Border>
+
   </Grid>
 </UserControl>

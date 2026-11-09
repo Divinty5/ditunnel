@@ -66,6 +66,40 @@ public sealed class SettingsAndRefreshTests
         Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
         Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
     }
+    [Fact] public async Task RefreshDownloadsSourcesConcurrentlyAndKeepsFailedSource()
+    {
+        var store = new Store { Items = Enumerable.Range(0, 6).Select(index =>
+            new ImportedProfile($"Old {index}", "VLESS", $"old-{index}", $"sub-{index}", $"Sub {index}", $"https://example.com/{index}")).ToList() };
+        var vm = new MainViewModel(null, store);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fourStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var current = 0; var maximum = 0;
+        try
+        {
+            var refresh = vm.RefreshSubscriptionsAsync(async (url, token) =>
+            {
+                var count = Interlocked.Increment(ref current);
+                maximum = Math.Max(maximum, count);
+                if (count == 4) fourStarted.TrySetResult();
+                try
+                {
+                    await release.Task.WaitAsync(token);
+                    if (url.EndsWith("/2")) throw new HttpRequestException();
+                    return new ImportedProfile[] { new("New", "VLESS", "new-" + url) };
+                }
+                finally { Interlocked.Decrement(ref current); }
+            });
+            await fourStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(4, maximum);
+            release.TrySetResult();
+            await refresh;
+            Assert.Equal(6, store.Items.Count);
+            Assert.Contains(store.Items, item => item.Content == "old-2");
+            Assert.Equal(5, store.Items.Count(item => item.Content.StartsWith("new-")));
+            Assert.True(vm.IsRefreshToastVisible);
+        }
+        finally { release.TrySetResult(); await vm.ShutdownAsync(); }
+    }
     [Fact] public void WindowPlacementRespectsSideTaskbarAndDpi()
     {
         var work = new PixelRect(80, 0, 1840, 1080);

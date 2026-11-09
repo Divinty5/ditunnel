@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private bool canClose, closing, ready;
     private TrayIcon? tray;
     private readonly IDisposable? connectionIcon;
+    private readonly ContentControl pageHost;
     private WindowPlacement? normal;
     private PixelRect? hiddenWindowBounds;
     private readonly DispatcherTimer trayTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -21,6 +22,7 @@ public partial class MainWindow : Window
     internal MainWindow(bool enableShellHook)
     {
         InitializeComponent();
+        pageHost = Content is ApplicationShell shell ? shell.NavigationHost : this;
         if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) connectionIcon = new VpnWindowIconIndicator(this, enableShellHook);
         PropertyChanged += (_, e) => { if (e.Property == IconProperty && tray is not null) tray.Icon = Icon; };
         ActualThemeVariantChanged += (_, _) =>
@@ -158,7 +160,7 @@ public partial class MainWindow : Window
     public async Task<string> CheckForUpdatesAsync(bool manual)
     {
         if (DataContext is not MainViewModel vm) return "Автообновление недоступно на этой платформе.";
-        return await UpdateFlow.CheckAsync(this, vm, manual, () =>
+        return await UpdateFlow.CheckAsync(pageHost, vm, manual, () =>
         {
             canClose = true; Close();
             if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();

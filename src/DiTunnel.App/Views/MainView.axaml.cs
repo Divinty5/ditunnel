@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 using Avalonia.Platform.Storage;
 using DiTunnel.Core.Profiles;
 using DiTunnel.App.ViewModels;
@@ -14,6 +15,7 @@ public partial class MainView : UserControl
     public MainView()
     {
         InitializeComponent();
+        ActualThemeVariantChanged += (_, _) => { if (DataContext is MainViewModel vm) vm.RefreshSubscriptionPresentation(); };
         SizeChanged += (_, _) =>
         {
             ContentGrid.MinHeight = 0;
@@ -25,22 +27,25 @@ public partial class MainView : UserControl
             if (updateChecked || !OperatingSystem.IsAndroid() || DataContext is not MainViewModel vm) return;
             updateChecked = true;
             await vm.InitializeSplitDefaultsAsync();
-            await UpdateFlow.CheckAsync(this, vm, false);
+            await UpdateFlow.CheckAsync(NavigationOwner, vm, false);
         };
     }
+
+    private ContentControl NavigationOwner => this.GetVisualAncestors().OfType<ApplicationShell>().FirstOrDefault()?.NavigationHost
+        ?? (TopLevel.GetTopLevel(this) is Window window ? window : this);
 
     private async void SettingsClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel vm)
         {
             await vm.InitializeSplitDefaultsAsync();
-            await Dialogs.Settings(TopLevel.GetTopLevel(this) is Window window ? window : this, vm);
+            await Dialogs.Settings(NavigationOwner, vm);
         }
     }
     private async void SubscriptionsClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel vm)
-            await Dialogs.Subscriptions(TopLevel.GetTopLevel(this) is Window window ? window : this, vm);
+            await Dialogs.Subscriptions(NavigationOwner, vm);
     }
     private void AddClick(object? sender, RoutedEventArgs e)
     {
@@ -165,7 +170,7 @@ public partial class MainView : UserControl
         if (clipboard is null) return;
         try
         {
-            await clipboard.SetTextAsync(vm.Notice);
+            await clipboard.SetTextAsync(vm.DiagnosticText);
             button.Content = "✓";
             await Task.Delay(1500);
             button.Content = vm.CopyErrorText;

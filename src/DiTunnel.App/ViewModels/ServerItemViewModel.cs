@@ -21,6 +21,10 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private bool probeTimedOut;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
+    [NotifyPropertyChangedFor(nameof(ProbeBrush))]
+    private bool isProbeUnconfirmed;
     public string ProbeDisplayText => ProbeText == "Проверяем…" || ProbeMilliseconds is not { } delay
         ? ProbeText : $"{delay:0} мс{ProbeMethod}";
     private string ProbeMethod

@@ -11,5 +11,5 @@
         Title="Di-Tunnel"
         WindowStartupLocation="Manual"
         mc:Ignorable="d">
-  <views:MainView />
+  <views:ApplicationShell />
 </Window>

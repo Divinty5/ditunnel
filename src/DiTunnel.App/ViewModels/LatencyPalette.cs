@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 
 namespace DiTunnel.App.ViewModels;
 
@@ -38,5 +39,5 @@ internal static class LatencyPalette
         };
 
     private static IBrush Brush(byte red, byte green, byte blue) =>
-        new SolidColorBrush(Color.FromRgb(red, green, blue));
+        new ImmutableSolidColorBrush(Color.FromRgb(red, green, blue));
 }

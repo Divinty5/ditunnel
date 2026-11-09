@@ -50,9 +50,9 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private static MainView CreateMainView()
+    private static ApplicationShell CreateMainView()
     {
-        return new MainView
+        return new ApplicationShell
         {
             DataContext = CreateMainViewModel()
         };

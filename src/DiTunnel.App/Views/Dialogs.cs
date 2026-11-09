@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
+using Avalonia.Data.Converters;
 using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -112,7 +113,7 @@ public static class Dialogs
             var networkSettingsChanged = networkSettingsChangedExplicitly || originalNetworkSettings != UserSettings.Current.NetworkSettingsFingerprint();
             owner.Content = originalContent;
             AppBackNavigation.Clear();
-            if (owner is Window window) window.Title = "Di-Tunnel";
+            if (TopLevel.GetTopLevel(owner) is Window window) window.Title = "Di-Tunnel";
             // Give Avalonia one frame to present the restored main view before a VPN
             // restart starts producing state changes. This avoids a transient empty frame.
             if (networkSettingsChanged)
@@ -459,7 +460,7 @@ public static class Dialogs
             sections.Children.Add(status);
             sections.Children.Add(Label($"Di-Tunnel · {UserSettings.Version}"));
             owner.Content = Page("Настройки", back, sections);
-            if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
+            if (TopLevel.GetTopLevel(owner) is Window window) window.Title = $"Di-Tunnel · {L.T("Настройки")}";
             AppBackNavigation.Set(() => _ = GoBackAsync());
         }
         Build();
@@ -539,9 +540,9 @@ public static class Dialogs
     public static async Task Subscriptions(ContentControl owner, MainViewModel vm)
     {
         var originalContent = owner.Content;
-        if (owner is Window window) window.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
+        if (TopLevel.GetTopLevel(owner) is Window window) window.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
         var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Center };
-        void GoBack() { owner.Content = originalContent; AppBackNavigation.Clear(); if (owner is Window window) window.Title = "Di-Tunnel"; }
+        void GoBack() { owner.Content = originalContent; AppBackNavigation.Clear(); if (TopLevel.GetTopLevel(owner) is Window window) window.Title = "Di-Tunnel"; }
         var back = Button("← Назад", GoBack);
         AppBackNavigation.Set(GoBack);
         var groups = new ComboBox { MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -553,8 +554,10 @@ public static class Dialogs
         cancelConnection.Bind(ContentControl.ContentProperty, new Binding("CancelConnectionText") { Converter = new TranslationConverter() });
         cancelConnection.Bind(Visual.IsVisibleProperty, new Binding("HasPendingConnection"));
         cancelConnection.Bind(Control.IsEnabledProperty, new Binding("CanCancelConnection"));
-        var operations = new WrapPanel { Margin = new Thickness(24, 0, 24, 8) };
-        operations.Children.Add(cancelConnection);
+        cancelConnection.Classes.Add("danger");
+        cancelConnection.HorizontalAlignment = HorizontalAlignment.Left;
+        cancelConnection.VerticalAlignment = VerticalAlignment.Top;
+        cancelConnection.Margin = new Thickness(0, 0, 8, 4);
         var list = new ListBox
         {
             MinHeight = OperatingSystem.IsAndroid() ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
@@ -619,15 +622,42 @@ public static class Dialogs
         ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
         ScrollViewer.SetIsScrollChainingEnabled(list, true);
         panel.Children.Add(list);
-        var testActions = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+        var testActions = new WrapPanel { Margin = new Thickness(0, 0, 0, 2), VerticalAlignment = VerticalAlignment.Top };
         var testOne = Button("Проверить сервер", () => vm.ProbeSelectedCommand.Execute(null));
         testOne.Margin = new Thickness(0, 0, 8, 4); testOne.Bind(Control.IsEnabledProperty, new Binding("CanProbe")); testActions.Children.Add(testOne);
         var testAll = Button("Проверить все", () => vm.ProbeAllCommand.Execute(null));
         testAll.Margin = new Thickness(0, 0, 8, 4); testAll.Bind(Control.IsEnabledProperty, new Binding("CanProbeAll")); testActions.Children.Add(testAll);
-        var cancelTests = Button("Отменить проверку", () => vm.CancelProbesCommand.Execute(null));
-        cancelTests.Bind(Visual.IsVisibleProperty, new Binding("IsProbing")); operations.Children.Add(cancelTests);
-        operations.Bind(Visual.IsVisibleProperty, new Binding("HasPendingOperation"));
-        panel.Children.Add(testActions);
+        var cancelTests = Button("Остановить проверку", () => vm.CancelProbesCommand.Execute(null));
+        cancelTests.Classes.Add("danger");
+        cancelTests.HorizontalAlignment = HorizontalAlignment.Left;
+        cancelTests.VerticalAlignment = VerticalAlignment.Top;
+        cancelTests.Margin = new Thickness(0, 0, 8, 4);
+        cancelTests.Bind(Visual.IsVisibleProperty, new MultiBinding
+        {
+            Converter = BoolConverters.And,
+            Bindings = { new Binding("IsProbing"), new Binding("!HasPendingConnection") }
+        });
+        testActions.Bind(Visual.IsVisibleProperty, new Binding("!HasPendingOperation"));
+        var testSlot = new Grid { MinHeight = 48 };
+        testActions.SizeChanged += (_, _) => { if (!vm.HasPendingOperation) testSlot.MinHeight = Math.Max(48,
+            testActions.Bounds.Height + testActions.Margin.Top + testActions.Margin.Bottom); };
+        testSlot.SizeChanged += (_, _) =>
+        {
+            // The page may open after a connection has already started, before
+            // the hidden normal buttons have ever been laid out. Reserve their
+            // wrapped height in that case too, including after a window resize.
+            if (!vm.HasPendingOperation || testSlot.Bounds.Width <= 0) return;
+            var unconstrained = new Size(double.PositiveInfinity, double.PositiveInfinity);
+            testOne.Measure(unconstrained); testAll.Measure(unconstrained);
+            var one = testOne.DesiredSize; var all = testAll.DesiredSize;
+            var height = one.Width + all.Width > testSlot.Bounds.Width
+                ? one.Height + all.Height : Math.Max(one.Height, all.Height);
+            testSlot.MinHeight = Math.Max(48, height + testActions.Margin.Top + testActions.Margin.Bottom);
+        };
+        testSlot.Children.Add(testActions);
+        testSlot.Children.Add(cancelTests);
+        testSlot.Children.Add(cancelConnection);
+        panel.Children.Add(testSlot);
         var removeUnavailable = Button("Отфильтровать недоступные", () => vm.RemoveUnavailableCommand.Execute(null));
         removeUnavailable.Margin = new Thickness(0, 0, 8, 2);
         removeUnavailable.HorizontalAlignment = HorizontalAlignment.Left;
@@ -771,9 +801,9 @@ public static class Dialogs
         removeOne.Margin = new Thickness(0, 0, 8, 6); removeOne.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(removeOne);
         panel.Children.Add(management);
         var status = Label(""); status.Bind(TextBlock.TextProperty, new Binding("SubscriptionStatus") { Converter = new TranslationConverter() }); panel.Children.Add(status);
-        var operationNotice = Label(""); operationNotice.Bind(TextBlock.TextProperty, new Binding("Notice") { Converter = new TranslationConverter() }); panel.Children.Add(operationNotice);
+        var operationNotice = Label(""); operationNotice.Bind(TextBlock.TextProperty, new Binding("DisplayNotice") { Converter = new TranslationConverter() }); panel.Children.Add(operationNotice);
         panel.Children.Add(Label("При выборе другого сервера активный VPN переподключится автоматически."));
-        var page = Page("Подписки и профили", back, panel, operations);
+        var page = Page("Подписки и профили", back, panel);
         var root = new Grid { DataContext = vm };
         root.Children.Add(page);
         root.Children.Add(confirmation);
