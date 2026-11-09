@@ -61,7 +61,7 @@ public sealed class ProbeLifecycleTests
         try
         {
             var configuration = XrayProfileConverter.Convert(new("Synthetic", "VLESS", "vless://11111111-1111-4111-8111-111111111111@192.0.2.1:443?security=none"));
-            await File.WriteAllTextAsync(path, configuration.Build("192.0.2.1", false, port, enableSocksUdp: enableUdp));
+            await File.WriteAllTextAsync(path, configuration.Build("192.0.2.1", false, port, enableSocksUdp: enableUdp, proxyCredentials: ProbeSocksCredentials.Create()));
             await using var manager = new XrayProcessManager(new XrayOptions
             { ExecutablePath = runtime, WorkingDirectory = Path.GetDirectoryName(runtime)!, ValidateConfigurationBeforeStart = false, ShutdownTimeout = TimeSpan.FromMilliseconds(100) });
             if (enableUdp)

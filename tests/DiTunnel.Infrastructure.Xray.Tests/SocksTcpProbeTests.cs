@@ -18,16 +18,14 @@ public sealed class SocksTcpProbeTests
         using var certificate = TestCertificate(key);
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
+        var credentials = ProbeSocksCredentials.Create();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         var server = ServeAsync();
         async Task ServeAsync()
         {
             using var socket = await listener.AcceptTcpClientAsync(deadline.Token);
             var stream = socket.GetStream();
-            var greeting = new byte[3];
-            await stream.ReadExactlyAsync(greeting, deadline.Token);
-            Assert.Equal(new byte[] { 5, 1, 0 }, greeting);
-            await stream.WriteAsync(new byte[] { 5, 0 }, deadline.Token);
+            await SocksTestPeer.AuthenticateAsync(stream, credentials, deadline.Token);
             var request = new byte[10];
             await stream.ReadExactlyAsync(request, deadline.Token);
             Assert.Equal(new byte[] { 5, 1, 0, 1, 192, 0, 2, 1, 1, 187 }, request);
@@ -54,7 +52,7 @@ public sealed class SocksTcpProbeTests
         };
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         if (trustCertificate) options.CertificateChainPolicy.CustomTrustStore.Add(certificate);
-        var probe = SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("192.0.2.1"), 443, deadline.Token, options);
+        var probe = SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("192.0.2.1"), 443, credentials, deadline.Token, options);
         if (reject) await Assert.ThrowsAsync<IOException>(() => probe);
         else if (!trustCertificate) await Assert.ThrowsAnyAsync<System.Security.Authentication.AuthenticationException>(() => probe);
         else
@@ -79,13 +77,12 @@ public sealed class SocksTcpProbeTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         using var cancellation = new CancellationTokenSource();
-        var probe = SocksTcpProbe.MeasureAsync(((IPEndPoint)listener.LocalEndpoint).Port, IPAddress.Parse("192.0.2.1"), 443, cancellation.Token);
+        var credentials = ProbeSocksCredentials.Create();
+        var probe = SocksTcpProbe.MeasureAsync(((IPEndPoint)listener.LocalEndpoint).Port, IPAddress.Parse("192.0.2.1"), 443, credentials, cancellation.Token);
         using var socket = await listener.AcceptTcpClientAsync();
-        var greeting = new byte[3];
-        await socket.GetStream().ReadExactlyAsync(greeting);
         if (connectAcknowledged)
         {
-            await socket.GetStream().WriteAsync(new byte[] { 5, 0 });
+            await SocksTestPeer.AuthenticateAsync(socket.GetStream(), credentials, default);
             await socket.GetStream().ReadExactlyAsync(new byte[10]);
             await socket.GetStream().WriteAsync(new byte[] { 5, 0, 0, 1, 0, 0, 0, 0, 0, 0 });
             // Wait until the TLS ClientHello is sent before cancelling the stalled peer.

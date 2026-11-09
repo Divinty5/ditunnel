@@ -23,8 +23,9 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         var selected = servers.Where(value => !ipv4Only || IPAddress.TryParse(value, out var ip) && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork).ToArray();
         return selected.Length > 0 ? selected : ["1.1.1.1", "1.0.0.1"];
     }
-    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false, IReadOnlyList<string>? dnsServers = null, bool enableSocksUdp = true)
+    public string Build(string serverAddress, bool tun, int proxyPort = 18080, SplitTunnelPolicy? splitTunnel = null, string? tunnelName = null, string? outboundSourceAddress = null, bool blockAds = false, bool strictAdBlocking = false, IReadOnlyList<string>? dnsServers = null, bool enableSocksUdp = false, ProbeSocksCredentials? proxyCredentials = null)
     {
+        if (!tun) ArgumentNullException.ThrowIfNull(proxyCredentials);
         var outbound = (JsonObject)Outbound.DeepClone();
         var settings = outbound["settings"]!.AsObject();
         if (!IsLocalProxy)
@@ -36,7 +37,7 @@ public sealed record XrayProfileConfiguration(string ServerHost, ushort ServerPo
         splitTunnel ??= SplitTunnelPolicy.Default;
         var inbound = tun
             ? new JsonObject { ["protocol"] = "tun", ["tag"] = "tun", ["port"] = 0, ["settings"] = new JsonObject { ["name"] = tunnelName ?? "DiTunnel", ["MTU"] = 1400, ["autoOutboundsInterface"] = "auto" }, ["sniffing"] = new JsonObject { ["enabled"] = true, ["destOverride"] = new JsonArray("http", "tls", "quic"), ["routeOnly"] = true } }
-            : new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = proxyPort, ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = enableSocksUdp } };
+            : new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = proxyPort, ["settings"] = new JsonObject { ["auth"] = "password", ["accounts"] = new JsonArray(new JsonObject { ["user"] = proxyCredentials!.Username, ["pass"] = proxyCredentials.Password }), ["udp"] = enableSocksUdp } };
         var outbounds = new JsonArray();
         JsonObject DirectOutbound() => new() { ["tag"] = "direct", ["protocol"] = "freedom", ["settings"] = new JsonObject { ["domainStrategy"] = "UseIPv4" } };
         if (splitTunnel.Mode == SplitTunnelMode.ProxySelected) outbounds.Add(DirectOutbound());

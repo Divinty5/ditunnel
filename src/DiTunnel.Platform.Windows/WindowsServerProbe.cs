@@ -29,7 +29,7 @@ public sealed class WindowsServerProbe : IServerProbe
             if (active is not null)
             {
                 var precise = mode == ServerProbeMode.Https;
-                var measured = await XrayServerProbe.MeasureAsync(active.Proxy, IPAddress.Loopback, WindowsRuntime.Find(), path,
+                var measured = await XrayServerProbe.MeasureAsync(active.Proxy, IPAddress.Loopback, WindowsRuntime.Find(),
                     cancellationToken, useHttps: precise, tcpOnly: !precise, probeTimeout: probeBudget);
                 return ProbePolicy.Success(measured, method, method, true, platform: "Windows");
             }
@@ -52,7 +52,7 @@ public sealed class WindowsServerProbe : IServerProbe
             var tcpOnly = awg is not null && !useHttps;
             await using var awgRuntime = awg is null ? null : await WindowsAmneziaWgRuntime.StartAsync(awg, address.ToString(), directory, bypass.SourceAddress, timeout.Token);
             stage = "Xray";
-            var milliseconds = await XrayServerProbe.MeasureAsync(awgRuntime?.Proxy ?? configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps, bypass.SourceAddress, tcpOnly, probeBudget);
+            var milliseconds = await XrayServerProbe.MeasureAsync(awgRuntime?.Proxy ?? configuration, address, WindowsRuntime.Find(), timeout.Token, useHttps, bypass.SourceAddress, tcpOnly, probeBudget);
             return ProbePolicy.Success(milliseconds, method, method, true, platform: "Windows");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

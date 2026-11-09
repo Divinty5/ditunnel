@@ -29,7 +29,7 @@ public sealed class XrayProfileConverterTests
     [Fact] public void SocksProbeOnlyListensOnLoopback()
     {
         var converted = XrayProfileConverter.Convert(new("Test", "HY2", "hy2://pass@example.com:443"));
-        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", false));
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", false, proxyCredentials: ProbeSocksCredentials.Create()));
         Assert.Equal("127.0.0.1", config.RootElement.GetProperty("inbounds")[0].GetProperty("listen").GetString());
         Assert.Single(config.RootElement.GetProperty("outbounds").EnumerateArray());
     }
@@ -190,7 +190,7 @@ public sealed class XrayProfileConverterTests
     public void ConvertsVmessAndPreservesTransportAndTlsWhenResolvingEndpoint(string transport)
     {
         var profile = XrayProfileConverter.Convert(Vmess(transport));
-        using var document = JsonDocument.Parse(profile.Build("192.0.2.1", false));
+        using var document = JsonDocument.Parse(profile.Build("192.0.2.1", false, proxyCredentials: ProbeSocksCredentials.Create()));
         var outbound = document.RootElement.GetProperty("outbounds")[0];
         Assert.Equal("vmess", outbound.GetProperty("protocol").GetString());
         var receiver = outbound.GetProperty("settings").GetProperty("vnext")[0];
@@ -216,7 +216,7 @@ public sealed class XrayProfileConverterTests
     public void VmessDefaultsToTcpWithoutTlsAndUsesSelectedCipher()
     {
         var profile = XrayProfileConverter.Convert(Vmess("tcp", "", "chacha20-poly1305"));
-        using var document = JsonDocument.Parse(profile.Build("192.0.2.1", false));
+        using var document = JsonDocument.Parse(profile.Build("192.0.2.1", false, proxyCredentials: ProbeSocksCredentials.Create()));
         var outbound = document.RootElement.GetProperty("outbounds")[0];
         Assert.Equal("none", outbound.GetProperty("streamSettings").GetProperty("security").GetString());
         Assert.Equal("chacha20-poly1305", outbound.GetProperty("settings").GetProperty("vnext")[0].GetProperty("users")[0].GetProperty("security").GetString());

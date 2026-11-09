@@ -40,6 +40,24 @@ public sealed class AndroidProbeBatchConfigurationTests
         XrayProfileConverter.Convert(new ImportedProfile("Synthetic", "VLESS", $"vless://{id}@{host}:443?security=none"));
 
     [Fact]
+    public void CredentialsAreDistinctPerProfileAndSurviveValidationAndSubdivision()
+    {
+        var profile = Profile("00000000-0000-0000-0000-000000000001", "192.0.2.1");
+        var first = new AndroidProbeOutbound(profile, "192.0.2.1", 31001);
+        var second = new AndroidProbeOutbound(profile, "192.0.2.1", 31002);
+        var validated = JsonNode.Parse(AndroidProbeBatchConfiguration.Build([second]))!;
+        var batch = JsonNode.Parse(AndroidProbeBatchConfiguration.Build([first, second]))!;
+        var retry = JsonNode.Parse(AndroidProbeBatchConfiguration.Build([second]))!;
+        var secondSettings = batch["inbounds"]![1]!["settings"]!;
+        Assert.True(JsonNode.DeepEquals(validated["inbounds"]![0]!["settings"], secondSettings));
+        Assert.True(JsonNode.DeepEquals(retry["inbounds"]![0]!["settings"], secondSettings));
+        Assert.Equal("password", secondSettings["auth"]!.GetValue<string>());
+        Assert.NotEqual(first.Credentials.Username, second.Credentials.Username);
+        Assert.NotEqual(first.Credentials.Password, second.Credentials.Password);
+        Assert.DoesNotContain(second.Credentials.Password, second.ToString());
+    }
+
+    [Fact]
     public void EveryInboundHasItsOwnOutboundAndNoPeerOrDirectDefaultRoute()
     {
         var first = Profile("00000000-0000-0000-0000-000000000001", "192.0.2.1");

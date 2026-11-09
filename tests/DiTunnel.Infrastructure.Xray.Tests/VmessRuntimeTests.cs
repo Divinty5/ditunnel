@@ -79,8 +79,9 @@ public sealed class VmessRuntimeTests
             var profile = Assert.Single(ProfileParser.Parse("vmess://" + Convert.ToBase64String(Encoding.UTF8.GetBytes(json))));
             var configuration = XrayProfileConverter.Convert(profile);
             var milliseconds = await XrayServerProbe.MeasureAsync(configuration, IPAddress.Loopback, runtime,
-                Path.Combine(directory, "probe.json"), timeout.Token, useHttps: false, probeTimeout: TimeSpan.FromSeconds(8));
+                timeout.Token, useHttps: false, probeTimeout: TimeSpan.FromSeconds(8));
             Assert.True(milliseconds >= 0);
+            Assert.False(File.Exists(Path.Combine(directory, "probe.json")));
             await response;
         }
         finally

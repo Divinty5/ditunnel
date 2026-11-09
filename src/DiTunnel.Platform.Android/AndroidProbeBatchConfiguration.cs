@@ -3,7 +3,10 @@ using DiTunnel.Infrastructure.Xray;
 
 namespace DiTunnel.Platform.Android;
 
-internal sealed record AndroidProbeOutbound(XrayProfileConfiguration Configuration, string Address, int Port);
+internal sealed record AndroidProbeOutbound(XrayProfileConfiguration Configuration, string Address, int Port)
+{
+    internal ProbeSocksCredentials Credentials { get; } = ProbeSocksCredentials.Create();
+}
 
 // A separate loopback SOCKS inbound for every profile, with no cross-profile default route.
 internal static class AndroidProbeBatchConfiguration
@@ -16,7 +19,7 @@ internal static class AndroidProbeBatchConfiguration
         for (var index = 0; index < profiles.Count; index++)
         {
             var profile = profiles[index];
-            var source = JsonNode.Parse(profile.Configuration.Build(profile.Address, false, profile.Port, enableSocksUdp: false))!;
+            var source = JsonNode.Parse(profile.Configuration.Build(profile.Address, false, profile.Port, enableSocksUdp: false, proxyCredentials: profile.Credentials))!;
             var inboundTag = $"probe-{index}";
             var tags = source["outbounds"]!.AsArray().ToDictionary(node => node!["tag"]!.GetValue<string>(),
                 node => $"{inboundTag}-{node!["tag"]!.GetValue<string>()}", StringComparer.Ordinal);

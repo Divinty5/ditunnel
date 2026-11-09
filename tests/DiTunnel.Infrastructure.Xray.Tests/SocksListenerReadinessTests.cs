@@ -10,6 +10,7 @@ public sealed class SocksListenerReadinessTests
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
+        var credentials = ProbeSocksCredentials.Create();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         using var serving = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
@@ -23,19 +24,16 @@ public sealed class SocksListenerReadinessTests
                 try
                 {
                     var stream = peer.GetStream();
-                    var request = new byte[3];
-                    await stream.ReadExactlyAsync(request, serving.Token);
-                    Assert.Equal(new byte[] { 5, 1, 0 }, request);
                     received.TrySetResult();
                     await reply.Task.WaitAsync(serving.Token);
-                    await stream.WriteAsync(new byte[] { 5, 0 }, serving.Token);
+                    await SocksTestPeer.AuthenticateAsync(stream, credentials, serving.Token);
                 }
                 catch (IOException) { /* A loaded VM can exhaust the 500 ms attempt; serve its retry too. */ }
             }
         });
         try
         {
-            var ready = SocksTcpProbe.WaitForListenerAsync(port, () => true, timeout.Token);
+            var ready = SocksTcpProbe.WaitForListenerAsync(port, credentials, () => true, timeout.Token);
             await received.Task.WaitAsync(timeout.Token);
             Assert.False(ready.IsCompleted);
             reply.SetResult();
@@ -50,7 +48,7 @@ public sealed class SocksListenerReadinessTests
 
     [Fact]
     public async Task Stopped_runtime_does_not_wait_for_a_listener()
-        => await Assert.ThrowsAsync<InvalidOperationException>(() => SocksTcpProbe.WaitForListenerAsync(1, () => false, default));
+        => await Assert.ThrowsAsync<InvalidOperationException>(() => SocksTcpProbe.WaitForListenerAsync(1, ProbeSocksCredentials.Create(), () => false, default));
 
     [Fact]
     public async Task Silent_listener_is_bounded_by_cancellation()
@@ -59,7 +57,7 @@ public sealed class SocksListenerReadinessTests
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         using var cancellation = new CancellationTokenSource();
-        var ready = SocksTcpProbe.WaitForListenerAsync(port, () => true, cancellation.Token);
+        var ready = SocksTcpProbe.WaitForListenerAsync(port, ProbeSocksCredentials.Create(), () => true, cancellation.Token);
         using var peer = await listener.AcceptTcpClientAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ready);

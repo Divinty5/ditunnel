@@ -82,9 +82,21 @@ public sealed class XrayProcessManager : IXrayProcessManager
         }
     }
 
-    public async Task StartAsync(
+    public Task StartAsync(
         string configurationPath,
         CancellationToken cancellationToken = default)
+        => StartCoreAsync(configurationPath, null, cancellationToken);
+
+    // Probe secrets stay in an anonymous stdin pipe, never a config file or argv.
+    internal Task StartFromJsonAsync(string configurationJson, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationJson);
+        if (_options.ValidateConfigurationBeforeStart)
+            throw new InvalidOperationException("In-memory probes require single-start configuration validation.");
+        return StartCoreAsync("stdin:", configurationJson, cancellationToken);
+    }
+
+    private async Task StartCoreAsync(string configurationPath, string? configurationJson, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -102,8 +114,15 @@ public sealed class XrayProcessManager : IXrayProcessManager
                 }
             }
 
-            var fullConfigurationPath = ResolveConfigurationPath(configurationPath);
-            var process = CreateProcess(CreateStartInfo(fullConfigurationPath, validateOnly: false));
+            var fullConfigurationPath = configurationJson is null ? ResolveConfigurationPath(configurationPath) : "stdin:";
+            var startInfo = CreateStartInfo(fullConfigurationPath, validateOnly: false);
+            if (configurationJson is not null)
+            {
+                startInfo.RedirectStandardInput = true;
+                startInfo.StandardInputEncoding = new System.Text.UTF8Encoding(false);
+                startInfo.ArgumentList.Add("-format"); startInfo.ArgumentList.Add("json");
+            }
+            var process = CreateProcess(startInfo);
             process.OutputDataReceived += OnOutputDataReceived;
             process.ErrorDataReceived += OnErrorDataReceived;
 
@@ -124,6 +143,13 @@ public sealed class XrayProcessManager : IXrayProcessManager
             process.Exited += OnProcessExited;
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+
+            if (configurationJson is not null)
+            {
+                await process.StandardInput.WriteAsync(configurationJson.AsMemory(), cancellationToken).ConfigureAwait(false);
+                await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
 
             await Task.Delay(_options.StartupGracePeriod, cancellationToken).ConfigureAwait(false);
 

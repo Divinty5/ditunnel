@@ -7,7 +7,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public static class SocksTcpProbe
 {
-    public static async Task WaitForListenerAsync(int proxyPort, Func<bool> isRunning, CancellationToken cancellationToken)
+    public static async Task WaitForListenerAsync(int proxyPort, ProbeSocksCredentials credentials, Func<bool> isRunning, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -20,11 +20,8 @@ public static class SocksTcpProbe
                 using var client = new TcpClient(AddressFamily.InterNetwork);
                 await client.ConnectAsync(IPAddress.Loopback, proxyPort, attempt.Token).ConfigureAwait(false);
                 var stream = client.GetStream();
-                await stream.WriteAsync(new byte[] { 5, 1, 0 }, attempt.Token).ConfigureAwait(false);
-                var reply = new byte[2];
-                await stream.ReadExactlyAsync(reply, attempt.Token).ConfigureAwait(false);
-                if (reply[0] == 5 && reply[1] == 0) return;
-                throw new IOException("SOCKS listener negotiation failed.");
+                await credentials.AuthenticateAsync(stream, attempt.Token).ConfigureAwait(false);
+                return;
             }
             catch (Exception error) when (error is SocketException or IOException || error is OperationCanceledException && !cancellationToken.IsCancellationRequested) { }
             await Task.Delay(25, cancellationToken).ConfigureAwait(false);
@@ -33,19 +30,16 @@ public static class SocksTcpProbe
 
     // Xray can acknowledge CONNECT before opening the remote outbound. Wait for
     // authenticated remote TLS traffic so the result includes the tunnel path.
-    public static Task<double> MeasureAsync(int proxyPort, IPAddress destination, ushort destinationPort, CancellationToken cancellationToken)
-        => MeasureAsync(proxyPort, destination, destinationPort, cancellationToken, new SslClientAuthenticationOptions { TargetHost = destination.ToString() });
+    public static Task<double> MeasureAsync(int proxyPort, IPAddress destination, ushort destinationPort, ProbeSocksCredentials credentials, CancellationToken cancellationToken)
+        => MeasureAsync(proxyPort, destination, destinationPort, credentials, cancellationToken, new SslClientAuthenticationOptions { TargetHost = destination.ToString() });
 
-    internal static async Task<double> MeasureAsync(int proxyPort, IPAddress destination, ushort destinationPort, CancellationToken cancellationToken, SslClientAuthenticationOptions tlsOptions)
+    internal static async Task<double> MeasureAsync(int proxyPort, IPAddress destination, ushort destinationPort, ProbeSocksCredentials credentials, CancellationToken cancellationToken, SslClientAuthenticationOptions tlsOptions)
     {
         using var client = new TcpClient(AddressFamily.InterNetwork);
         await client.ConnectAsync(IPAddress.Loopback, proxyPort, cancellationToken);
         var stream = client.GetStream();
         var watch = Stopwatch.StartNew();
-        await stream.WriteAsync(new byte[] { 5, 1, 0 }, cancellationToken);
-        var negotiation = new byte[2];
-        await stream.ReadExactlyAsync(negotiation, cancellationToken);
-        if (negotiation[0] != 5 || negotiation[1] != 0) throw new IOException("SOCKS negotiation failed.");
+        await credentials.AuthenticateAsync(stream, cancellationToken).ConfigureAwait(false);
         var address = destination.GetAddressBytes();
         var request = new byte[6 + address.Length];
         request[0] = 5; request[1] = 1; request[3] = destination.AddressFamily == AddressFamily.InterNetwork ? (byte)1 : (byte)4;

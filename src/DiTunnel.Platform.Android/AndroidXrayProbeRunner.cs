@@ -80,7 +80,7 @@ internal static class AndroidXrayProbeRunner
                                 stage = "HTTPS";
                                 using var handler = new SocketsHttpHandler
                                 {
-                                    Proxy = new WebProxy($"socks5://127.0.0.1:{port}"), UseProxy = true, AllowAutoRedirect = false
+                                    Proxy = item.Credentials.CreateProxy(port), UseProxy = true, AllowAutoRedirect = false
                                 };
                                 using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
                                 var result = await AndroidProbePolicy.CheckHttpClientAsync(http, cancellationToken);
@@ -131,7 +131,7 @@ internal static class AndroidXrayProbeRunner
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(3));
-        await SocksTcpProbe.WaitForListenerAsync(item.Port, () => true, timeout.Token);
+        await SocksTcpProbe.WaitForListenerAsync(item.Port, item.Credentials, () => true, timeout.Token);
     }
 
     public static Network? FindPhysicalNetwork(ConnectivityManager manager)

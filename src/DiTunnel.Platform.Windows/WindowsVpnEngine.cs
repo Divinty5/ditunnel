@@ -173,7 +173,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 Publish(VpnConnectionState.Connecting, awg is null ? "Проверяем сервер через Xray (до 12 секунд)…" : "Проверяем сервер через AmneziaWG (до 12 секунд)…");
                 await using var bypass = awg is null ? null : await WindowsProbeRouteBypass.CreateAsync(address, sessionDirectory, timeout.Token);
                 await using var awgProbe = awg is null ? null : await WindowsAmneziaWgRuntime.StartAsync(awg, address.ToString(), sessionDirectory, bypass?.SourceAddress, timeout.Token);
-                delayMilliseconds = await XrayServerProbe.MeasureAsync(awgProbe?.Proxy ?? configuration, address, runtime, configPath, timeout.Token, outboundSourceAddress: bypass?.SourceAddress);
+                delayMilliseconds = await XrayServerProbe.MeasureAsync(awgProbe?.Proxy ?? configuration, address, runtime, timeout.Token, outboundSourceAddress: bypass?.SourceAddress);
             }
             else delayMilliseconds = null;
             Publish(VpnConnectionState.Connecting, "Запускаем сетевой модуль Windows…");

@@ -57,10 +57,8 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
                 sockopt["mark"] = transportMark;
                 configuration = configuration with { Outbound = outbound };
             }
-            var path = Path.Combine(directory, "xray.json");
-            await WritePrivateAsync(path, "", timeout.Token).ConfigureAwait(false);
             stage = "Xray";
-            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, xray, path, timeout.Token,
+            var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, xray, timeout.Token,
                 useHttps: mode == ServerProbeMode.Https, tcpOnly: awg is not null && mode == ServerProbeMode.Fast, probeTimeout: budget,
                 processLifetimeFactory: static process => new LinuxProcessLifetime(process), platform: "Linux").ConfigureAwait(false);
             return ProbePolicy.Success(milliseconds, method, method, true, platform: "Linux");
