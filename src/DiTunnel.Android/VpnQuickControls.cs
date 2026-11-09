@@ -16,6 +16,7 @@ internal static class VpnQuickControls
     public const string SelectAction = "com.divintyinteractive.ditunnel.control.SELECT";
     public const string RecoverAction = "com.divintyinteractive.ditunnel.control.RECOVER";
     public static Task RecoverAsync() => engine.RecoverConnectionAsync();
+    internal static bool CanRecoverAfterSystemStop => engine.CanRecoverAfterSystemStop;
     public const string ProfileExtra = "profile_key";
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static Context context = null!;
@@ -28,6 +29,7 @@ internal static class VpnQuickControls
     private static string? latencyProfileKey;
     private sealed record LatencyReading(string ProfileKey, double Milliseconds);
     private static LatencyReading? latencyReading;
+    private static WakeReceiver? wakeReceiver;
     public static double? LatencyMilliseconds => Status.State == VpnConnectionState.Connected &&
         engine.ActiveProfile is { } profile && Volatile.Read(ref latencyReading) is { } reading && reading.ProfileKey == Key(profile)
             ? reading.Milliseconds : null;
@@ -95,12 +97,15 @@ internal static class VpnQuickControls
     public static bool Busy => Status.State is VpnConnectionState.Connecting or VpnConnectionState.Disconnecting or VpnConnectionState.Reconnecting;
     public static bool Active => Status.State is VpnConnectionState.Connected or VpnConnectionState.Reconnecting;
     public static bool CanToggle => Status.State is not (VpnConnectionState.Connecting or VpnConnectionState.Disconnecting);
-    public static string StatusText => L.T(Status.State switch
+    internal static bool SubscriptionExhausted => engine.ActiveProfile is { } active
+        && (Profiles().FirstOrDefault(p => p.Content == active.Content && p.SourceId == active.SourceId)?.Usage
+            ?? Profiles().FirstOrDefault(p => p.SourceId == active.SourceId)?.Usage ?? active.Usage)?.IsExhausted(DateTimeOffset.UtcNow) == true;
+    public static string StatusText => SubscriptionExhausted ? L.T("Подписка исчерпана") : L.T(Status.State switch
     {
         VpnConnectionState.Connecting => "Подключаем VPN…",
         VpnConnectionState.Disconnecting => "Отключаем VPN…",
         VpnConnectionState.Reconnecting => "Восстанавливаем VPN…",
-        VpnConnectionState.Connected => "VPN подключён",
+        VpnConnectionState.Connected => "Туннель VPN запущен",
         VpnConnectionState.Error => "Не удалось подключиться",
         _ => "VPN отключён"
     });
@@ -124,6 +129,15 @@ internal static class VpnQuickControls
             try { engine.RefreshNotification(); }
             catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelControls", error.GetType().Name); }
         };
+        wakeReceiver = new WakeReceiver();
+        using var wakeFilter = new IntentFilter(Intent.ActionScreenOn);
+        wakeFilter.AddAction(Intent.ActionUserPresent);
+        wakeFilter.AddAction(PowerManager.ActionDeviceIdleModeChanged);
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) context.RegisterReceiver(wakeReceiver, wakeFilter, ReceiverFlags.NotExported);
+        else
+#pragma warning disable CA1422
+            context.RegisterReceiver(wakeReceiver, wakeFilter);
+#pragma warning restore CA1422
     }
     public static IReadOnlyList<ImportedProfile> Profiles()
     {
@@ -188,13 +202,23 @@ internal static class VpnQuickControls
         global::Android.Widget.Toast.MakeText(context, L.T(text), global::Android.Widget.ToastLength.Long)?.Show());
     public static void Refresh()
     {
+        engine.RefreshRuntimeState();
         try { Refreshed?.Invoke(); }
         catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelControls", error.GetType().Name); }
         // Launcher/system UI failures must never break profile saving or VPN state transitions.
         try { VpnWidgets.Refresh(context); }
         catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelControls", error.GetType().Name); }
-        try { global::Android.Service.QuickSettings.TileService.RequestListeningState(context, new ComponentName(context, Java.Lang.Class.FromType(typeof(VpnTileService)))); }
+        try { VpnControlsRefreshScheduler.Update(context); }
         catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelControls", error.GetType().Name); }
+    }
+
+    private sealed class WakeReceiver : BroadcastReceiver
+    {
+        public override void OnReceive(Context? owner, Intent? intent)
+        {
+            Refresh();
+            if (CanRecoverAfterSystemStop) _ = RecoverAsync();
+        }
     }
 }
 

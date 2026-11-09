@@ -12,6 +12,12 @@ namespace DiTunnel.Android;
 
 internal static class VpnWidgets
 {
+    internal static bool HasWidgets(Context context)
+    {
+        var manager = AppWidgetManager.GetInstance(context);
+        return manager is not null && Providers.Any(type =>
+            manager.GetAppWidgetIds(new ComponentName(context, Java.Lang.Class.FromType(type))) is { Length: > 0 });
+    }
     internal static bool HasLargeWidgets(Context context)
     {
         var manager = AppWidgetManager.GetInstance(context);
@@ -43,7 +49,7 @@ internal static class VpnWidgets
         var status = VpnQuickControls.StatusText;
         var power = VpnQuickControls.Active ? L.T("Отключить") : L.T("Подключить");
         var light = IsLight(context);
-        using var bitmap = PowerBitmap(VpnQuickControls.Active, VpnQuickControls.Busy, light);
+        using var bitmap = PowerBitmap(VpnQuickControls.Active && !VpnQuickControls.SubscriptionExhausted, VpnQuickControls.Busy, light);
         views.SetImageViewBitmap(Resource.Id.widget_power, bitmap);
         views.SetBoolean(Resource.Id.widget_power, "setEnabled", VpnQuickControls.CanToggle);
         views.SetContentDescription(Resource.Id.widget_power, $"Di-Tunnel · {power} · {selected?.Name}");
@@ -122,6 +128,12 @@ public abstract class VpnWidgetProvider : AppWidgetProvider
     {
         if (context is null || manager is null) return;
         foreach (var id in ids ?? []) VpnWidgets.Update(context, manager, id, GetType());
+        VpnControlsRefreshScheduler.Update(context);
+    }
+    public override void OnDisabled(Context? context)
+    {
+        base.OnDisabled(context);
+        if (context is not null) VpnControlsRefreshScheduler.Update(context);
     }
     public override void OnAppWidgetOptionsChanged(Context? context, AppWidgetManager? manager, int id, Bundle? options)
     {

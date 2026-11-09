@@ -37,12 +37,21 @@ internal static class AndroidVpnRuntimeState
         var state = Read(context);
         Write(context, false, state.Pid, state.ProfileKey);
     }
-    public static VpnStatus ReadStatus(Context context) => IsVpnProcessRunning(context)
-        ? new(VpnConnectionState.Connected, "VPN подключён через Android VpnService.", DateTimeOffset.UtcNow)
-        : Read(context).Recovering ? new(VpnConnectionState.Reconnecting, "Восстанавливаем VPN…") : VpnStatus.Disconnected;
+    public static VpnStatus ReadStatus(Context context)
+    {
+        var saved = Read(context);
+        var state = AndroidVpnStatePolicy.Observed(saved.Active, saved.Recovering,
+            IsOurVpnProcess(context, saved.Pid), IsSystemVpnActive(context));
+        return state switch
+        {
+            VpnConnectionState.Connected => new(state, "Туннель VPN запущен.", DateTimeOffset.UtcNow),
+            VpnConnectionState.Reconnecting => new(state, "Восстанавливаем VPN…"),
+            _ => VpnStatus.Disconnected
+        };
+    }
     public static ImportedProfile? ReadActiveProfile(Context context)
     {
-        if (!IsVpnProcessRunning(context) && !Read(context).Recovering) return null;
+        if (!IsVpnProcessRunning(context) && !Read(context).Recovering && !Read(context).ServiceRecovery) return null;
         try
         {
             var key = Read(context).ProfileKey;

@@ -33,6 +33,12 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnNewIntent(intent);
         HandleControlIntent(intent);
     }
+    protected override void OnResume()
+    {
+        base.OnResume();
+        VpnQuickControls.Refresh();
+        if (VpnQuickControls.CanRecoverAfterSystemStop) _ = VpnQuickControls.RecoverAsync();
+    }
     private void HandleControlIntent(Intent? intent)
     {
         if (intent?.Action != VpnQuickControls.ToggleAction) return;

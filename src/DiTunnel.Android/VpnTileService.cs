@@ -9,7 +9,7 @@ namespace DiTunnel.Android;
 [Service(Name = "com.divintyinteractive.ditunnel.VpnTileService", Label = "Di-Tunnel", Icon = "@drawable/ic_vpn_tile",
     Exported = true, Permission = "android.permission.BIND_QUICK_SETTINGS_TILE")]
 [IntentFilter(["android.service.quicksettings.action.QS_TILE"])]
-[MetaData("android.service.quicksettings.ACTIVE_TILE", Value = "true")]
+[MetaData("android.service.quicksettings.ACTIVE_TILE", Value = "false")]
 [MetaData("android.service.quicksettings.TOGGLEABLE_TILE", Value = "true")]
 public sealed class VpnTileService : TileService
 {
@@ -20,6 +20,8 @@ public sealed class VpnTileService : TileService
         base.OnStartListening();
         if (!listening) VpnQuickControls.Refreshed += OnRefreshed;
         listening = true;
+        VpnQuickControls.Refresh();
+        if (VpnQuickControls.CanRecoverAfterSystemStop) _ = VpnQuickControls.RecoverAsync();
         Update();
     }
     public override void OnStopListening()
@@ -61,7 +63,7 @@ public sealed class VpnTileService : TileService
         if (OperatingSystem.IsAndroidVersionAtLeast(29))
             tile.Subtitle = VpnQuickControls.StatusText;
         tile.State = !VpnQuickControls.CanToggle ? TileState.Unavailable
-            : VpnQuickControls.Status.State == DiTunnel.Core.Connection.VpnConnectionState.Connected ? TileState.Active : TileState.Inactive;
+            : VpnQuickControls.Status.State == DiTunnel.Core.Connection.VpnConnectionState.Connected && !VpnQuickControls.SubscriptionExhausted ? TileState.Active : TileState.Inactive;
         tile.Icon = Icon.CreateWithResource(this, Resource.Drawable.ic_vpn_tile);
         tile.UpdateTile();
     }

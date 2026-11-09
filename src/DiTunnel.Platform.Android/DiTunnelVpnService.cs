@@ -5,6 +5,7 @@ using Android.Graphics.Drawables;
 using Android.OS;
 using Android.Runtime;
 using DiTunnel.Infrastructure.Xray;
+using DiTunnel.Core.Profiles;
 using Java.Interop;
 using System.Globalization;
 using System.Net;
@@ -41,6 +42,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
     private int restarting;
     private int physicalNetworkId;
     private PhysicalNetworkMonitor? networkMonitor;
+    private WakeRelay? wakeRelay;
     private CancellationTokenSource? networkEvaluation;
     private bool OwnsRecovery => !stopRequested;
     private VpnStartupStage startupStage;
@@ -55,6 +57,15 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         base.OnCreate();
         AndroidVpnRuntimeState.SetStarting(this, OwnsRecovery);
         CreateNotificationChannel();
+        wakeRelay = new WakeRelay(this);
+        using var wakeFilter = new IntentFilter(Intent.ActionScreenOn);
+        wakeFilter.AddAction(Intent.ActionUserPresent);
+        wakeFilter.AddAction(PowerManager.ActionDeviceIdleModeChanged);
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)) RegisterReceiver(wakeRelay, wakeFilter, ReceiverFlags.NotExported);
+        else
+#pragma warning disable CA1422
+            RegisterReceiver(wakeRelay, wakeFilter);
+#pragma warning restore CA1422
     }
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
@@ -62,7 +73,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         if (intent?.Action == ActionRefreshNotification)
         {
             CreateNotificationChannel();
-            if (xrayRunning) UpdateNotification(amneziaRuntime is not null ? "VPN подключён · AmneziaWG" : "VPN подключён");
+            if (xrayRunning) UpdateNotification(amneziaRuntime is not null ? "Туннель VPN запущен · AmneziaWG" : "Туннель VPN запущен");
             else if (starting is not null && !stopRequested) UpdateNotification("Восстанавливаем VPN…");
             else { stopRequested = true; StopSelf(); }
             return OwnsRecovery ? StartCommandResult.Sticky : StartCommandResult.NotSticky;
@@ -100,6 +111,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
 
     public override void OnDestroy()
     {
+        if (wakeRelay is not null) { try { UnregisterReceiver(wakeRelay); } catch { } wakeRelay.Dispose(); wakeRelay = null; }
         starting?.Cancel();
         StopNetworkMonitor();
         if (OwnsRecovery) AndroidVpnRuntimeState.SetRecovering(this);
@@ -114,6 +126,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
     private async Task StartTunnelAsync()
     {
         await lifecycle.WaitAsync();
+        var startupWatch = System.Diagnostics.Stopwatch.StartNew();
         var manualRequest = startIntent?.Action == ActionStart;
         try
         {
@@ -122,6 +135,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
                 AndroidVpnServiceBridge.PublishStarted(this);
                 return;
             }
+            Stage(VpnStartupStage.Profile);
             var persisted = startIntent is null ? null : AndroidVpnServiceBridge.RequestFromIntent(startIntent);
             persisted ??= await Task.Run(() => new AndroidVpnResumeStore(this).Load());
             startIntent = null;
@@ -129,6 +143,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             if (stopRequested) throw new System.OperationCanceledException();
             var request = (Profile: saved.Profile, SplitTunnelPolicy: new DiTunnel.Core.Connection.SplitTunnelPolicy(saved.Mode, saved.Domains, saved.Processes),
                 saved.BlockAds, saved.StrictAdBlocking, saved.Ipv4Only);
+            SubscriptionAccess.EnsureAvailable(request.Profile);
             starting?.Dispose();
             starting = new CancellationTokenSource();
             // Validate before replacing the saved request. Recovery must use the latest
@@ -193,13 +208,13 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             starting.Token.ThrowIfCancellationRequested();
             Stage(VpnStartupStage.Xray);
             var response = await Task.Run(() => Invoke("runXrayFromJson", new JsonObject { ["configJSON"] = configuration }), starting.Token);
-            if (!response.Success) throw new InvalidOperationException(SanitizeError(response.Error));
+            if (!response.Success) throw new AndroidProbeException("Xray", "Runtime");
             xrayRunning = true;
             starting.Token.ThrowIfCancellationRequested();
             Stage(VpnStartupStage.Connected);
             await Task.Run(() => new AndroidVpnResumeStore(this).Save(saved), starting.Token);
             AndroidVpnRuntimeState.SetConnected(this, request.Profile, OwnsRecovery);
-            UpdateNotification(isAmneziaWg ? "VPN подключён · AmneziaWG" : "VPN подключён");
+            UpdateNotification(isAmneziaWg ? "Туннель VPN запущен · AmneziaWG" : "Туннель VPN запущен");
             AndroidVpnServiceBridge.PublishStarted(this);
             StartNetworkMonitor();
         }
@@ -208,17 +223,17 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             AndroidVpnRuntimeState.Clear(this);
             CloseTunnel();
             StopForeground(StopForegroundFlags.Remove);
-            var message = error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
-                ? error.Message
-                : "Не удалось запустить Android VPN.";
-            if (!manualRequest && OwnsRecovery && PersistedRequestAvailable()) _ = RestartForRecoveryAsync();
+            var failure = AndroidProbePolicy.Failure(error, startupStage.ToString(), "Запуск VPN", startupWatch.Elapsed.TotalMilliseconds);
+            var message = error is SubscriptionExhaustedException ? SubscriptionAccess.ExhaustedMessage
+                : $"Не удалось запустить Android VPN. {failure.Message}\n{failure.Diagnostics!.ToDisplayString()}";
+            if (error is not SubscriptionExhaustedException && !manualRequest && OwnsRecovery && PersistedRequestAvailable()) _ = RestartForRecoveryAsync();
             else
             {
                 var wasStopping = stopRequested;
                 stopRequested = true;
                 StopSelf();
                 if (wasStopping) AndroidVpnServiceBridge.PublishStopped(this);
-                else AndroidVpnServiceBridge.PublishStartFailed(this, $"{message} ({startupStage}; {error.GetType().Name})");
+                else AndroidVpnServiceBridge.PublishStartFailed(this, message);
                 TerminateVpnProcess();
             }
         }
@@ -310,6 +325,16 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         public override void OnAvailable(global::Android.Net.Network network) => changed();
         public override void OnLost(global::Android.Net.Network network) => changed();
         public override void OnCapabilitiesChanged(global::Android.Net.Network network, global::Android.Net.NetworkCapabilities capabilities) => changed();
+    }
+
+    private sealed class WakeRelay(DiTunnelVpnService service) : BroadcastReceiver
+    {
+        public override void OnReceive(Context? context, Intent? intent)
+        {
+            // Wake the controls process without an Activity, including after its eviction.
+            service.SendBroadcast(new Intent().SetClassName(service.PackageName!, "com.divintyinteractive.ditunnel.VpnStatusReceiver"));
+            service.ScheduleNetworkEvaluation();
+        }
     }
 
     private async Task<XrayProfileConfiguration> StartAmneziaWgAsync(DiTunnel.Core.Profiles.ImportedProfile profile, CancellationToken cancellationToken)
@@ -533,15 +558,6 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
         return new(
             root.TryGetProperty("success", out var success) && success.GetBoolean(),
             root.TryGetProperty("error", out var error) ? error.GetString() : null);
-    }
-
-    private static string SanitizeError(string? error)
-    {
-        if (string.IsNullOrWhiteSpace(error)) return "libXray не запустил VPN.";
-        var message = error.Length <= 400 ? error : error[..400];
-        return message.StartsWith("xray ", StringComparison.Ordinal)
-            ? "Xray " + message[5..]
-            : message;
     }
 
     private void CreateNotificationChannel()

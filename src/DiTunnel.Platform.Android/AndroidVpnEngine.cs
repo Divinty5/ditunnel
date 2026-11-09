@@ -21,6 +21,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     private CancellationTokenSource? healthCancellation;
     private CancellationTokenSource? networkChangeCancellation;
     private PhysicalNetworkCallback? networkCallback;
+    private RuntimeNetworkCallback? runtimeNetworkCallback;
     private CancellationTokenSource? recoveryCancellation;
     private readonly object networkSignalLock = new();
     private TaskCompletionSource networkChanged = NewNetworkSignal();
@@ -43,10 +44,23 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         AndroidVpnServiceBridge.StatusReceived += OnServiceStatusReceived;
         RegisterNetworkMonitor();
         if (status.State == VpnConnectionState.Connected) StartHealthMonitor();
+        else if (CanRecoverAfterSystemStop) _ = RecoverConnectionAsync();
     }
 
-    public VpnStatus Status => status;
+    public VpnStatus Status => AndroidVpnStatePolicy.Reconcile(status, AndroidVpnRuntimeState.ReadStatus(context),
+        pendingConnection is not null || recoveryCancellation is not null || status.State == VpnConnectionState.Disconnecting);
+    public void RefreshRuntimeState()
+    {
+        var observed = Status;
+        if (observed.State != status.State)
+        {
+            if (observed.State == VpnConnectionState.Connected) activeProfile = AndroidVpnRuntimeState.ReadActiveProfile(context);
+            SetStatus(observed);
+        }
+    }
     public ImportedProfile? ActiveProfile => activeProfile;
+    public bool CanRecoverAfterSystemStop => !disposed && pendingConnection is null
+        && AndroidVpnRuntimeState.ServiceOwnsRecovery(context) && !AndroidVpnRuntimeState.IsVpnProcessAlive(context);
     public bool RequiresAdministrator => false;
     public bool IsNetworkProtectionActive => status.State == VpnConnectionState.Connected && AndroidVpnRuntimeState.IsVpnProcessRunning(context);
     public event EventHandler<VpnStatus>? StatusChanged;
@@ -54,6 +68,14 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     // native process is started explicitly; Sticky restart is only the OS fallback.
     public async Task RecoverConnectionAsync()
     {
+        RefreshRuntimeState();
+        if (status.State == VpnConnectionState.Connected || !AndroidVpnRuntimeState.ServiceOwnsRecovery(context)) return;
+        using var permission = global::Android.Net.VpnService.Prepare(context);
+        if (permission is not null)
+        {
+            SetStatus(new(VpnConnectionState.Error, "Откройте Di-Tunnel и подтвердите разрешение на VPN."));
+            return;
+        }
         activeProfile ??= AndroidVpnRuntimeState.ReadActiveProfile(context);
         BeginRecovery();
         var recovery = recoveryTask;
@@ -68,6 +90,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         ArgumentNullException.ThrowIfNull(profile);
         CancelRecovery();
         await lifecycle.WaitAsync(cancellationToken);
@@ -115,6 +138,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
 
     public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         ArgumentNullException.ThrowIfNull(profile);
         CancelRecovery();
         await lifecycle.WaitAsync(cancellationToken);
@@ -193,8 +217,12 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
                 throw new InvalidOperationException(started.Message ?? "Не удалось запустить Android VPN.");
             activeProfile = profile;
             SetStatus(new(VpnConnectionState.Connected,
-                "Туннель Android VPN активен; доступность интернета проверяется отдельно.",
+                "Туннель Android VPN запущен. Проверяем HTTPS через VPN…",
                 DateTimeOffset.UtcNow));
+            // Control-site failure is inconclusive, never a reason to tear down a working TUN.
+            var check = await new AndroidServerProbe(context).ProbeActiveTunnelAsync(cancellationToken);
+            SetStatus(new(VpnConnectionState.Connected,
+                AndroidProbePolicy.TunnelMessage(check), status.ConnectedAt, check.Milliseconds));
             StartHealthMonitor();
         }
         catch (Exception error)
@@ -276,6 +304,26 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         _ = builder.AddCapability(NetCapability.NotVpn);
         var request = builder.Build() ?? throw new InvalidOperationException("Android не создал запрос наблюдения за сетью.");
         manager.RegisterNetworkCallback(request, callback);
+        runtimeNetworkCallback = new RuntimeNetworkCallback(ScheduleRuntimeRefresh);
+        using var vpnBuilder = new global::Android.Net.NetworkRequest.Builder();
+        manager.RegisterNetworkCallback(vpnBuilder.RemoveCapability(NetCapability.NotVpn)!
+            .AddTransportType(global::Android.Net.TransportType.Vpn)!.Build()!, runtimeNetworkCallback);
+    }
+
+    private void ScheduleRuntimeRefresh()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, lifetime.Token);
+                if (disposed) return;
+                RefreshRuntimeState();
+                if (CanRecoverAfterSystemStop) await RecoverConnectionAsync();
+            }
+            catch (OperationCanceledException) { }
+            catch { /* The next network/wake event retries; never report a cached Connected state. */ }
+        });
     }
 
     private void StopHealthMonitor()
@@ -290,6 +338,12 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
 
     private void UnregisterNetworkMonitor()
     {
+        if (runtimeNetworkCallback is not null && context.GetSystemService(Context.ConnectivityService) is ConnectivityManager runtimeManager)
+        {
+            try { runtimeManager.UnregisterNetworkCallback(runtimeNetworkCallback); } catch (ArgumentException) { }
+            runtimeNetworkCallback.Dispose();
+            runtimeNetworkCallback = null;
+        }
         if (networkCallback is not null && context.GetSystemService(Context.ConnectivityService) is ConnectivityManager manager)
         {
             try { manager.UnregisterNetworkCallback(networkCallback); } catch (ArgumentException) { }
@@ -361,6 +415,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
     {
         try { await RecoverAsync(profile, cancellation.Token); }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch { SetStatus(new(VpnConnectionState.Error, "Не удалось восстановить VPN. Повторите подключение.")); }
         finally
         {
             if (ReferenceEquals(recoveryCancellation, cancellation)) recoveryCancellation = null;
@@ -491,5 +546,12 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             }
             changed();
         }
+    }
+
+    private sealed class RuntimeNetworkCallback(Action changed) : ConnectivityManager.NetworkCallback
+    {
+        public override void OnAvailable(global::Android.Net.Network network) => changed();
+        public override void OnLost(global::Android.Net.Network network) => changed();
+        public override void OnCapabilitiesChanged(global::Android.Net.Network network, global::Android.Net.NetworkCapabilities capabilities) => changed();
     }
 }
