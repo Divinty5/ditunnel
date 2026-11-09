@@ -19,8 +19,6 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
-WizardStyle=modern
-SetupIconFile=..\src\DiTunnel.Desktop\app.ico
 UninstallDisplayIcon={app}\Di-Tunnel.exe
 OutputDir=..\artifacts\installer
 OutputBaseFilename=Di-Tunnel-{#AppVersion}-Setup-x64
@@ -30,6 +28,8 @@ CloseApplications=no
 RestartApplications=no
 Uninstallable=yes
 UninstallDisplayName=Di-Tunnel
+
+#include "Branding.iss"
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
