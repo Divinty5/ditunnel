@@ -82,6 +82,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         await ValidateProfileAsync(profile, cancellationToken);
         CancelReconnect();
         reconnectProfile = profile;
@@ -92,6 +93,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
 
     public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         await ValidateProfileAsync(profile, cancellationToken);
         if (!connectionPolicy().Normalize().KillSwitchEnabled || host is null || !IsNetworkProtectionActive)
         {
@@ -254,6 +256,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
 
     private async Task MonitorAsync(WindowsTunnelHost process, TaskCompletionSource ready, KillSwitchConfiguration? protection, string killSwitchReadyPath, bool permitDynamicDirectAddresses)
     {
+        var connectionWatch = System.Diagnostics.Stopwatch.StartNew();
         string? line;
         string? error = null;
         var rollbackConfirmed = false;
@@ -273,7 +276,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         catch (UnauthorizedAccessException) { }
         while ((line = await process.ReadLineAsync()) is not null)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|DNS_(INTERFACE|NRPT)_READY|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|PROBE_WARNING|PROBE_EXCEPTION_[A-Za-z0-9_]+|PROBE_SOCKET_[0-9]+|CONNECTED|STOPPED|CANCELLED)$"))
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, "^(STAGE_[A-Z_]+|DNS_(INTERFACE|NRPT)_READY|TUNNEL_INTERFACE_[0-9]+|PHYSICAL_INTERFACE_[0-9]+|SPLIT_ADDRESS_[0-9a-fA-F:.]+|ERROR_[A-Za-z0-9_-]+|TAKEOVER_OTHER_VPN|CORPORATE_DNS_PRESERVED|PROBE_WARNING|PROBE_EXCEPTION_[A-Za-z0-9_]+|PROBE_SOCKET_[0-9]+|CONNECTED|STOPPED|CANCELLED)$"))
                 await AppendDiagnosticAsync(logPath, line);
             if (line.StartsWith("PHYSICAL_INTERFACE_", StringComparison.Ordinal) && int.TryParse(line[19..], out var physicalIndex))
                 physicalInterfaceIndex = physicalIndex;
@@ -339,12 +342,18 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 case "ERROR_PRECHECK_SERVER_ROUTE": error = "Не удалось подготовить физический маршрут к VPN-серверу."; break;
                 case "ERROR_PRECHECK_OUTBOUND": error = "Не удалось подготовить исходящее соединение VPN."; break;
                 case "TAKEOVER_OTHER_VPN": Publish(VpnConnectionState.Connecting, "Обнаружен другой VPN. Переключаем маршруты на Di-Tunnel…"); break;
+                case "CORPORATE_DNS_PRESERVED": break;
                 case "PROBE_WARNING": probeWarning = true; break;
                 case "STOPPED": rollbackConfirmed = true; break;
                 case "CONNECTED":
                     wasConnected = true; reconnectFailures = 0;
                     try { File.Delete(Path.Combine(sessionDirectory!, "preserve-kill-switch")); } catch (IOException) { }
-                    Publish(VpnConnectionState.Connected, probeWarning ? "Туннель активен. Сервер доступен, но контрольный запрос через TUN не выполнен." : "Туннель активен. Контрольное соединение через TUN выполнено.");
+                    var connectionReport = new ProbeDiagnostics("TCP через TUN", "TUN", probeWarning ? "Unconfirmed" : "None",
+                        // A TCP acknowledgement through a local TUN stack is not
+                        // authenticated application traffic through the profile.
+                        connectionWatch.Elapsed.TotalMilliseconds, false, ProbePolicy.VersionFor("Windows"), Platform: "Windows");
+                    Publish(VpnConnectionState.Connected, (probeWarning ? "Туннель запущен. Проверка не пройдена." : "VPN подключён.")
+                        + "\n" + connectionReport.ToDisplayString());
                     ready.TrySetResult();
                     break;
                 case "ERROR_DNS_POLICY": error = "Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их."; break;

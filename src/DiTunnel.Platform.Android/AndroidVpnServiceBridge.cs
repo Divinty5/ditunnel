@@ -67,7 +67,7 @@ internal static class AndroidVpnServiceBridge
 
     public static Task<VpnStatus> ExpectStart() { lock (Sync) return (startCompletion = NewCompletion()).Task; }
     public static Task<VpnStatus> ExpectStop() { lock (Sync) return (stopCompletion = NewCompletion()).Task; }
-    public static void PublishStarted(Context context) => Publish(context, ActionStarted, "VPN подключён через Android VpnService.");
+    public static void PublishStarted(Context context) => Publish(context, ActionStarted, "Туннель Android VPN запущен; работоспособность ещё не подтверждена.");
     public static void PublishStartFailed(Context context, string message) => Publish(context, ActionStartFailed, message);
     public static void PublishStopped(Context context) => Publish(context, ActionStopped, "VPN отключён.");
     public static void PublishRecovering(Context context) => Publish(context, ActionRecovering, "Восстанавливаем VPN…");

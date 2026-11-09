@@ -31,11 +31,13 @@ public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<Con
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         await RequestAsync("connect", profile, cancellationToken);
         ActiveProfile = profile;
     }
     public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         await RequestAsync("switch", profile, cancellationToken);
         ActiveProfile = profile;
     }
@@ -52,7 +54,8 @@ public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<Con
         ActiveProfile = null;
     }
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
-        (await RequestAsync("probe", profile, cancellationToken, mode)).Probe ?? new(null, "Сетевой модуль не вернул результат проверки.");
+        (await RequestAsync("probe", profile, cancellationToken, mode)).Probe
+            ?? ProbePolicy.Failure(new IOException(), "Служба проверки", mode == ServerProbeMode.Https ? "HTTPS" : "HTTP", 0, "Windows");
 
     private async Task EnsureStartedAsync(CancellationToken token)
     {

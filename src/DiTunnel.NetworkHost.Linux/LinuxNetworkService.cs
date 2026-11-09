@@ -1,4 +1,6 @@
 using DiTunnel.Core.Connection;
+using DiTunnel.Core;
+using System.Text.Json;
 using DiTunnel.Platform.Linux.Network;
 using Tmds.DBus.Protocol;
 using System.Text;
@@ -13,7 +15,7 @@ internal sealed class LinuxNetworkService(LinuxProbeCoordinator coordinator, Lin
     private static readonly ReadOnlyMemory<byte> InterfaceXml = """
         <interface name="org.divinty5.DiTunnel.Network1">
           <method name="GetCapabilities"><arg direction="out" type="u" name="version"/><arg direction="out" type="b" name="probe"/><arg direction="out" type="b" name="connect"/><arg direction="out" type="b" name="killSwitch"/><arg direction="out" type="b" name="splitTunnel"/></method>
-          <method name="Probe"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="u" name="mode"/><arg direction="out" type="b" name="success"/><arg direction="out" type="d" name="milliseconds"/><arg direction="out" type="s" name="message"/><arg direction="out" type="b" name="deferred"/></method>
+          <method name="Probe"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="u" name="mode"/><arg direction="out" type="b" name="success"/><arg direction="out" type="d" name="milliseconds"/><arg direction="out" type="s" name="message"/><arg direction="out" type="b" name="deferred"/><arg direction="out" type="s" name="diagnostics"/></method>
           <method name="CancelProbe"><arg direction="in" type="s" name="id"/></method>
           <method name="Connect"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="s" name="policy"/></method>
           <method name="Switch"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="s" name="policy"/></method>
@@ -75,7 +77,7 @@ internal sealed class LinuxNetworkService(LinuxProbeCoordinator coordinator, Lin
         catch
         {
             admission.Release();
-            context.ReplyError("org.divinty5.DiTunnel.InvalidRequest", "Проверка принимает один поддерживаемый профиль и версию протокола 2.");
+            context.ReplyError("org.divinty5.DiTunnel.InvalidRequest", "Проверка принимает один поддерживаемый профиль и версию протокола 3.");
             return default;
         }
     }
@@ -107,11 +109,12 @@ internal sealed class LinuxNetworkService(LinuxProbeCoordinator coordinator, Lin
 
     private static void ReplyProbe(MethodContext context, ServerProbeResult result)
     {
-        using var writer = context.CreateReplyWriter("bdsb");
+        using var writer = context.CreateReplyWriter("bdsbs");
         writer.WriteBool(result.Milliseconds is not null);
         writer.WriteDouble(result.Milliseconds ?? 0);
         writer.WriteString(result.Message);
         writer.WriteBool(result.IsDeferred);
+        writer.WriteString(JsonSerializer.Serialize(result.Diagnostics, DiTunnelJsonContext.Default.ProbeDiagnostics));
         context.Reply(writer.CreateMessage());
     }
 }

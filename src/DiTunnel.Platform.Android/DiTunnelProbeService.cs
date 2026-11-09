@@ -32,9 +32,11 @@ public sealed class DiTunnelProbeService : Service
         var profiles = JsonSerializer.Deserialize(profilesJson, DiTunnelJsonContext.Default.ImportedProfileArray);
         if (profiles is null or { Length: 0 }) return StartCommandResult.NotSticky;
         runningRequestId = requestId;
-        running = new CancellationTokenSource(TimeSpan.FromSeconds(17));
-        _ = RunAsync(requestId, profiles, (ServerProbeMode)intent.GetIntExtra(AndroidProbeServiceBridge.ExtraMode, 0),
-            intent.GetBooleanExtra(AndroidProbeServiceBridge.ExtraLegacy, false), running.Token);
+        running = new CancellationTokenSource(TimeSpan.FromSeconds(22));
+        var mode = (ServerProbeMode)intent.GetIntExtra(AndroidProbeServiceBridge.ExtraMode, 0);
+        var legacy = intent.GetBooleanExtra(AndroidProbeServiceBridge.ExtraLegacy, false);
+        var token = running.Token;
+        _ = Task.Run(() => RunAsync(requestId, profiles, mode, legacy, token));
         return StartCommandResult.NotSticky;
     }
 
@@ -47,10 +49,10 @@ public sealed class DiTunnelProbeService : Service
                 ? [await AndroidXrayProbeRunner.MeasureViaProxyAsync(this, profiles[0], mode, cancellationToken)]
                 : await AndroidXrayProbeRunner.MeasureBatchAsync(this, profiles, mode, cancellationToken);
         }
-        catch (OperationCanceledException) { result = profiles.Select(_ => new ServerProbeResult(null, "Таймаут")).ToArray(); }
-        catch { result = profiles.Select(_ => new ServerProbeResult(null, "Недоступен")).ToArray(); }
+        catch (Exception error) { result = profiles.Select(_ => AndroidProbePolicy.Failure(error, "Проверка", "HTTPS", 0)).ToArray(); }
         SendBroadcast(new Intent(AndroidProbeServiceBridge.ActionResult).SetPackage(PackageName)
             .PutExtra(AndroidProbeServiceBridge.ExtraRequestId, requestId)
+            .PutExtra(AndroidProbeServiceBridge.ExtraProcessId, global::Android.OS.Process.MyPid())
             .PutExtra(AndroidProbeServiceBridge.ExtraResult, JsonSerializer.Serialize(result.ToArray(), DiTunnelJsonContext.Default.ServerProbeResultArray)));
         StopSelf();
         await Task.Delay(200);

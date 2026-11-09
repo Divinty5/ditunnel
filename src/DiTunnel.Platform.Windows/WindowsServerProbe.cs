@@ -16,6 +16,9 @@ public sealed class WindowsServerProbe : IServerProbe
 
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
     {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var method = mode == ServerProbeMode.Https ? "HTTPS" : AmneziaWgProfileConverter.IsAmneziaWg(profile) ? "TLS" : "HTTP";
+        var stage = "Профиль";
         var probeBudget = TimeSpan.FromSeconds(mode == ServerProbeMode.Fast ? 8 : 12);
         var directory = WindowsRuntime.CreateSession();
         var path = Path.Combine(directory, "config.json");
@@ -28,11 +31,13 @@ public sealed class WindowsServerProbe : IServerProbe
                 var precise = mode == ServerProbeMode.Https;
                 var measured = await XrayServerProbe.MeasureAsync(active.Proxy, IPAddress.Loopback, WindowsRuntime.Find(), path,
                     cancellationToken, useHttps: precise, tcpOnly: !precise, probeTimeout: probeBudget);
-                return new(measured, $"{(precise ? "HTTPS" : "TLS")} · {measured:F0} мс");
+                return ProbePolicy.Success(measured, method, method, true, platform: "Windows");
             }
             var configuration = awg?.CreateProxyConfiguration(0, "pending", "pending") ?? XrayProfileConverter.Convert(profile);
+            stage = "DNS сервера";
             var address = (await Dns.GetHostAddressesAsync(configuration.ServerHost, cancellationToken).WaitAsync(TimeSpan.FromSeconds(mode == ServerProbeMode.Fast ? 4 : 15), cancellationToken)).FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork)
                 ?? throw new NotSupportedException("Нет IPv4-адреса сервера.");
+            stage = "Подключение к серверу";
             await using var bypass = await WindowsProbeRouteBypass.CreateAsync(address, directory, cancellationToken, serializeEndpoint: awg is not null);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             await using var permit = killSwitch is null
@@ -46,14 +51,12 @@ public sealed class WindowsServerProbe : IServerProbe
             var useHttps = mode == ServerProbeMode.Https;
             var tcpOnly = awg is not null && !useHttps;
             await using var awgRuntime = awg is null ? null : await WindowsAmneziaWgRuntime.StartAsync(awg, address.ToString(), directory, bypass.SourceAddress, timeout.Token);
+            stage = "Xray";
             var milliseconds = await XrayServerProbe.MeasureAsync(awgRuntime?.Proxy ?? configuration, address, WindowsRuntime.Find(), path, timeout.Token, useHttps, bypass.SourceAddress, tcpOnly, probeBudget);
-            return new(milliseconds, $"{(tcpOnly ? "TLS" : useHttps ? "HTTPS" : "HTTP")} · {milliseconds:F0} мс");
+            return ProbePolicy.Success(milliseconds, method, method, true, platform: "Windows");
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new(null, "Таймаут"); }
-        catch (TimeoutException) { return new(null, "Таймаут"); }
-        catch (Exception error) when (error is InvalidOperationException or NotSupportedException or FormatException) { return new(null, error.Message); }
-        catch (HttpRequestException) { return new(null, "Ошибка сети"); }
-        catch (SocketException) { return new(null, "Не удалось определить адрес"); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error) { return ProbePolicy.Failure(error, stage, method, watch.Elapsed.TotalMilliseconds, "Windows"); }
         finally
         {
             if (File.Exists(path)) File.Delete(path);

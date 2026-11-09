@@ -1,4 +1,6 @@
 using DiTunnel.Core.Connection;
+using DiTunnel.Core;
+using System.Text.Json;
 using DiTunnel.Core.Profiles;
 using Tmds.DBus.Protocol;
 
@@ -72,9 +74,12 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
                 var milliseconds = reader.ReadDouble();
                 var text = reader.ReadString();
                 var deferred = reader.ReadBool();
+                var diagnosticsJson = reader.ReadString();
+                if (diagnosticsJson.Length > 4096) throw new InvalidOperationException("Некорректная диагностика проверки.");
+                var diagnostics = JsonSerializer.Deserialize(diagnosticsJson, DiTunnelJsonContext.Default.ProbeDiagnostics);
                 if (text.Length > 512 || success && (!double.IsFinite(milliseconds) || milliseconds < 0))
                     throw new InvalidOperationException("Некорректный ответ сетевой службы.");
-                return new ServerProbeResult(success ? milliseconds : null, text, deferred);
+                return new ServerProbeResult(success ? milliseconds : null, text, deferred, diagnostics);
             });
             try { return await call.WaitAsync(LinuxNetworkProtocol.ProbeTimeout + TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false); }
             catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
@@ -87,7 +92,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
             }
         }
         catch (OperationCanceledException) { throw; }
-        catch { return new(null, "Не удалось проверить сервер. Проверьте профиль и доступность сетевой службы Linux."); }
+        catch (Exception error) { return ProbePolicy.Failure(error, "Сетевая служба", mode == ServerProbeMode.Https ? "HTTPS" : "HTTP", 0, "Linux"); }
     }
 
     private MessageBuffer CreateProbe(Guid id, string content, ServerProbeMode mode)
@@ -113,6 +118,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
 
     public async Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         await control.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false); }
         finally { control.Release(); }
@@ -195,6 +201,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
 
     public async Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
     {
+        SubscriptionAccess.EnsureAvailable(profile);
         _ = LinuxNetworkProtocol.ParseProfile(LinuxNetworkProtocol.Version, profile.Content, 0);
         await control.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

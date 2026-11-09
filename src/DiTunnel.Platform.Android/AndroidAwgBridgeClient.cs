@@ -1,6 +1,7 @@
 using Android.Content;
 using Android.OS;
 using DiTunnel.Infrastructure.Xray;
+using DiTunnel.Core.Connection;
 using System.Security.Cryptography;
 
 namespace DiTunnel.Platform.Android;
@@ -44,7 +45,7 @@ internal sealed class AndroidAwgBridgeClient : IDisposable
         var port = await started.Task.WaitAsync(cancellationToken);
         return Proxy = configuration.CreateProxyConfiguration(port, username, password);
     }
-    public async Task<double> MeasureHttpsAsync(CancellationToken cancellationToken)
+    internal async Task<ServerProbeResult> ProbeHttpsAsync(CancellationToken cancellationToken)
     {
         var port = await started.Task.WaitAsync(cancellationToken);
         using var handler = new SocketsHttpHandler
@@ -53,11 +54,8 @@ internal sealed class AndroidAwgBridgeClient : IDisposable
             UseProxy = true,
             AllowAutoRedirect = false
         };
-        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        using var response = await http.GetAsync("https://cp.cloudflare.com/", HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return watch.Elapsed.TotalMilliseconds;
+        using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        return await AndroidProbePolicy.CheckHttpClientAsync(http, cancellationToken);
     }
     private void SendStart(IBinder binder)
     {

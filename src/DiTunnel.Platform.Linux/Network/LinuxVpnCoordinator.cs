@@ -94,6 +94,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
     private async Task RunAsync(Operation operation, ImportedProfile profile, Func<CancellationToken, Task<bool>> authorize, LinuxVpnPolicy policy)
     {
         Exception? failure = null;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(operation.Cancellation.Token);
@@ -102,7 +103,10 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
             deadline.Token.ThrowIfCancellationRequested();
             operation.Session = createSession();
             await operation.Session.StartAsync(profile, policy, deadline.Token).ConfigureAwait(false);
-            lock (gate) { retainedProtection = false; status = new(VpnConnectionState.Connected, ConnectedAt: DateTimeOffset.UtcNow); }
+            var diagnostic = new ProbeDiagnostics("TUN", "TUN", "Unconfirmed", watch.Elapsed.TotalMilliseconds,
+                false, ProbePolicy.VersionFor("Linux"), Platform: "Linux");
+            lock (gate) { retainedProtection = false; status = new(VpnConnectionState.Connected,
+                "Туннель запущен.\n" + diagnostic.ToDisplayString(), ConnectedAt: DateTimeOffset.UtcNow); }
             operation.Ready.TrySetResult();
             await operation.Session.WaitForExitAsync(operation.Cancellation.Token).ConfigureAwait(false);
         }

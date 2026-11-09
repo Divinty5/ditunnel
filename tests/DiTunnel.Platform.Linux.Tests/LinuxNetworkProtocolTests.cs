@@ -19,11 +19,12 @@ public sealed class LinuxNetworkProtocolTests
     [Theory]
     [InlineData(0u, Profile, 0u)]
     [InlineData(1u, Profile, 0u)]
-    [InlineData(3u, Profile, 0u)]
-    [InlineData(2u, Profile, 2u)]
-    [InlineData(2u, "", 0u)]
-    [InlineData(2u, "{\"outbounds\":[{\"protocol\":\"freedom\"}]}", 0u)]
-    [InlineData(2u, Profile + "\n" + "vless://00000000-0000-4000-8000-000000000002@127.0.0.1:444", 0u)]
+    [InlineData(2u, Profile, 0u)]
+    [InlineData(LinuxNetworkProtocol.Version + 1, Profile, 0u)]
+    [InlineData(LinuxNetworkProtocol.Version, Profile, 2u)]
+    [InlineData(LinuxNetworkProtocol.Version, "", 0u)]
+    [InlineData(LinuxNetworkProtocol.Version, "{\"outbounds\":[{\"protocol\":\"freedom\"}]}", 0u)]
+    [InlineData(LinuxNetworkProtocol.Version, Profile + "\n" + "vless://00000000-0000-4000-8000-000000000002@127.0.0.1:444", 0u)]
     public void Request_rejects_unsupported_or_ambiguous_payload(uint version, string content, uint mode)
         => Assert.ThrowsAny<Exception>(() => LinuxNetworkProtocol.ParseProfile(version, content, mode));
 

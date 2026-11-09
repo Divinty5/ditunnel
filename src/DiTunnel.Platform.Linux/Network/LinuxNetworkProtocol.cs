@@ -6,7 +6,7 @@ namespace DiTunnel.Platform.Linux.Network;
 
 public static class LinuxNetworkProtocol
 {
-    public const uint Version = 2;
+    public const uint Version = 3;
     public const string Service = "org.divinty5.DiTunnel.Network1";
     public const string Path = "/org/divinty5/DiTunnel/Network1";
     public const string Interface = Service;

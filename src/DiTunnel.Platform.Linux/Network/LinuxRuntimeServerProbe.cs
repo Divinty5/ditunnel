@@ -24,6 +24,9 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
 
     private async Task<ServerProbeResult> ProbeCoreAsync(ImportedProfile profile, CancellationToken cancellationToken, ServerProbeMode mode)
     {
+        var watch = Stopwatch.StartNew();
+        var stage = "Профиль";
+        var method = mode == ServerProbeMode.Https ? "HTTPS" : AmneziaWgProfileConverter.IsAmneziaWg(profile) ? "TLS" : "HTTP";
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var budget = TimeSpan.FromSeconds(mode == ServerProbeMode.Fast ? 8 : 12);
         timeout.CancelAfter(budget);
@@ -36,6 +39,7 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
             var isAwg = AmneziaWgProfileConverter.IsAmneziaWg(profile);
             var awg = isAwg ? AmneziaWgProfileConverter.Convert(profile) : null;
             var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
+            stage = "DNS сервера";
             var address = await (endpoints ?? new()).ResolveAsync(profile, false, timeout.Token).ConfigureAwait(false);
             await using var permit = new LinuxProbeFirewallLease(firewall);
             await permit.PermitAsync(address, awg?.ServerPort ?? converted!.ServerPort,
@@ -54,17 +58,15 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
                 configuration = configuration with { Outbound = outbound };
             }
             var path = Path.Combine(directory, "xray.json");
-            // XrayServerProbe overwrites this existing 0600 file, preserving its mode.
             await WritePrivateAsync(path, "", timeout.Token).ConfigureAwait(false);
+            stage = "Xray";
             var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, xray, path, timeout.Token,
                 useHttps: mode == ServerProbeMode.Https, tcpOnly: awg is not null && mode == ServerProbeMode.Fast, probeTimeout: budget,
-                processLifetimeFactory: static process => new LinuxProcessLifetime(process)).ConfigureAwait(false);
-            var method = mode == ServerProbeMode.Https ? "HTTPS" : awg is not null ? "TLS" : "HTTP";
-            return new(milliseconds, $"{method} · {milliseconds:F0} мс");
+                processLifetimeFactory: static process => new LinuxProcessLifetime(process), platform: "Linux").ConfigureAwait(false);
+            return ProbePolicy.Success(milliseconds, method, method, true, platform: "Linux");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (OperationCanceledException) { return new(null, "Время проверки сервера истекло."); }
-        catch { return new(null, "Сервер не ответил через туннель. Проверьте профиль и доступность сервера."); }
+        catch (Exception error) { return ProbePolicy.Failure(error, stage, method, watch.Elapsed.TotalMilliseconds, "Linux"); }
         finally
         {
             // Only the fresh private directory allocated by this operation is removed.

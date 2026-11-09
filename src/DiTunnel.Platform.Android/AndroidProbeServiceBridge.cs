@@ -18,7 +18,13 @@ internal static class AndroidProbeServiceBridge
     internal const string ExtraMode = "mode";
     internal const string ExtraLegacy = "legacy";
     internal const string ExtraResult = "result";
-    private static readonly ConcurrentDictionary<string, TaskCompletionSource<IReadOnlyList<ServerProbeResult>>> Pending = new();
+    internal const string ExtraProcessId = "process_id";
+    private sealed class ProbeRequest
+    {
+        public TaskCompletionSource<IReadOnlyList<ServerProbeResult>> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int ProcessId;
+    }
+    private static readonly ConcurrentDictionary<string, ProbeRequest> Pending = new();
     private static readonly object Sync = new();
     private static ResultReceiver? receiver;
 
@@ -26,8 +32,9 @@ internal static class AndroidProbeServiceBridge
     {
         Register(context);
         var requestId = Guid.NewGuid().ToString("N");
-        var completion = new TaskCompletionSource<IReadOnlyList<ServerProbeResult>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Pending[requestId] = completion;
+        var pending = new ProbeRequest();
+        var completion = pending.Completion;
+        Pending[requestId] = pending;
         context.StartService(new Intent(context, typeof(DiTunnelProbeService)).SetAction(ActionProbe)
             .PutExtra(ExtraRequestId, requestId)
             .PutExtra(ExtraProfiles, JsonSerializer.Serialize(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray))
@@ -42,7 +49,7 @@ internal static class AndroidProbeServiceBridge
         finally
         {
             Pending.TryRemove(requestId, out _);
-            await WaitForProbeProcessExitAsync(context);
+            await WaitForProbeProcessExitAsync(context, pending.ProcessId);
         }
     }
 
@@ -61,16 +68,24 @@ internal static class AndroidProbeServiceBridge
         }
     }
 
-    private static async Task WaitForProbeProcessExitAsync(Context context)
+    private static async Task WaitForProbeProcessExitAsync(Context context, int processId)
     {
+        // RunningAppProcesses can omit our process on vendor firmware. A successful
+        // reply carries its PID, so the next profile must wait for that exact process.
+        if (processId <= 0) processId = FindProbeProcess(context)?.Pid ?? 0;
         for (var attempt = 0; attempt < 20; attempt++)
         {
-            if (FindProbeProcess(context) is null) return;
+            if (!IsProbeProcess(context, processId)) return;
             await Task.Delay(100);
         }
-        var remaining = FindProbeProcess(context);
-        if (remaining is not null && remaining.Pid != global::Android.OS.Process.MyPid())
-            global::Android.OS.Process.KillProcess(remaining.Pid);
+        if (IsProbeProcess(context, processId)) global::Android.OS.Process.KillProcess(processId);
+    }
+
+    private static bool IsProbeProcess(Context context, int processId)
+    {
+        if (processId <= 0 || processId == global::Android.OS.Process.MyPid()) return false;
+        try { return File.ReadAllText($"/proc/{processId}/cmdline").Split('\0')[0] == context.PackageName + ":probe"; }
+        catch { return FindProbeProcess(context)?.Pid == processId; }
     }
 
     private static ActivityManager.RunningAppProcessInfo? FindProbeProcess(Context context)
@@ -86,9 +101,10 @@ internal static class AndroidProbeServiceBridge
         {
             var requestId = intent?.GetStringExtra(ExtraRequestId);
             var json = intent?.GetStringExtra(ExtraResult);
-            if (requestId is null || json is null || !Pending.TryGetValue(requestId, out var completion)) return;
-            try { completion.TrySetResult(JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResultArray) ?? []); }
-            catch { completion.TrySetResult([]); }
+            if (requestId is null || json is null || !Pending.TryGetValue(requestId, out var pending)) return;
+            pending.ProcessId = intent!.GetIntExtra(ExtraProcessId, 0);
+            try { pending.Completion.TrySetResult(JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResultArray) ?? []); }
+            catch { pending.Completion.TrySetResult([]); }
         }
     }
 }

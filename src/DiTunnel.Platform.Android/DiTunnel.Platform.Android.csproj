@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyMetadata Include="AndroidVersion" Value="$(AndroidVersion)" />
     <AndroidNativeLibrary Include="$(DITUNNEL_ANDROID_AWG_ROOT)\arm64-v8a\libditunnel-awg.so" Condition="Exists('$(DITUNNEL_ANDROID_AWG_ROOT)\arm64-v8a\libditunnel-awg.so')" />
     <AndroidNativeLibrary Include="$(DITUNNEL_ANDROID_AWG_ROOT)\x86_64\libditunnel-awg.so" Condition="Exists('$(DITUNNEL_ANDROID_AWG_ROOT)\x86_64\libditunnel-awg.so')" />
     <ProjectReference Include="..\DiTunnel.Core\DiTunnel.Core.csproj" />

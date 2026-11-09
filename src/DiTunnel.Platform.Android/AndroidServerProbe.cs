@@ -1,6 +1,5 @@
 using Android.Content;
 using Android.Net;
-using Android.Util;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using DiTunnel.Infrastructure.Xray;
@@ -8,7 +7,7 @@ using System.Diagnostics;
 
 namespace DiTunnel.Platform.Android;
 
-public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
+public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IActiveTunnelProbe
 {
     private static readonly SemaphoreSlim XrayProbeGate = new(1, 1);
     private readonly Context context = context.ApplicationContext ?? context;
@@ -30,29 +29,28 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
                     // AWG list probes use a separate helper with no system TUN.
                     // Only missing VPN permission defers an offline check.
                     if (AmneziaWgProfileConverter.IsAmneziaWg(profiles[index]))
-                        results[index] = await ProbeAmneziaWgAsync(profiles[index], mode, cancellationToken);
+                        results[index] = await AndroidProbeFailureIsolation.RunAsync(
+                            () => ProbeAmneziaWgAsync(profiles[index], mode, cancellationToken),
+                            error => ProbeFailure(error, "AmneziaWG"), cancellationToken);
                     else
                     {
                         try { configurations[index] = XrayProfileConverter.Convert(profiles[index]); }
-                        catch (Exception error) when (error is InvalidOperationException or NotSupportedException or FormatException)
-                        { results[index] = new(null, ShortMessage(error.Message)); }
+                        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+                        { results[index] = ProbeFailure(new AndroidProbeException("Профиль", "Configuration"), "Профиль"); }
                     }
                 }
                 var tcpIndexes = Enumerable.Range(0, profiles.Count)
-                    .Where(index => configurations[index] is { ServerTransport: not KillSwitchTransportProtocol.Udp }).ToArray();
+                    .Where(index => configurations[index] is not null &&
+                        (mode == ServerProbeMode.Https || configurations[index]!.ServerTransport != KillSwitchTransportProtocol.Udp)).ToArray();
                 foreach (var chunk in tcpIndexes.Chunk(5))
                 {
+                    var chunkWatch = Stopwatch.StartNew();
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(mode == ServerProbeMode.Fast ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(18));
+                    timeout.CancelAfter(mode == ServerProbeMode.Fast ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(25));
                     if (mode == ServerProbeMode.Fast)
                     {
-                        var measured = await Task.WhenAll(chunk.Select(index => AndroidProbeFailureIsolation.RunAsync(
-                            () => Task.Run(() =>
-                            {
-                                var milliseconds = MeasureTcp(configurations[index]!.ServerHost, configurations[index]!.ServerPort, timeout.Token);
-                                return new ServerProbeResult(milliseconds, $"TCP · {milliseconds:F0} мс");
-                            }, timeout.Token),
-                            error => ProbeFailure(error, "TCP", timeout.IsCancellationRequested), cancellationToken)));
+                        var measured = await Task.WhenAll(chunk.Select(index => MeasureTcpProfileAsync(
+                            configurations[index]!, timeout.Token, cancellationToken)));
                         for (var offset = 0; offset < chunk.Length; offset++)
                             results[chunk[offset]] = offset < measured.Length ? measured[offset] : new(null, "Проверка не выполнена");
                     }
@@ -62,12 +60,12 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
                             () => AndroidProbeServiceBridge.ProbeAsync(context,
                                 chunk.Select(index => profiles[index]).ToArray(), mode, timeout.Token),
                             error => (IReadOnlyList<ServerProbeResult>)Enumerable.Repeat(
-                                ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested), chunk.Length).ToArray(), cancellationToken);
+                                ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested, duration: chunkWatch.Elapsed.TotalMilliseconds), chunk.Length).ToArray(), cancellationToken);
                         for (var offset = 0; offset < chunk.Length; offset++)
                             results[chunk[offset]] = offset < measured.Count ? measured[offset] : new(null, "Проверка не выполнена");
                     }
                 }
-                foreach (var index in Enumerable.Range(0, profiles.Count).Where(index => configurations[index]?.ServerTransport == KillSwitchTransportProtocol.Udp))
+                foreach (var index in Enumerable.Range(0, profiles.Count).Where(index => mode == ServerProbeMode.Fast && configurations[index]?.ServerTransport == KillSwitchTransportProtocol.Udp))
                 {
                     results[index] = await AndroidProbeFailureIsolation.RunAsync(
                         () => ProbeUdpProfileAsync(profiles[index], mode, cancellationToken),
@@ -81,33 +79,23 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
         catch (TimeoutException) { FillMissing(results, "Таймаут проверки"); }
         catch (Exception error) when (error is InvalidOperationException or NotSupportedException or FormatException)
         {
-            FillMissing(results, ShortMessage(error.Message));
+            FillMissing(results, ProbeFailure(error, "Профиль"));
         }
         catch (Exception error)
         {
-            FillMissing(results, ProbeFailure(error, "Проверка").Message);
+            FillMissing(results, ProbeFailure(error, "Проверка"));
         }
         FillMissing(results, "Проверка не выполнена");
         return results.Select(result => result!).ToArray();
     }
 
-    private static ServerProbeResult ProbeFailure(Exception error, string stage, bool timedOut = false)
-    {
-        Log.Warn("DiTunnelProbe", error.ToString());
-        return new(null, timedOut ? $"{stage}: таймаут" : error switch
-        {
-            Java.Net.SocketTimeoutException or TimeoutException or OperationCanceledException => $"{stage}: таймаут",
-            Java.Net.UnknownHostException => "DNS: адрес сервера не найден",
-            Java.Net.NoRouteToHostException => $"{stage}: нет маршрута до сервера",
-            Java.Net.ConnectException => $"{stage}: ошибка подключения",
-            InvalidOperationException or NotSupportedException or FormatException => ShortMessage(error.Message),
-            _ => $"{stage}: ошибка проверки"
-        });
-    }
+    private static ServerProbeResult ProbeFailure(Exception error, string stage, bool timedOut = false, string method = "HTTPS", double duration = 0)
+        => AndroidProbePolicy.Failure(timedOut ? new TimeoutException() : error, stage, method, duration);
 
-    private static string ShortMessage(string message) => message.Length <= 42 ? message : "Недоступен";
     private async Task<ServerProbeResult> ProbeAmneziaWgAsync(ImportedProfile profile, ServerProbeMode mode, CancellationToken cancellationToken)
     {
+        var watch = Stopwatch.StartNew();
+        var stage = "AmneziaWG";
         if (AndroidVpnRuntimeState.ReadActiveProfile(context)?.Content != profile.Content)
         {
             using var permission = global::Android.Net.VpnService.Prepare(context);
@@ -119,78 +107,95 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
                 var configuration = AmneziaWgProfileConverter.Convert(profile);
                 var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager;
                 var network = manager is null ? null : AndroidXrayProbeRunner.FindPhysicalNetwork(manager);
-                if (network is null) return new(null, "Нет доступной физической сети.");
+                if (network is null) throw new AndroidProbeException("Подключение к серверу", "Connection");
+                stage = "DNS сервера";
                 var addresses = await Task.Run(() => network.GetAllByName(configuration.ServerHost), timeout.Token)
                     .WaitAsync(TimeSpan.FromSeconds(8), timeout.Token);
                 var address = addresses?.OrderBy(item => item.HostAddress?.Contains(':') == true ? 1 : 0).FirstOrDefault()?.HostAddress;
-                if (address is null) return new(null, "Не удалось определить IP-адрес VPN-сервера.");
+                if (address is null) throw new AndroidProbeException(stage, "Dns");
+                stage = "AmneziaWG";
                 // A dedicated probe process cannot stop or replace the active AWG helper.
                 // It owns no TUN: only this test traffic goes through its SOCKS/netstack.
                 using var bridge = new AndroidAwgBridgeClient(context, configuration, address, _ => { }, probe: true);
                 await bridge.StartAsync(timeout.Token);
-                var milliseconds = mode == ServerProbeMode.Fast ? bridge.HandshakeMilliseconds : await bridge.MeasureHttpsAsync(timeout.Token);
-                return new(milliseconds, $"{(mode == ServerProbeMode.Fast ? "Handshake" : "HTTPS")} · {milliseconds:F0} мс");
+                // An authenticated handshake alone does not verify HTTPS/data forwarding.
+                var result = await bridge.ProbeHttpsAsync(timeout.Token);
+                return result with { Diagnostics = result.Diagnostics! with { DurationMilliseconds = watch.Elapsed.TotalMilliseconds } };
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (OperationCanceledException) { return new(null, "Таймаут"); }
-            catch (TimeoutException) { return new(null, "Таймаут"); }
-            catch (Exception error) when (error is InvalidOperationException or FormatException or NotSupportedException) { return new(null, ShortMessage(error.Message)); }
-            catch { return new(null, "Сервер недоступен"); }
+            catch (Exception error) { return AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds); }
         }
         return await ProbeActiveTunnelAsync(cancellationToken);
     }
 
     // Bind explicitly to the VPN Network; widget latency must never use a physical network fallback.
-    public Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default) => Task.Run(() =>
+    public async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        Network? network = null;
+        try
         {
             var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager;
+            // The STARTED broadcast may precede the system's VPN Network registration.
+            for (var attempt = 0; attempt < 6 && network is null; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
 #pragma warning disable CA1422
-            var network = manager?.GetAllNetworks().FirstOrDefault(candidate =>
-                manager.GetNetworkCapabilities(candidate)?.HasTransport(TransportType.Vpn) == true);
+                network = manager?.GetAllNetworks().FirstOrDefault(candidate =>
+                    manager.GetNetworkCapabilities(candidate)?.HasTransport(TransportType.Vpn) == true);
 #pragma warning restore CA1422
-            if (network is null) return new ServerProbeResult(null, "Туннель VPN недоступен");
-            using var url = new Java.Net.URL("https://www.gstatic.com/generate_204");
-            using var connection = network.OpenConnection(url) as Javax.Net.Ssl.HttpsURLConnection;
-            if (connection is null) return new ServerProbeResult(null, "Контрольный сервер не ответил.");
-            using var registration = cancellationToken.Register(connection.Disconnect);
-            connection.ConnectTimeout = 8000;
-            connection.ReadTimeout = 8000;
+                if (network is null && attempt < 5) await Task.Delay(200, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception error) { return ProbeFailure(error, "TUN"); }
+        if (network is null) return ProbeFailure(new AndroidProbeException("TUN", "Connection"), "TUN");
+        return await AndroidProbePolicy.CheckHttpsAsync((target, token) => Task.Run(() =>
+        {
+            token.ThrowIfCancellationRequested();
+            using var url = new Java.Net.URL(target.AbsoluteUri);
+            using var connection = network.OpenConnection(url) as Javax.Net.Ssl.HttpsURLConnection
+                ?? throw new AndroidProbeException("HTTPS", "ControlService");
+            using var registration = token.Register(connection.Disconnect);
+            connection.ConnectTimeout = 2500;
+            connection.ReadTimeout = 2500;
             connection.UseCaches = false;
             connection.InstanceFollowRedirects = false;
             try
             {
-                var watch = Stopwatch.StartNew();
-                if ((int)connection.ResponseCode != 204) return new ServerProbeResult(null, "Контрольный сервер не ответил.");
-                var elapsed = watch.Elapsed.TotalMilliseconds;
-                return new ServerProbeResult(elapsed, $"HTTPS · {elapsed:F0} мс");
+                AndroidProbePolicy.ValidateResponse(target, (int)connection.ResponseCode);
+                token.ThrowIfCancellationRequested();
             }
-            catch (Exception) when (!cancellationToken.IsCancellationRequested) { return new ServerProbeResult(null, "Сервер недоступен"); }
+            catch (Exception) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
             finally { connection.Disconnect(); }
-        }, cancellationToken);
-    private static void FillMissing(ServerProbeResult?[] results, string message)
+        }, token), cancellationToken);
+    }
+
+    private static void FillMissing(ServerProbeResult?[] results, string message) =>
+        FillMissing(results, AndroidProbePolicy.Failure(new AndroidProbeException("Проверка",
+            message.Contains("Таймаут", StringComparison.Ordinal) ? "Timeout" : "Internal"), "Проверка", "HTTPS", 0));
+
+    private static void FillMissing(ServerProbeResult?[] results, ServerProbeResult failure)
     {
-        for (var index = 0; index < results.Length; index++) results[index] ??= new(null, message);
+        for (var index = 0; index < results.Length; index++) results[index] ??= failure;
     }
 
     private async Task<ServerProbeResult> ProbeUdpProfileAsync(ImportedProfile profile, ServerProbeMode mode, CancellationToken cancellationToken)
     {
-        ServerProbeResult? lastResult = null;
-        for (var attempt = 0; attempt < 2; attempt++)
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(mode == ServerProbeMode.Fast ? TimeSpan.FromSeconds(14) : TimeSpan.FromSeconds(20));
-            try
-            {
-                lastResult = (await AndroidProbeServiceBridge.ProbeAsync(context, [profile], mode, timeout.Token, legacy: true))[0];
-                if (lastResult.Milliseconds is not null) return lastResult;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (OperationCanceledException) { lastResult = new(null, "Таймаут"); }
-            catch (TimeoutException) { lastResult = new(null, "Таймаут"); }
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        return (await AndroidProbeServiceBridge.ProbeAsync(context, [profile], mode, timeout.Token))[0];
+    }
 
-            if (attempt == 0) await Task.Delay(250, cancellationToken);
-        }
-        return lastResult ?? new(null, "Недоступен");
+    private async Task<ServerProbeResult> MeasureTcpProfileAsync(XrayProfileConfiguration configuration,
+        CancellationToken timeout, CancellationToken caller)
+    {
+        var watch = Stopwatch.StartNew();
+        return await AndroidProbeFailureIsolation.RunAsync(() => Task.Run(() =>
+        {
+            var milliseconds = MeasureTcp(configuration.ServerHost, configuration.ServerPort, timeout);
+            return AndroidProbePolicy.Success(milliseconds, "TCP", "Подключение к серверу", false);
+        }, timeout), error => AndroidProbePolicy.Failure(timeout.IsCancellationRequested ? new TimeoutException() : error,
+            "Подключение к серверу", "TCP", watch.Elapsed.TotalMilliseconds), caller);
     }
 
     private double MeasureTcp(string host, int port, CancellationToken cancellationToken)
@@ -202,11 +207,16 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe
         using var socket = network.SocketFactory?.CreateSocket()
             ?? throw new InvalidOperationException("Android не создал сетевой сокет.");
         using var registration = cancellationToken.Register(socket.Close);
-        var address = System.Net.IPAddress.TryParse(host, out var parsed)
-            ? Java.Net.InetAddress.GetByAddress(parsed.GetAddressBytes())
-            : (network.GetAllByName(host) ?? []).FirstOrDefault();
-        if (address is null) throw new InvalidOperationException("Не удалось определить адрес VPN-сервера.");
         var watch = Stopwatch.StartNew();
+        Java.Net.InetAddress? address;
+        try
+        {
+            address = System.Net.IPAddress.TryParse(host, out var parsed)
+                ? Java.Net.InetAddress.GetByAddress(parsed.GetAddressBytes())
+                : (network.GetAllByName(host) ?? []).FirstOrDefault();
+        }
+        catch (Exception error) { throw new AndroidProbeException("DNS сервера", AndroidProbePolicy.Classify(error)); }
+        if (address is null) throw new AndroidProbeException("DNS сервера", "Dns");
         socket.Connect(new Java.Net.InetSocketAddress(address, port), 8000);
         return watch.Elapsed.TotalMilliseconds;
     }

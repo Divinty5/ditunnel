@@ -1,3 +1,4 @@
+using DiTunnel.Core.Connection;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -6,7 +7,7 @@ namespace DiTunnel.Infrastructure.Xray;
 
 public static class XrayServerProbe
 {
-    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true, string? outboundSourceAddress = null, bool tcpOnly = false, TimeSpan? probeTimeout = null, Func<Process, IXrayProcessLifetime>? processLifetimeFactory = null)
+    public static async Task<double> MeasureAsync(XrayProfileConfiguration configuration, IPAddress address, string runtime, string path, CancellationToken cancellationToken, bool useHttps = true, string? outboundSourceAddress = null, bool tcpOnly = false, TimeSpan? probeTimeout = null, Func<Process, IXrayProcessLifetime>? processLifetimeFactory = null, string platform = "Windows")
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var budget = probeTimeout ?? TimeSpan.FromSeconds(12);
@@ -49,7 +50,14 @@ public static class XrayServerProbe
                     new System.Net.Security.SslClientAuthenticationOptions { TargetHost = "one.one.one.one" });
             }
             using var handler = new HttpClientHandler { UseProxy = true, Proxy = new WebProxy($"socks5://127.0.0.1:{port}") };
-            using var client = new HttpClient(handler);
+            using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+            if (useHttps)
+            {
+                var check = await ProbePolicy.CheckHttpClientAsync(client, timeout.Token, platform);
+                if (check.Milliseconds is { } delay) return delay;
+                if (Volatile.Read(ref certificateError) != 0) throw new ProbeFailureException("TLS", "Tls");
+                throw new ProbeFailureException(check.Diagnostics!.Stage, check.Diagnostics.ErrorType) { Diagnostics = check.Diagnostics };
+            }
             var watch = Stopwatch.StartNew();
             var target = useHttps ? configuration.SupportsIpv4 ? "https://1.1.1.1/cdn-cgi/trace" : "https://one.one.one.one/cdn-cgi/trace" : "http://cp.cloudflare.com/";
             using var request = new HttpRequestMessage(useHttps ? HttpMethod.Get : HttpMethod.Head, target);
@@ -59,17 +67,17 @@ public static class XrayServerProbe
         }
         catch (InvalidOperationException) when (Volatile.Read(ref listenerError) != 0)
         {
-            throw new InvalidOperationException("Xray не смог открыть локальный порт проверки. Повторите проверку.");
+            throw new ProbeFailureException("Xray", "Runtime");
         }
         catch (HttpRequestException)
         {
             await manager.StopAsync(CancellationToken.None);
             if (Volatile.Read(ref certificateError) != 0)
-                throw new InvalidOperationException("Сертификат VPN-сервера не прошёл проверку. Проверьте SNI и сертификат.");
-            throw new InvalidOperationException("Сервер не ответил.");
+                throw new ProbeFailureException("TLS", "Tls");
+            throw new ProbeFailureException("HTTPS", "Connection");
         }
-        catch (IOException) { throw new InvalidOperationException("Сервер не установил контрольное TCP-соединение через туннель."); }
-        catch (System.Security.Authentication.AuthenticationException) { throw new InvalidOperationException("Не удалось подтвердить TLS-соединение с контрольным узлом через туннель."); }
+        catch (IOException) { throw new ProbeFailureException("Подключение к серверу", "Connection"); }
+        catch (System.Security.Authentication.AuthenticationException) { throw new ProbeFailureException("TLS", "Tls"); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException($"Проверка сервера превысила {budget.TotalSeconds:F0} секунд.");
