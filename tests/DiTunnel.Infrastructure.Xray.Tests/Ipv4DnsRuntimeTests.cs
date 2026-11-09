@@ -17,9 +17,9 @@ public sealed class Ipv4DnsRuntimeTests
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
         Assert.NotNull(root);
-        var executable = OperatingSystem.IsWindows()
+        var executable = Environment.GetEnvironmentVariable("DITUNNEL_TEST_XRAY") ?? (OperatingSystem.IsWindows()
             ? Path.Combine(root.FullName, ".tools/xray/26.3.27/windows-x64/xray.exe")
-            : Path.Combine(root.FullName, ".tools/linux-runtime/linux-x64/xray");
+            : Path.Combine(root.FullName, ".tools/linux-runtime/linux-x64/xray"));
         Assert.True(File.Exists(executable));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
         using var upstream = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
@@ -71,9 +71,19 @@ public sealed class Ipv4DnsRuntimeTests
                 var query = new List<byte> { 0x12, (byte)type, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
                 foreach (var label in "example.test".Split('.')) { query.Add((byte)label.Length); query.AddRange(Encoding.ASCII.GetBytes(label)); }
                 query.AddRange([0, 0, (byte)type, 0, 1]);
-                using var client = new UdpClient();
-                await client.SendAsync(query.ToArray(), new IPEndPoint(IPAddress.Loopback, port), timeout.Token);
-                return (await client.ReceiveAsync(timeout.Token)).Buffer;
+                // Process startup does not prove UDP listener readiness. UDP silently
+                // drops a datagram sent before bind; retry the query under the original
+                // test deadline instead of losing the only request on a loaded builder.
+                while (true)
+                {
+                    Assert.True(manager.IsRunning);
+                    using var attempt = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+                    attempt.CancelAfter(TimeSpan.FromMilliseconds(350));
+                    using var client = new UdpClient();
+                    await client.SendAsync(query.ToArray(), new IPEndPoint(IPAddress.Loopback, port), timeout.Token);
+                    try { return (await client.ReceiveAsync(attempt.Token)).Buffer; }
+                    catch (OperationCanceledException) when (!timeout.IsCancellationRequested) { }
+                }
             }
             var a = await Query(1);
             Assert.Equal(1, BinaryPrimitives.ReadUInt16BigEndian(a.AsSpan(6)));

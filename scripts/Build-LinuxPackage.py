@@ -57,11 +57,15 @@ def main():
     build = output / "build"
     property_arg = "-p:DITUNNEL_BUILD_ROOT=" + str(build)
     if args.test:
+        os.environ["DITUNNEL_TEST_XRAY"] = str(runtime / "xray")
         for project in ("DiTunnel.Core.Tests", "DiTunnel.Infrastructure.Xray.Tests", "DiTunnel.App.Tests", "DiTunnel.Platform.Linux.Tests"):
             run(dotnet, "test", root / "tests" / project / (project + ".csproj"), "-c", "Release", property_arg, "--disable-build-servers", "-m:1", "-v:minimal")
     # Stage only inside a newly created private build directory. A failed build
     # cannot delete a caller-supplied output or an installed application.
-    with tempfile.TemporaryDirectory(prefix="package-", dir=output) as temporary:
+    # The checkout/output can be on a Windows mount in WSL, where chmod does not
+    # preserve Unix modes. Stage on the Linux temporary filesystem so package
+    # ownership and executable permissions are reproducible there as well.
+    with tempfile.TemporaryDirectory(prefix="ditunnel-package-") as temporary:
         stage = Path(temporary)
         for project, name in (("DiTunnel.Linux", "ui"), ("DiTunnel.NetworkHost.Linux", "host")):
             destination = stage / "usr/lib/ditunnel" / name
