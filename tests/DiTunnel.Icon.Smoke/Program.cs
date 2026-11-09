@@ -37,6 +37,16 @@ internal static class Program
         if (OperatingSystem.IsLinux()) builder.With(new X11PlatformOptions { ForceDrawnDecorations = true, WmClass = "Di-Tunnel.Linux" });
 #pragma warning restore AVALONIA_X11_FORCE_CSD
         builder.SetupWithoutStarting();
+        if (OperatingSystem.IsWindows() && args is ["--managed-caption"])
+        {
+            WindowsCaptionSmoke.RunManaged();
+            return;
+        }
+        if (OperatingSystem.IsWindows() && args is ["--window-chrome"])
+        {
+            WindowsCaptionSmoke.Run();
+            return;
+        }
         if (OperatingSystem.IsLinux() && args is ["--linux-desktop", var desktopOutput])
         {
             VerifyLinuxDesktop(Path.GetFullPath(desktopOutput));

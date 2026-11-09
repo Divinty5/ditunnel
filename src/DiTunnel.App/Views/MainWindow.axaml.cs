@@ -19,10 +19,12 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer trayTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private NativeMenuItem? trayStatus, showItem, connectItem, exitItem;
     public MainWindow() : this(enableShellHook: true) { }
-    internal MainWindow(bool enableShellHook)
+    internal MainWindow(bool enableShellHook) : this(enableShellHook, OperatingSystem.IsWindows()) { }
+    internal MainWindow(bool enableShellHook, bool useManagedCaption)
     {
         InitializeComponent();
         pageHost = Content is ApplicationShell shell ? shell.NavigationHost : this;
+        if (useManagedCaption) WindowsWindowChrome.Apply(this);
         if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) connectionIcon = new VpnWindowIconIndicator(this, enableShellHook);
         PropertyChanged += (_, e) => { if (e.Property == IconProperty && tray is not null) tray.Icon = Icon; };
         ActualThemeVariantChanged += (_, _) =>
