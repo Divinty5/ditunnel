@@ -183,9 +183,15 @@ public sealed class ProfileImporter
     private readonly HttpClient client;
 
     // An injected client must also have automatic redirects disabled so HTTPS is checked on every hop.
-    public ProfileImporter() : this(Client) { }
-    public ProfileImporter(HttpClient client) => this.client = client ?? throw new ArgumentNullException(nameof(client));
+    public ProfileImporter(TimeSpan? timeout = null) : this(Client, timeout) { }
+    public ProfileImporter(HttpClient client, TimeSpan? timeout = null)
+    {
+        this.client = client ?? throw new ArgumentNullException(nameof(client));
+        requestBudget = timeout ?? TimeSpan.FromSeconds(25);
+        if (requestBudget <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+    }
 
+    private readonly TimeSpan requestBudget;
     public int SkippedEntries { get; private set; }
 
     public async Task<IReadOnlyList<ImportedProfile>> ImportAsync(string input, CancellationToken cancellationToken = default)
@@ -199,11 +205,12 @@ public sealed class ProfileImporter
             return parsed;
         }
         if (uri.Scheme != "https") throw new FormatException("Не удалось импортировать: для подписки нужна ссылка HTTPS.");
-        using var response = await GetFollowingRedirectsAsync(uri, cancellationToken);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(requestBudget);
+        using var response = await GetFollowingRedirectsAsync(uri, deadline.Token);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > ProfileParser.MaximumBytes) throw new FormatException("Не удалось импортировать: подписка превышает 2 МБ.");
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(25));
+
         await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
         using var buffer = new MemoryStream();
         var block = new byte[8192];

@@ -7,4 +7,5 @@ namespace DiTunnel.Core;
 [JsonSerializable(typeof(ImportedProfile))]
 [JsonSerializable(typeof(ImportedProfile[]))]
 [JsonSerializable(typeof(ServerProbeResult[]))]
+[JsonSerializable(typeof(ProbeDiagnostics))]
 public partial class DiTunnelJsonContext : JsonSerializerContext;

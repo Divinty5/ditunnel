@@ -24,6 +24,9 @@
     <!-- Pure Android network-selection policy; runs without an Android device. -->
     <Compile Include="../../src/DiTunnel.Platform.Android/PhysicalNetworkSelection.cs" Link="Platform/PhysicalNetworkSelection.cs" />
     <Compile Include="../../src/DiTunnel.Platform.Android/AndroidProbeFailureIsolation.cs" Link="Platform/AndroidProbeFailureIsolation.cs" />
+    <Compile Include="../../src/DiTunnel.Platform.Android/AndroidProbePolicy.cs" Link="Platform/AndroidProbePolicy.cs" />
+    <Compile Include="../../src/DiTunnel.Platform.Android/AndroidVpnStatePolicy.cs" Link="Platform/AndroidVpnStatePolicy.cs" />
+    <AssemblyMetadata Include="AndroidVersion" Value="$(AndroidVersion)" />
   </ItemGroup>
 
 </Project>

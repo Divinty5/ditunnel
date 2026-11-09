@@ -17,6 +17,30 @@ public sealed class SubscriptionDownloadTests
         }
     }
 
+    private sealed class SlowRedirects : HttpMessageHandler
+    {
+        public List<CancellationToken> Tokens { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Tokens.Add(cancellationToken);
+            if (Tokens.Count == 1)
+                return new(HttpStatusCode.Found) { Headers = { Location = new Uri("https://example.com/next") } };
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException();
+        }
+    }
+
+    [Fact]
+    public async Task RedirectChainIsCancelledByTheSingleDownloadDeadline()
+    {
+        using var handler = new SlowRedirects();
+        using var client = new HttpClient(handler);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new ProfileImporter(client, TimeSpan.FromMilliseconds(200)).ImportAsync("https://example.com/start"));
+        Assert.Equal(2, handler.Tokens.Count);
+        Assert.True(handler.Tokens[^1].IsCancellationRequested);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

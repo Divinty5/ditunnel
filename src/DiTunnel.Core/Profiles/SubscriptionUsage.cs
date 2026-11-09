@@ -4,6 +4,9 @@ namespace DiTunnel.Core.Profiles;
 
 public sealed record SubscriptionUsage(long? Upload, long? Download, long? Total, long? Expire)
 {
+    public bool IsTimeExhausted(DateTimeOffset now) => Expire is > 0 && Expire.Value <= now.ToUnixTimeSeconds();
+    public bool IsTrafficExhausted => RemainingBytes == 0;
+    public bool IsExhausted(DateTimeOffset now) => IsTimeExhausted(now) || IsTrafficExhausted;
     public decimal? RemainingBytes => Total is > 0 && Upload.HasValue && Download.HasValue
         ? Math.Max(0m, (decimal)Total.Value - Upload.Value - Download.Value) : null;
     public int? RemainingDays(DateTimeOffset now) => Expire is > 0
