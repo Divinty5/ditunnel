@@ -11,7 +11,12 @@ public sealed class ProcessRoutingRuntimeTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ActualXrayRoutesOnlyTheMatchingWindowsExecutable(bool match)
+    public Task ActualXrayRoutesOnlyTheMatchingWindowsExecutable(bool match) => RunAsync(match, false);
+
+    [Fact]
+    public Task ActualXrayRoutesMatchingWindowsExecutableName() => RunAsync(true, true);
+
+    private static async Task RunAsync(bool match, bool nameOnly)
     {
         if (!OperatingSystem.IsWindows()) return;
         var root = new DirectoryInfo(AppContext.BaseDirectory);
@@ -46,7 +51,8 @@ public sealed class ProcessRoutingRuntimeTests
                 ["outbounds"] = new JsonArray(Outbound("fallback", fallback), Outbound("selected", selected)),
                 ["routing"] = new JsonObject { ["rules"] = new JsonArray(new JsonObject
                 {
-                    ["process"] = new JsonArray(match ? Environment.ProcessPath! : "ditunnel-does-not-exist.exe"),
+                    ["process"] = new JsonArray(match ? nameOnly ? Path.GetFileNameWithoutExtension(Environment.ProcessPath!)
+                        : Environment.ProcessPath! : "ditunnel-does-not-exist.exe"),
                     ["outboundTag"] = "selected"
                 }) }
             };

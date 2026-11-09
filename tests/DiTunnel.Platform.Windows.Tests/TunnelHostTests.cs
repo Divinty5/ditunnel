@@ -304,6 +304,51 @@ public sealed class TunnelHostTests
         await DrainAsync(host);
         Assert.Empty(fixture.Network.Table);
     }
+    [Fact]
+    public async Task OtherVpnKeepsItsDnsAndPreexistingRoutes()
+    {
+        await using var fixture = new Fixture();
+        fixture.Network.HasOtherVpn = true;
+        fixture.Network.PrecheckException = new InvalidOperationException("Corporate default DNS is not ours");
+        var corporate = new NetworkRoute("10.0.0.0/8", 71, "0.0.0.0");
+        fixture.Network.Table.Add(corporate);
+        using var host = fixture.Start();
+        await ReadUntilAsync(host, "CONNECTED");
+        Assert.Null(fixture.Network.DnsServers);
+        Assert.Contains(corporate, fixture.Network.Table);
+        host.RequestStop();
+        await DrainAsync(host);
+        Assert.Equal(corporate, Assert.Single(fixture.Network.Table));
+    }
+
+    [Fact]
+    public async Task StartingOpenVpnAfterDiTunnelReleasesOnlyOurDns()
+    {
+        await using var fixture = new Fixture();
+        using var host = fixture.Start();
+        await ReadUntilAsync(host, "CONNECTED");
+        Assert.NotNull(fixture.Network.DnsServers);
+        fixture.Network.HasOtherVpn = true;
+        await ReadUntilAsync(host, "CORPORATE_DNS_PRESERVED");
+        Assert.Equal(1, fixture.Network.CleanupCount);
+        Assert.DoesNotContain(fixture.Network.Table, route => route.Prefix == "10.20.30.1/32" && route.InterfaceIndex == 42);
+        host.RequestStop();
+        await DrainAsync(host);
+    }
+
+    [Fact]
+    public async Task SelectedDestinationInsideCorporateRouteDoesNotGetAnOverridingHostRoute()
+    {
+        await using var fixture = new Fixture(mode: SplitTunnelMode.BypassSelected);
+        fixture.Network.HasOtherVpn = true;
+        fixture.Network.CorporateDestination = true;
+        using var host = fixture.Start();
+        await ReadUntilAsync(host, "CONNECTED");
+        Assert.DoesNotContain(fixture.Network.Table, route => route.Prefix == "203.0.113.20/32");
+        host.RequestStop();
+        await DrainAsync(host);
+    }
+
     private static async Task<List<string>> DrainAsync(WindowsTunnelHost host)
     {
         var events = new List<string>();
@@ -353,6 +398,9 @@ public sealed class TunnelHostTests
     }
     private sealed class FakeNetwork : ITunnelNetwork
     {
+        public bool HasOtherVpn { get; set; }
+        internal bool CorporateDestination;
+        public bool IsCorporateDestination(IPAddress address) => CorporateDestination;
         internal PhysicalUplink Uplink = new(2, "192.0.2.1", "192.0.2.5");
         internal readonly List<NetworkRoute> Table = [];
         internal string? FailingStage;

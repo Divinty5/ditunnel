@@ -61,6 +61,17 @@ internal sealed class WindowsTunnelHost : IDisposable
         if (network.AddRoute(route)) ownedRoutes.Add(route);
     }
 
+    private void ConfigureDnsRoutes(bool enabled)
+    {
+        foreach (var server in options.DnsServers)
+        {
+            var route = new NetworkRoute(server + (server.Contains(':') ? "/128" : "/32"), tunnelIndex,
+                server.Contains(':') ? "::" : "0.0.0.0");
+            if (enabled) { if (!ownedRoutes.Contains(route)) AddRoute(route); }
+            else if (ownedRoutes.Contains(route)) { network.RemoveRoute(route); ownedRoutes.Remove(route); }
+        }
+    }
+
     private ITunnelCore StartCore(string path, params string[] arguments)
     {
         if (startCore is not null) return startCore(path, arguments);
@@ -88,6 +99,8 @@ internal sealed class WindowsTunnelHost : IDisposable
         foreach (var outbound in config["outbounds"]!.AsArray())
             if (options.AmneziaRuntime is null || (string?)outbound!["tag"] != "proxy")
                 outbound!["sendThrough"] = uplink.SourceAddress;
+        WindowsVpnCoexistence.ConfigureOpenVpnBypass(config.AsObject(), uplink.SourceAddress, options.ProtectionReady is null,
+            network.InterfaceName(uplink.InterfaceIndex));
         if (options.AmneziaRuntime is not null)
         {
             Stage("AMNEZIAWG");
@@ -129,8 +142,8 @@ internal sealed class WindowsTunnelHost : IDisposable
     private void UpdateSplitRoutes(IEnumerable<string> addresses, PhysicalUplink uplink)
     {
         if (options.SplitMode == SplitTunnelMode.ProxyAll) return;
-        var desired = addresses.Where(a => a != options.Server.ToString() && !options.DnsServers.Contains(a)).ToHashSet();
-        if (desired.Count == 0) return;
+        var desired = addresses.Where(a => a != options.Server.ToString() && !options.DnsServers.Contains(a)
+            && (!IPAddress.TryParse(a, out var address) || !network.IsCorporateDestination(address))).ToHashSet();
         foreach (var address in splitRoutes.Keys.Except(desired).ToArray())
         {
             var old = splitRoutes[address];
@@ -174,12 +187,15 @@ internal sealed class WindowsTunnelHost : IDisposable
         // instead of taking/releasing a mutex across async continuations (see broker).
         bool cleanupFailed = false;
         bool dnsPrecheckCompleted = false;
+        bool corporateDns = false;
         string precheckStep = "DNS";
         IAsyncDisposable? endpointLease = null;
         try
         {
             Stage("PRECHECK");
-            network.PrecheckDns();
+            corporateDns = options.ProtectionReady is null && network.HasOtherVpn;
+            if (corporateDns) network.CleanupDns();
+            else network.PrecheckDns();
             dnsPrecheckCompleted = true;
             precheckStep = "UPLINK";
             var uplink = network.FindUplink();
@@ -224,11 +240,11 @@ internal sealed class WindowsTunnelHost : IDisposable
                 if (!options.SupportsIpv6)
                     foreach (var prefix in new[] { "::/1", "8000::/1" }) AddRoute(new(prefix, tunnelIndex, "::"));
             }
-            foreach (var server in options.DnsServers)
-                AddRoute(new(server + (server.Contains(':') ? "/128" : "/32"), tunnelIndex, server.Contains(':') ? "::" : "0.0.0.0"));
+            ConfigureDnsRoutes(!corporateDns);
             UpdateSplitRoutes(options.SplitAddresses.Select(a => a.ToString()), uplink);
             Stage("DNS_RULE");
-            Emit(network.InstallDns(tunnelIndex, options.Name, options.DnsServers) ? "DNS_INTERFACE_READY" : "DNS_NRPT_READY");
+            if (corporateDns) Emit("CORPORATE_DNS_PRESERVED");
+            else Emit(network.InstallDns(tunnelIndex, options.Name, options.DnsServers) ? "DNS_INTERFACE_READY" : "DNS_NRPT_READY");
             Stage("DNS_CACHE");
             network.FlushDns();
             if (options.SplitMode == SplitTunnelMode.ProxySelected)
@@ -279,6 +295,15 @@ internal sealed class WindowsTunnelHost : IDisposable
             while (!stopping.IsCancellationRequested)
             {
                 CheckCores();
+                var preserveCorporateDns = options.ProtectionReady is null && network.HasOtherVpn;
+                if (preserveCorporateDns != corporateDns)
+                {
+                    ConfigureDnsRoutes(!preserveCorporateDns);
+                    if (preserveCorporateDns) { network.CleanupDns(); Emit("CORPORATE_DNS_PRESERVED"); }
+                    else Emit(network.InstallDns(tunnelIndex, options.Name, options.DnsServers) ? "DNS_INTERFACE_READY" : "DNS_NRPT_READY");
+                    network.FlushDns();
+                    corporateDns = preserveCorporateDns;
+                }
                 PhysicalUplink? current = null;
                 try { current = network.FindUplink(); } catch (InvalidOperationException) { }
                 if (current != uplink)

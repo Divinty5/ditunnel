@@ -8,6 +8,9 @@ internal sealed class TunnelRouteException() : InvalidOperationException("Кон
 
 internal interface ITunnelNetwork
 {
+    bool HasOtherVpn => false;
+    bool IsCorporateDestination(IPAddress address) => false;
+    string? InterfaceName(uint index) => null;
     void PrecheckDns();
     PhysicalUplink FindUplink();
     Task<IAsyncDisposable> AcquireServerRouteAsync(System.Net.IPAddress address, PhysicalUplink uplink, CancellationToken token);
@@ -27,6 +30,16 @@ internal interface ITunnelNetwork
 
 internal sealed class TunnelNetwork : ITunnelNetwork
 {
+    public string? InterfaceName(uint index) => NetworkInterface.GetAllNetworkInterfaces()
+        .FirstOrDefault(item => item.Supports(NetworkInterfaceComponent.IPv4)
+            && item.GetIPProperties().GetIPv4Properties()?.Index == index)?.Name;
+    public bool HasOtherVpn => WindowsVpnCoexistence.Interfaces("DiTunnel").Count != 0;
+    public bool IsCorporateDestination(IPAddress address)
+    {
+        var interfaces = WindowsVpnCoexistence.Interfaces("DiTunnel");
+        return WindowsNetworkApi.Routes().Any(route => interfaces.Contains(route.InterfaceIndex)
+            && WindowsVpnCoexistence.CoversSpecificRoute(route.Prefix, address));
+    }
     private WindowsInterfaceDns? interfaceDns;
     public void PrecheckDns() => WindowsDnsPolicy.Precheck();
     public PhysicalUplink FindUplink() => WindowsNetworkApi.FindUplink();
