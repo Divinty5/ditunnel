@@ -125,7 +125,9 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception error) { return AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds); }
         }
-        return await ProbeActiveTunnelAsync(cancellationToken);
+        return mode == ServerProbeMode.Https
+            ? await AndroidProbePolicy.RetryTimeoutAsync(() => ProbeActiveTunnelAsync(cancellationToken))
+            : await ProbeActiveTunnelAsync(cancellationToken);
     }
 
     // Bind explicitly to the VPN Network; widget latency must never use a physical network fallback.

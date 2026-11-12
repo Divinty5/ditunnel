@@ -12,6 +12,7 @@ internal static class AndroidProbeServiceBridge
 {
     internal const string ActionProbe = "com.divintyinteractive.ditunnel.action.PROBE";
     internal const string ActionCancel = "com.divintyinteractive.ditunnel.action.CANCEL_PROBE";
+    internal const string ActionStarted = "com.divintyinteractive.ditunnel.status.PROBE_STARTED";
     internal const string ActionResult = "com.divintyinteractive.ditunnel.status.PROBE_RESULT";
     internal const string ExtraRequestId = "request_id";
     internal const string ExtraProfiles = "profiles";
@@ -35,21 +36,29 @@ internal static class AndroidProbeServiceBridge
         var pending = new ProbeRequest();
         var completion = pending.Completion;
         Pending[requestId] = pending;
-        context.StartService(new Intent(context, typeof(DiTunnelProbeService)).SetAction(ActionProbe)
-            .PutExtra(ExtraRequestId, requestId)
-            .PutExtra(ExtraProfiles, JsonSerializer.Serialize(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray))
-            .PutExtra(ExtraMode, (int)mode)
-            .PutExtra(ExtraLegacy, legacy));
-        using var cancellation = cancellationToken.Register(() =>
+        var started = false;
+        try
         {
-            context.StartService(new Intent(context, typeof(DiTunnelProbeService)).SetAction(ActionCancel).PutExtra(ExtraRequestId, requestId));
-            completion.TrySetCanceled(cancellationToken);
-        });
-        try { return await completion.Task; }
+            cancellationToken.ThrowIfCancellationRequested();
+            started = context.StartService(new Intent(context, typeof(DiTunnelProbeService)).SetAction(ActionProbe)
+                .PutExtra(ExtraRequestId, requestId)
+                .PutExtra(ExtraProfiles, JsonSerializer.Serialize(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray))
+                .PutExtra(ExtraMode, (int)mode)
+                .PutExtra(ExtraLegacy, legacy)) is not null;
+            if (!started) throw new AndroidProbeException("Служба проверки", "Runtime");
+            using var cancellation = cancellationToken.Register(() =>
+            {
+                completion.TrySetCanceled(cancellationToken);
+                try { context.StartService(new Intent(context, typeof(DiTunnelProbeService)).SetAction(ActionCancel).PutExtra(ExtraRequestId, requestId)); }
+                catch (Java.Lang.IllegalStateException) { /* Android can reject service starts while backgrounded. */ }
+                catch (Java.Lang.SecurityException) { /* Wait for the already-started helper below. */ }
+            });
+            return await completion.Task;
+        }
         finally
         {
-            Pending.TryRemove(requestId, out _);
-            await WaitForProbeProcessExitAsync(context, pending.ProcessId);
+            try { if (started) await WaitForProbeProcessExitAsync(context, pending); }
+            finally { Pending.TryRemove(requestId, out _); }
         }
     }
 
@@ -60,6 +69,7 @@ internal static class AndroidProbeServiceBridge
             if (receiver is not null) return;
             receiver = new ResultReceiver();
             var filter = new IntentFilter(ActionResult);
+            filter.AddAction(ActionStarted);
             if (OperatingSystem.IsAndroidVersionAtLeast(33)) context.RegisterReceiver(receiver, filter, ReceiverFlags.NotExported);
             else
 #pragma warning disable CA1422
@@ -68,17 +78,25 @@ internal static class AndroidProbeServiceBridge
         }
     }
 
-    private static async Task WaitForProbeProcessExitAsync(Context context, int processId)
+    private static async Task WaitForProbeProcessExitAsync(Context context, ProbeRequest pending)
     {
         // RunningAppProcesses can omit our process on vendor firmware. A successful
         // reply carries its PID, so the next profile must wait for that exact process.
-        if (processId <= 0) processId = FindProbeProcess(context)?.Pid ?? 0;
+        var processId = Volatile.Read(ref pending.ProcessId);
         for (var attempt = 0; attempt < 20; attempt++)
         {
-            if (!IsProbeProcess(context, processId)) return;
+            if (processId <= 0) processId = Volatile.Read(ref pending.ProcessId);
+            if (processId <= 0) processId = FindProbeProcess(context)?.Pid ?? 0;
+            if (processId > 0 && !IsProbeProcess(context, processId)) return;
             await Task.Delay(100);
         }
-        if (IsProbeProcess(context, processId)) global::Android.OS.Process.KillProcess(processId);
+        if (IsProbeProcess(context, processId))
+        {
+            global::Android.OS.Process.KillProcess(processId);
+            for (var attempt = 0; attempt < 10 && IsProbeProcess(context, processId); attempt++)
+                await Task.Delay(100);
+            if (IsProbeProcess(context, processId)) throw new AndroidProbeException("Служба проверки", "Runtime");
+        }
     }
 
     private static bool IsProbeProcess(Context context, int processId)
@@ -101,8 +119,9 @@ internal static class AndroidProbeServiceBridge
         {
             var requestId = intent?.GetStringExtra(ExtraRequestId);
             var json = intent?.GetStringExtra(ExtraResult);
-            if (requestId is null || json is null || !Pending.TryGetValue(requestId, out var pending)) return;
-            pending.ProcessId = intent!.GetIntExtra(ExtraProcessId, 0);
+            if (requestId is null || !Pending.TryGetValue(requestId, out var pending)) return;
+            Volatile.Write(ref pending.ProcessId, intent!.GetIntExtra(ExtraProcessId, 0));
+            if (intent.Action != ActionResult || json is null) return;
             try { pending.Completion.TrySetResult(JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResultArray) ?? []); }
             catch { pending.Completion.TrySetResult([]); }
         }

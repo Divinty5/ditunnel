@@ -154,10 +154,11 @@ public static class ProbePolicy
         } };
     }
 
-    public static async Task<ServerProbeResult> CheckHttpClientAsync(HttpClient http, CancellationToken token, string platform = "Android") =>
+    public static async Task<ServerProbeResult> CheckHttpClientAsync(HttpClient http, CancellationToken token, string platform = "Android",
+        TimeSpan? attemptBudget = null) =>
         await CheckHttpsAsync(async (target, cancellation) =>
         {
             using var response = await http.GetAsync(target, HttpCompletionOption.ResponseHeadersRead, cancellation);
             ValidateResponse(target, (int)response.StatusCode);
-        }, token, platform: platform);
+        }, token, attemptBudget, platform);
 }

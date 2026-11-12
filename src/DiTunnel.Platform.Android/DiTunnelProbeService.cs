@@ -36,6 +36,9 @@ public sealed class DiTunnelProbeService : Service
         var mode = (ServerProbeMode)intent.GetIntExtra(AndroidProbeServiceBridge.ExtraMode, 0);
         var legacy = intent.GetBooleanExtra(AndroidProbeServiceBridge.ExtraLegacy, false);
         var token = running.Token;
+        SendBroadcast(new Intent(AndroidProbeServiceBridge.ActionStarted).SetPackage(PackageName)
+            .PutExtra(AndroidProbeServiceBridge.ExtraRequestId, requestId)
+            .PutExtra(AndroidProbeServiceBridge.ExtraProcessId, global::Android.OS.Process.MyPid()));
         _ = Task.Run(() => RunAsync(requestId, profiles, mode, legacy, token));
         return StartCommandResult.NotSticky;
     }

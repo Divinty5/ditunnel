@@ -11,5 +11,18 @@ internal static class AndroidProbePolicy
     internal static void ValidateResponse(Uri target, int status) => ProbePolicy.ValidateResponse(target, status);
     internal static string TunnelMessage(ServerProbeResult result) => ProbePolicy.TunnelMessage(result);
     internal static Task<ServerProbeResult> CheckHttpsAsync(Func<Uri, CancellationToken, Task> request, CancellationToken token, TimeSpan? attemptBudget = null) => ProbePolicy.CheckHttpsAsync(request, token, attemptBudget);
-    internal static Task<ServerProbeResult> CheckHttpClientAsync(HttpClient http, CancellationToken token) => ProbePolicy.CheckHttpClientAsync(http, token);
+    internal static Task<ServerProbeResult> CheckHttpClientAsync(HttpClient http, CancellationToken token) =>
+        RetryTimeoutAsync(() => ProbePolicy.CheckHttpClientAsync(http, token, attemptBudget: TimeSpan.FromSeconds(5)));
+
+    internal static async Task<ServerProbeResult> RetryTimeoutAsync(Func<Task<ServerProbeResult>> check)
+    {
+        var result = await check();
+        if (result.Diagnostics?.ErrorType != "Timeout") return result;
+        var retry = await check();
+        return retry with { Diagnostics = retry.Diagnostics! with
+        {
+            Attempts = result.Diagnostics.Attempts + "\n" + retry.Diagnostics!.Attempts,
+            DurationMilliseconds = result.Diagnostics.DurationMilliseconds + retry.Diagnostics.DurationMilliseconds
+        } };
+    }
 }

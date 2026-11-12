@@ -84,6 +84,26 @@ public sealed class AndroidProbePolicyTests
     }
 
     [Fact]
+    public async Task PreciseProbeRetriesTransientTimeoutAndKeepsAttemptDiagnostics()
+    {
+        using var handler = new TimeoutThenSuccessHandler();
+        using var client = new HttpClient(handler);
+        var result = await AndroidProbePolicy.CheckHttpClientAsync(client, default);
+        Assert.Equal(3, handler.Calls);
+        Assert.True(result.Diagnostics!.ProfileConfirmed);
+        Assert.Contains("Timeout", result.Diagnostics.Attempts);
+        Assert.Contains("None", result.Diagnostics.Attempts);
+    }
+
+    private sealed class TimeoutThenSuccessHandler : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => ++Calls <= 2 ? Task.FromException<HttpResponseMessage>(new TimeoutException())
+                : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+    }
+
+    [Fact]
     public async Task TwoControlFailuresAreInconclusiveAndDoNotDiagnoseSubscriptionExpiry()
     {
         var result = await AndroidProbePolicy.CheckHttpsAsync((_, _) => Task.FromException(new TimeoutException()), CancellationToken.None);
