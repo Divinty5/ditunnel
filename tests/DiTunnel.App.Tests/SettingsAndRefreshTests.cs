@@ -148,6 +148,33 @@ public sealed class SettingsAndRefreshTests
         finally { Directory.Delete(dir, true); }
     }
 
+    [Fact]
+    public void FirstWindowsLaunchFillsRightHalfOfWorkAreaAtFractionalDpi()
+    {
+        var work = new PixelRect(-1840, 40, 1841, 1040);
+        var initial = WindowLayout.Fit(null, work, 1.25, windows: true);
+        Assert.Equal(work.X + 920, initial.X);
+        Assert.Equal(work.Y, initial.Y);
+        Assert.Equal(work.Right, initial.X + (int)Math.Round(initial.Width * 1.25));
+        Assert.Equal(work.Bottom, initial.Y + (int)Math.Round(initial.Height * 1.25));
+        Assert.True(initial.UsesVisibleFrame);
+        Assert.False(initial.Maximized);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void SavedWindowsPlacementKeepsNormalBoundsAndWindowMode(bool maximized, bool fullScreen)
+    {
+        var settings = new UserSettings
+        {
+            Window = new(250, 150, 640, 580, maximized) { FullScreen = fullScreen, UsesVisibleFrame = true }
+        };
+        var restored = System.Text.Json.JsonSerializer.Deserialize<UserSettings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
+        Assert.Equal(settings.Window, WindowLayout.Fit(restored.Window, new PixelRect(0, 0, 1920, 1080), 1.25, windows: true));
+    }
+
     [Fact] public void SplitTunnelRulesAreStoredSeparatelyForBothModes()
     {
         var settings = new UserSettings();

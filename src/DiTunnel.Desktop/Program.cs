@@ -49,9 +49,7 @@ internal static class Program
         {
             if (show.WaitOne(0) && Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop && desktop.MainWindow is { } window)
             {
-                window.Show();
-                if (window.WindowState == Avalonia.Controls.WindowState.Minimized) window.WindowState = Avalonia.Controls.WindowState.Normal;
-                window.Activate();
+                if (window is App.Views.MainWindow mainWindow) mainWindow.Restore();
             }
         };
         timer.Start();

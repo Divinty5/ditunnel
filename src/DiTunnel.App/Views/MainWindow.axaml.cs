@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private readonly IDisposable? connectionIcon;
     private readonly ContentControl pageHost;
     private WindowPlacement? normal;
+    private WindowState lastWindowState;
     private PixelRect? hiddenWindowBounds;
     private readonly DispatcherTimer trayTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private NativeMenuItem? trayStatus, showItem, connectItem, exitItem;
@@ -40,10 +41,14 @@ public partial class MainWindow : Window
             var screen = saved is null ? Screens.Primary : Screens.ScreenFromPoint(new PixelPoint(saved.X, saved.Y)) ?? Screens.Primary;
             if (screen is not null)
             {
-                normal = WindowLayout.Fit(saved, screen.WorkingArea, screen.Scaling);
+                normal = WindowLayout.Fit(saved, screen.WorkingArea, screen.Scaling, windows: OperatingSystem.IsWindows());
                 MinWidth = Math.Min(360, normal.Width); MinHeight = Math.Min(500, normal.Height);
                 Width = normal.Width; Height = normal.Height; Position = new PixelPoint(normal.X, normal.Y);
-                if (normal.Maximized && !App.ShouldStartMinimized) WindowState = WindowState.Maximized;
+                if (OperatingSystem.IsWindows() && normal.UsesVisibleFrame && TryGetPlatformHandle() is { } handle)
+                    WindowsWindowBounds.RestoreVisible(handle.Handle, new PixelRect(normal.X, normal.Y,
+                        (int)Math.Round(normal.Width * screen.Scaling), (int)Math.Round(normal.Height * screen.Scaling)));
+                lastWindowState = normal.FullScreen ? WindowState.FullScreen : normal.Maximized ? WindowState.Maximized : WindowState.Normal;
+                if (!App.ShouldStartMinimized) WindowState = lastWindowState;
             }
             ready = true; SetupTray();
             if (App.ShouldStartMinimized && tray is not null) Hide();
@@ -56,7 +61,10 @@ public partial class MainWindow : Window
         PropertyChanged += (_, e) =>
         {
             if (e.Property == WindowStateProperty && WindowState != WindowState.Minimized)
+            {
+                if (ready) lastWindowState = WindowState;
                 Dispatcher.UIThread.Post(UpdateTitleBarTheme);
+            }
         };
         SizeChanged += (_, _) => RememberNormal();
         Closing += async (_, e) =>
@@ -92,13 +100,19 @@ public partial class MainWindow : Window
     }
     private void RememberNormal()
     {
-        if (ready && IsVisible && WindowState == WindowState.Normal)
+        if (!ready || !IsVisible || WindowState != WindowState.Normal) return;
+        if (OperatingSystem.IsWindows() && TryGetPlatformHandle() is { } handle &&
+            WindowsWindowBounds.CaptureVisible(handle.Handle) is { } frame)
+            normal = new(frame.X, frame.Y, frame.Width / RenderScaling, frame.Height / RenderScaling, false) { UsesVisibleFrame = true };
+        else
             normal = new(Position.X, Position.Y, Bounds.Width, Bounds.Height, false);
     }
     private void SavePlacement()
     {
+        RememberNormal();
         if (normal is null) return;
-        UserSettings.Current.Window = normal with { Maximized = WindowState == WindowState.Maximized || WindowState == WindowState.Minimized && normal.Maximized };
+        var state = WindowState == WindowState.Minimized ? lastWindowState : WindowState;
+        UserSettings.Current.Window = normal with { Maximized = state == WindowState.Maximized, FullScreen = state == WindowState.FullScreen };
         try { UserSettings.Current.Save(); }
         catch { if (DataContext is MainViewModel vm) vm.Notice = "Не удалось сохранить настройки."; }
     }
@@ -122,9 +136,9 @@ public partial class MainWindow : Window
         }
         catch { tray?.Dispose(); tray = null; }
     }
-    private void Restore()
+    public void Restore()
     {
-        Show(); if (WindowState == WindowState.Minimized) WindowState = normal?.Maximized == true ? WindowState.Maximized : WindowState.Normal;
+        Show(); if (WindowState == WindowState.Minimized) WindowState = lastWindowState;
         RestoreHiddenWindowBounds();
         Activate();
     }
@@ -164,6 +178,7 @@ public partial class MainWindow : Window
         if (DataContext is not MainViewModel vm) return "Автообновление недоступно на этой платформе.";
         return await UpdateFlow.CheckAsync(pageHost, vm, manual, () =>
         {
+            SavePlacement();
             canClose = true; Close();
             if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
         });

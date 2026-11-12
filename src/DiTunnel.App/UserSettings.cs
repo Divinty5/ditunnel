@@ -6,7 +6,11 @@ using DiTunnel.Core.Connection;
 
 namespace DiTunnel.App;
 
-public sealed record WindowPlacement(int X, int Y, double Width, double Height, bool Maximized);
+public sealed record WindowPlacement(int X, int Y, double Width, double Height, bool Maximized)
+{
+    public bool FullScreen { get; init; }
+    public bool UsesVisibleFrame { get; init; }
+}
 
 public sealed class UserSettings
 {
@@ -159,11 +163,17 @@ public sealed class UserSettings
 public static class WindowLayout
 {
     // Coordinates are physical pixels; sizes are Avalonia DIPs. Allow room for the caption.
-    public static WindowPlacement Fit(WindowPlacement? saved, PixelRect area, double scaling)
+    public static WindowPlacement Fit(WindowPlacement? saved, PixelRect area, double scaling, bool windows = false)
     {
         scaling = double.IsFinite(scaling) && scaling > 0 ? scaling : 1;
         var maxWidth = Math.Max(1, area.Width / scaling);
-        var maxHeight = Math.Max(1, area.Height / scaling - 40);
+        if (windows && saved is null)
+        {
+            var left = area.X + area.Width / 2;
+            return new(left, area.Y, (area.Right - left) / scaling, area.Height / scaling, false) { UsesVisibleFrame = true };
+        }
+        var caption = windows ? 0 : 40;
+        var maxHeight = Math.Max(1, area.Height / scaling - caption);
         var width = saved?.Width ?? maxWidth / 2;
         var height = saved?.Height ?? maxHeight;
         if (!double.IsFinite(width)) width = maxWidth / 2;
@@ -172,8 +182,12 @@ public static class WindowLayout
         height = Math.Clamp(height, Math.Min(500, maxHeight), maxHeight);
         var x = saved?.X ?? area.Right - (int)(width * scaling);
         var y = saved?.Y ?? area.Y;
-        x = Math.Clamp(x, area.X, Math.Max(area.X, area.Right - (int)(width * scaling)));
-        y = Math.Clamp(y, area.Y, Math.Max(area.Y, area.Bottom - (int)((height + 40) * scaling)));
-        return new(x, y, width, height, saved?.Maximized ?? false);
+        x = Math.Clamp(x, area.X, Math.Max(area.X, area.Right - (int)Math.Round(width * scaling)));
+        y = Math.Clamp(y, area.Y, Math.Max(area.Y, area.Bottom - (int)Math.Round((height + caption) * scaling)));
+        return new(x, y, width, height, saved?.Maximized ?? false)
+        {
+            FullScreen = saved?.FullScreen == true,
+            UsesVisibleFrame = saved?.UsesVisibleFrame == true
+        };
     }
 }
