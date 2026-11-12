@@ -840,6 +840,14 @@
     "es": "Se conservaron los servidores anteriores.",
     "zh-Hans": "已保留原有服务器。"
   },
+  "Format errors:": {
+    "es": "Errores de formato:",
+    "zh-Hans": "格式错误："
+  },
+  "Download errors:": {
+    "es": "Errores de descarga:",
+    "zh-Hans": "下载错误："
+  },
   "Test cancelled.": {
     "es": "Prueba cancelada.",
     "zh-Hans": "测试已取消。"

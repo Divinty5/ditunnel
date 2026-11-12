@@ -1,3 +1,4 @@
+using System.Text;
 using DiTunnel.App.ViewModels;
 using DiTunnel.Core.Profiles;
 using SkiaSharp;
@@ -62,13 +63,17 @@ public sealed class ProfileSharingTests
     }
 
     [Theory]
-    [InlineData("")]
-    [InlineData("S3 = 12\nS4 = 12\nI1 = <b 0x01020304><r 10>")]
-    [InlineData("RandomTrailers = true\nDisableCookies = false\nContentPaddingAddition = 10-20")]
-    public void RenderedAwgQrCodeCanBeDecodedAndImported(string extra)
+    [InlineData("", false)]
+    [InlineData("S3 = 12\nS4 = 12\nI1 = <b 0x01020304><r 10>", false)]
+    [InlineData("RandomTrailers = true\nDisableCookies = false\nContentPaddingAddition = 10-20", false)]
+    [InlineData("S3 = 12\nS4 = 12\nI1 = <r 10>\nI2 =", true)]
+    [InlineData("RandomTrailers = on\nDisableCookies = off\nContentPaddingAddition = 10-20", true)]
+    public void RenderedAwgQrCodeCanBeDecodedAndImported(string extra, bool nativeLink)
     {
         var profile = Profile(extra);
-        var link = ProfileShareFormatter.CreateLink(profile)!;
+        var link = nativeLink
+            ? "vpn://" + Convert.ToBase64String(Encoding.UTF8.GetBytes(profile.Content)).Replace('+', '-').Replace('/', '_').TrimEnd('=')
+            : ProfileShareFormatter.CreateLink(profile)!;
         using var bitmap = SKBitmap.Decode(QrCodeImage.CreatePng(link));
         var rgb = new byte[bitmap.Width * bitmap.Height * 3];
         for (var y = 0; y < bitmap.Height; y++)
@@ -84,7 +89,8 @@ public sealed class ProfileSharingTests
         Assert.Equal(link, decoded.Text);
         var imported = Assert.Single(ProfileParser.Parse(decoded.Text));
         Assert.Equal(profile.Content, imported.Content);
-        Assert.Equal(profile.Name, imported.Name);
+        Assert.Equal(profile.ProtocolName, imported.ProtocolName);
+        Assert.Equal(nativeLink ? "AmneziaWG · vpn.example.com" : profile.Name, imported.Name);
     }
 
     [Fact]

@@ -77,10 +77,10 @@ public sealed partial class MainViewModel : ViewModelBase
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
                     deadline.CancelAfter(TimeSpan.FromSeconds(10));
                     var fresh = await download(source.SourceUrl!, deadline.Token).WaitAsync(deadline.Token);
-                    return (Source: source, Fresh: fresh);
+                    return (Source: source, Fresh: fresh, Error: (Exception?)null);
                 }
                 catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { throw; }
-                catch { return (Source: source, Fresh: (IReadOnlyList<ImportedProfile>)Array.Empty<ImportedProfile>()); }
+                catch (Exception error) { return (Source: source, Fresh: (IReadOnlyList<ImportedProfile>)Array.Empty<ImportedProfile>(), Error: error); }
                 finally { concurrency.Release(); }
             }));
             foreach (var item in downloads)
@@ -108,7 +108,12 @@ public sealed partial class MainViewModel : ViewModelBase
                 if (refreshed is not null) activeProfile = Profiles.FirstOrDefault(row => row.Profile == refreshed) ?? new ServerItemViewModel(refreshed);
             }
             RefreshSubscriptionPresentation();
-            SubscriptionStatus = failed == 0 ? $"Подписки обновлены: {updated} · {DateTime.Now:HH:mm}" : $"Обновлено: {updated}. Не удалось обновить: {failed}. Сохранены прежние серверы.";
+            var status = failed == 0 ? $"Подписки обновлены: {updated} · {DateTime.Now:HH:mm}" : $"Обновлено: {updated}. Не удалось обновить: {failed}. Сохранены прежние серверы.";
+            var invalidFormats = downloads.Count(item => item.Error is FormatException);
+            var downloadErrors = downloads.Count(item => item.Error is HttpRequestException or OperationCanceledException);
+            if (invalidFormats > 0) status += $" Ошибки формата: {invalidFormats}.";
+            if (downloadErrors > 0) status += $" Ошибки загрузки: {downloadErrors}.";
+            SubscriptionStatus = status;
             if (showToast)
             {
                 RefreshToast = failed == 0 ? "Подписки успешно обновлены" : "Не удалось обновить подписки";

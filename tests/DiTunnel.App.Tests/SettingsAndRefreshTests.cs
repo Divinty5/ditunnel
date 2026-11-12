@@ -66,6 +66,25 @@ public sealed class SettingsAndRefreshTests
         Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
         Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
     }
+
+    [Fact] public async Task RefreshDistinguishesInvalidSubscriptionsFromDownloadFailures()
+    {
+        var store = new Store();
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2"));
+        var vm = new MainViewModel(null, store);
+        try
+        {
+            await vm.RefreshSubscriptionsAsync((url, _) => Task.FromException<IReadOnlyList<ImportedProfile>>(url.EndsWith("/sub2")
+                ? new FormatException("synthetic subscription data")
+                : new HttpRequestException("synthetic subscription address")));
+
+            Assert.Contains("Ошибки формата: 1", vm.SubscriptionStatus);
+            Assert.Contains("Ошибки загрузки: 1", vm.SubscriptionStatus);
+            Assert.DoesNotContain("synthetic subscription", vm.SubscriptionStatus);
+            Assert.Equal(new[] { "old", "manual", "second" }, store.Items.Select(profile => profile.Content));
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
     [Fact] public async Task RefreshDownloadsSourcesConcurrentlyAndKeepsFailedSource()
     {
         var store = new Store { Items = Enumerable.Range(0, 6).Select(index =>

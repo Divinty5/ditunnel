@@ -51,6 +51,34 @@ public sealed class AmneziaWgProfileConverterTests
     }
 
     [Theory]
+    [InlineData("on", "off", "true", "false")]
+    [InlineData("0", "1", "false", "true")]
+    [InlineData("TRUE", "False", "true", "false")]
+    public void RuntimeUsesCanonicalAwg31SwitchValues(string trailers, string cookies, string expectedTrailers, string expectedCookies)
+    {
+        var profile = Profile($"RandomTrailers = {trailers}\nDisableCookies = {cookies}");
+        var uapi = AmneziaWgProfileConverter.Convert(profile).BuildUserspaceConfiguration("192.0.2.1");
+        Assert.Contains($"random_trailers={expectedTrailers}\n", uapi);
+        Assert.Contains($"disable_cookies={expectedCookies}\n", uapi);
+    }
+
+    [Fact]
+    public void RuntimePreservesAwg2RangesPaddingAndConfiguredPacketTemplates()
+    {
+        var profile = Profile("S3 = 16\nS4 = 20\nI1 = <r 10>\nI2 =");
+        profile = profile with { Content = profile.Content.Replace("H1 = 12345", "h1 = 12345 - 12355")
+            .Replace("PersistentKeepalive = 25", "PersistentKeepalive = 20 - 25") };
+        var uapi = AmneziaWgProfileConverter.Convert(profile).BuildUserspaceConfiguration("192.0.2.1");
+        Assert.Contains("h1=12345-12355\n", uapi);
+        Assert.Contains("s3=16\ns4=20\n", uapi);
+        Assert.Contains("i1=<r 10>\n", uapi);
+        Assert.DoesNotContain("i2=", uapi);
+        Assert.Contains("persistent_keepalive_interval=20-25\n", uapi);
+        Assert.DoesNotContain("random_trailers=", uapi);
+        Assert.DoesNotContain("disable_cookies=", uapi);
+    }
+
+    [Theory]
     [InlineData(SplitTunnelMode.ProxyAll)]
     [InlineData(SplitTunnelMode.BypassSelected)]
     [InlineData(SplitTunnelMode.ProxySelected)]
@@ -214,7 +242,9 @@ public sealed class AmneziaWgProfileConverterTests
 
     [Theory]
     [InlineData("")]
+    [InlineData("S3 = 16\nS4 = 20\nI1 = <r 10>\nI2 =")]
     [InlineData("S3 = 16\nS4 = 16\nHeaderProtectionKey = KEY\nContentPaddingAddition = 10-20")]
+    [InlineData("S3 = 16\nS4 = 16\nHeaderProtectionKey = KEY\nContentPaddingAddition = 10-20\nRandomTrailers = on\nDisableCookies = off")]
     public async Task GeneratedConfigurationIsAcceptedByPinnedKernelWithoutOpeningSockets(string extra)
     {
         if (!OperatingSystem.IsWindows()) return;

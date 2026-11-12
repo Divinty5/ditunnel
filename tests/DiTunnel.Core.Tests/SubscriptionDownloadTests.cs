@@ -8,6 +8,24 @@ public sealed class SubscriptionDownloadTests
 {
     private const string Link = "vless://00000000-0000-0000-0000-000000000001@example.com:443?security=tls#Test%20server";
 
+    private static string NativeAwgLink(string fields)
+    {
+        var key = Convert.ToBase64String(Enumerable.Repeat((byte)1, 32).ToArray());
+        var content = $"""
+            [Interface]
+            PrivateKey = {key}
+            Address = 192.0.2.2/32
+            H1 = 12345-12355
+            S3 = 12
+            {fields}
+            [Peer]
+            PublicKey = {key}
+            Endpoint = awg.example.com:51820
+            AllowedIPs = 0.0.0.0/0
+            """;
+        return "vpn://" + Convert.ToBase64String(Encoding.UTF8.GetBytes(content)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
+
     private sealed class Responses(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -28,6 +46,12 @@ public sealed class SubscriptionDownloadTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException();
         }
+    }
+
+    private sealed class BrokenResponse : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(new IOException("Response interrupted."));
     }
 
     [Fact]
@@ -69,6 +93,50 @@ public sealed class SubscriptionDownloadTests
         Assert.Equal(60m, profile.Usage!.RemainingBytes);
         Assert.Equal(1, importer.SkippedEntries);
         Assert.Empty(client.DefaultRequestHeaders.UserAgent);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ImportsBothAwgVersionsAlongsideOtherProtocols(bool base64)
+    {
+        var awg2 = NativeAwgLink("I1 = <r 10>\nI2 =");
+        var awg31 = NativeAwgLink("RandomTrailers = on\nDisableCookies = on");
+        var content = $"{awg2}\nhy2://test@example.com:443#Test {Link}\n{awg31}\n{NativeAwgLink("DisableCookies = invalid")}\n{awg2}";
+        if (base64) content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        using var client = new HttpClient(new Responses(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) };
+            response.Headers.TryAddWithoutValidation("Subscription-Userinfo", "upload=0; download=30; total=100");
+            return response;
+        }));
+        var importer = new ProfileImporter(client);
+
+        var profiles = await importer.ImportAsync("https://example.com/sub");
+
+        Assert.Equal(new[] { "AmneziaWG 2.0", "Hysteria 2", "VLESS", "AmneziaWG 3.1" }, profiles.Select(profile => profile.ProtocolName));
+        Assert.All(profiles, profile => Assert.Equal(70m, profile.Usage!.RemainingBytes));
+        Assert.Equal(1, importer.SkippedEntries);
+    }
+
+    [Fact]
+    public async Task MalformedAwgResponseReportsAConfigurationError()
+    {
+        var link = NativeAwgLink("RandomTrailers = invalid");
+        using var client = new HttpClient(new Responses(_ => new(HttpStatusCode.OK) { Content = new StringContent(link) }));
+
+        var error = await Assert.ThrowsAsync<FormatException>(() => new ProfileImporter(client).ImportAsync("https://example.com/sub"));
+
+        Assert.Contains("некорректную конфигурацию AWG", error.Message);
+        Assert.DoesNotContain(link, error.Message);
+    }
+
+    [Fact]
+    public async Task InterruptedBodyReportsADownloadError()
+    {
+        using var client = new HttpClient(new Responses(_ => new(HttpStatusCode.OK) { Content = new StreamContent(new BrokenResponse()) }));
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => new ProfileImporter(client).ImportAsync("https://example.com/sub"));
     }
 
     [Theory]

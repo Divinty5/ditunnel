@@ -97,6 +97,23 @@ public sealed class AmneziaWgConfigurationTests
         Assert.Equal("22-30", config.Peer["PersistentKeepalive"]);
     }
 
+    [Fact]
+    public void AcceptsAwg2WithLowercaseHeaderRangesAndBlankPacketTemplates()
+    {
+        var content = Configuration.Replace("H1 = 12345", "h1 = 12345 - 12355")
+            .Replace("[Peer]", "i1 = <r 10>\nI2 = # disabled\nI3 =\nI4 =\nI5 =\n[Peer]")
+            .Replace("PersistentKeepalive = 25", "PersistentKeepalive = off");
+        var profile = Assert.Single(ProfileParser.Parse(content));
+        var config = AmneziaWgConfiguration.Parse(profile.Content);
+
+        Assert.Equal("AmneziaWG 2.0", profile.ProtocolName);
+        Assert.Equal(content, profile.Content);
+        Assert.Equal("12345-12355", config.Interface["H1"]);
+        Assert.Equal("<r 10>", config.Interface["I1"]);
+        Assert.False(config.Interface.ContainsKey("I2"));
+        Assert.Equal("0", config.Peer["PersistentKeepalive"]);
+    }
+
     [Theory]
     [InlineData("PrivateKey", "bad")]
     [InlineData("PublicKey", "bad")]
@@ -130,6 +147,9 @@ public sealed class AmneziaWgConfigurationTests
     [InlineData("Unknown = secret")]
     [InlineData("Jc = 5")]
     [InlineData("privatekey = secret")]
+    [InlineData("I2 =\ni2 = <r 10>")]
+    [InlineData("RandomTrailers = sometimes")]
+    [InlineData("DisableCookies = 2")]
     [InlineData("[Interface]")]
     public void RejectsHooksUnknownFieldsAndDuplicates(string line)
         => Assert.Throws<FormatException>(() => ProfileParser.Parse(Configuration.Replace("[Peer]", line + "\n[Peer]")));

@@ -35,8 +35,7 @@ public static class ProfileParser
         input = input.Trim().TrimStart('\uFEFF');
         if (string.IsNullOrWhiteSpace(input)) throw new FormatException("Не удалось импортировать: данные отсутствуют.");
         skippedEntries = 0;
-        if (input.StartsWith("vpn://", StringComparison.OrdinalIgnoreCase)) return AmneziaVpnLink.Parse(input);
-        if (AmneziaWgConfiguration.LooksLikeConfiguration(input)) return ParseAmneziaWg(input);
+        if (AmneziaWgConfiguration.LooksLikeConfiguration(input)) return [ParseAmneziaWg(input)];
 
         if (input.StartsWith('{')) return ParseJson(input);
 
@@ -47,34 +46,44 @@ public static class ProfileParser
         }
         if (!input.Contains("://", StringComparison.Ordinal))
         {
-            try { input = Encoding.UTF8.GetString(Convert.FromBase64String(PadBase64(string.Concat(input.Where(c => !char.IsWhiteSpace(c)))))); }
+            try { input = Encoding.UTF8.GetString(Convert.FromBase64String(PadBase64(string.Concat(input.Where(c => !char.IsWhiteSpace(c)))))).TrimStart('\uFEFF'); }
             catch (FormatException) { throw new FormatException("Не удалось импортировать: формат подписки не распознан."); }
         }
 
         if (Encoding.UTF8.GetByteCount(input) > MaximumBytes) throw new FormatException("Не удалось импортировать: конфигурация превышает 2 МБ.");
-        if (AmneziaWgConfiguration.LooksLikeConfiguration(input)) return ParseAmneziaWg(input);
-        if (input.StartsWith("vpn://", StringComparison.OrdinalIgnoreCase)) return AmneziaVpnLink.Parse(input);
+        if (AmneziaWgConfiguration.LooksLikeConfiguration(input)) return [ParseAmneziaWg(input)];
         if (input.StartsWith('{')) return ParseJson(input);
 
         var result = new List<ImportedProfile>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        FormatException? awgLinkError = null;
+        var remainingDecompressedBytes = MaximumBytes;
         var tokens = SplitServerEntries(input);
         foreach (var token in tokens)
         {
             if (result.Count >= 1000) break;
             if (!LooksLikeServerUri(token)) { skippedEntries++; continue; }
             if (!seen.Add(token)) continue;
-            try { result.Add(ParseServerUri(token)); }
-            catch (FormatException) { skippedEntries++; }
+            var isAwg = token.StartsWith("vpn://", StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                if (isAwg) result.AddRange(AmneziaVpnLink.Parse(token, ref remainingDecompressedBytes).Take(1000 - result.Count));
+                else result.Add(ParseServerUri(token));
+            }
+            catch (FormatException error)
+            {
+                if (isAwg) awgLinkError ??= error;
+                skippedEntries++;
+            }
         }
-        if (result.Count == 0) throw new FormatException("Не удалось импортировать: поддерживаемые серверы не найдены.");
+        if (result.Count == 0) throw awgLinkError ?? new FormatException("Не удалось импортировать: поддерживаемые серверы не найдены.");
         return result;
     }
 
-    private static IReadOnlyList<ImportedProfile> ParseAmneziaWg(string input)
+    internal static ImportedProfile ParseAmneziaWg(string input)
     {
         var configuration = AmneziaWgConfiguration.Parse(input);
-        return [new(NormalizeProfileName($"AmneziaWG · {configuration.EndpointHost}"), AmneziaWgConfiguration.ProfileKind, input)];
+        return new(NormalizeProfileName($"AmneziaWG · {configuration.EndpointHost}"), AmneziaWgConfiguration.ProfileKind, input);
     }
 
     private static IEnumerable<string> SplitServerEntries(string input)
@@ -83,7 +92,7 @@ public static class ProfileParser
         {
             if (rawLine.StartsWith('#') || rawLine.StartsWith("//", StringComparison.Ordinal)) continue;
             var starts = System.Text.RegularExpressions.Regex.Matches(rawLine,
-                @"(?i)(?<![\p{L}\p{N}+.-])(?:vless|vmess|trojan|ss|hysteria2|hy2)://");
+                @"(?i)(?<![\p{L}\p{N}+.-])(?:vpn|vless|vmess|trojan|ss|hysteria2|hy2)://");
             if (starts.Count == 0) { yield return rawLine; continue; }
             for (var index = 0; index < starts.Count; index++)
             {
@@ -112,7 +121,7 @@ public static class ProfileParser
     private static bool LooksLikeServerUri(string value)
     {
         var separator = value.IndexOf("://", StringComparison.Ordinal);
-        return separator is > 0 and <= 12 && value[..separator].ToLowerInvariant() is "vless" or "vmess" or "trojan" or "ss" or "hysteria2" or "hy2";
+        return separator is > 0 and <= 12 && value[..separator].ToLowerInvariant() is "vpn" or "vless" or "vmess" or "trojan" or "ss" or "hysteria2" or "hy2";
     }
 
     private static ImportedProfile ParseServerUri(string line)
@@ -211,14 +220,22 @@ public sealed class ProfileImporter
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > ProfileParser.MaximumBytes) throw new FormatException("Не удалось импортировать: подписка превышает 2 МБ.");
 
-        await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
         using var buffer = new MemoryStream();
-        var block = new byte[8192];
-        int read;
-        while ((read = await stream.ReadAsync(block, deadline.Token)) != 0)
+        try
         {
-            if (buffer.Length + read > ProfileParser.MaximumBytes) throw new FormatException("Не удалось импортировать: подписка превышает 2 МБ.");
-            buffer.Write(block, 0, read);
+            await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+            var block = new byte[8192];
+            int read;
+            while ((read = await stream.ReadAsync(block, deadline.Token)) != 0)
+            {
+                if (buffer.Length + read > ProfileParser.MaximumBytes) throw new FormatException("Не удалось импортировать: подписка превышает 2 МБ.");
+                buffer.Write(block, 0, read);
+            }
+        }
+        catch (IOException error)
+        {
+            deadline.Token.ThrowIfCancellationRequested();
+            throw new HttpRequestException("Не удалось загрузить данные подписки.", error);
         }
         var usage = response.Headers.TryGetValues("Subscription-Userinfo", out var headers) ? SubscriptionUsage.Parse(string.Join(";", headers)) : null;
         var profiles = ProfileParser.Parse(Encoding.UTF8.GetString(buffer.ToArray()), out var skippedEntries);

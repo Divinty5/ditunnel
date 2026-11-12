@@ -75,6 +75,62 @@ public sealed class AmneziaVpnLinkTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ImportsBase64UrlNativeConfigurationFromShareLinkOrQr(bool modern)
+    {
+        var profile = Assert.Single(ProfileParser.Parse(Link(Share(Client).ToJsonString())));
+        var content = "\uFEFF# Export\n" + profile.Content;
+        if (modern) content = content.Replace("[Peer]", "RandomTrailers = On\nDisableCookies = off\n[Peer]");
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(content)).Replace('+', '-').Replace('/', '_');
+
+        var imported = Assert.Single(ProfileParser.Parse("VPN://" + encoded.TrimEnd('='), out var skipped));
+
+        Assert.Equal(content, imported.Content);
+        Assert.Equal("AmneziaWG · vpn.example.com", imported.Name);
+        Assert.Equal(modern ? "AmneziaWG 3.1" : "AmneziaWG 2.0", imported.ProtocolName);
+        Assert.Equal(0, skipped);
+        Assert.Equal(imported, Assert.Single(ProfileParser.Parse("vpn://" + encoded)));
+    }
+
+    [Fact]
+    public void ImportsSeveralOfficialLinksAsIndependentEntries()
+    {
+        var first = Share(Client);
+        var second = Share(Client);
+        second["description"] = "Another server";
+        var firstLink = Link(first.ToJsonString());
+        var profiles = ProfileParser.Parse(firstLink + "\n" + Link(second.ToJsonString()) + "\n" + firstLink, out var skipped);
+
+        Assert.Equal(new[] { "Test AWG 2", "Another server" }, profiles.Select(profile => profile.Name));
+        Assert.Equal(0, skipped);
+    }
+
+    [Fact]
+    public void MalformedSizePrefixLeavesRoomForOtherCompressedLinks()
+    {
+        var json = Share(Client).ToJsonString();
+        var invalid = Link(json, lengthAdjustment: ProfileParser.MaximumBytes - Encoding.UTF8.GetByteCount(json));
+        var profiles = ProfileParser.Parse(invalid + "\n" + Link(json), out var skipped);
+
+        Assert.Single(profiles);
+        Assert.Equal(1, skipped);
+    }
+
+    [Fact]
+    public void LimitsCombinedExpansionOfCompressedLinks()
+    {
+        var first = Share(Client);
+        first["padding"] = new string('a', ProfileParser.MaximumBytes / 2);
+        var second = Share(Client);
+        second["padding"] = new string('b', ProfileParser.MaximumBytes / 2);
+        var profiles = ProfileParser.Parse(Link(first.ToJsonString()) + "\n" + Link(second.ToJsonString()), out var skipped);
+
+        Assert.Single(profiles);
+        Assert.Equal(1, skipped);
+    }
+
+    [Theory]
     [InlineData(-1)]
     [InlineData(1)]
     [InlineData(2097152)]

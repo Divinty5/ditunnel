@@ -22,14 +22,17 @@ public sealed class AmneziaWgConfiguration
     {
         "PublicKey", "PresharedKey", "Endpoint", "AllowedIPs", "PersistentKeepalive"
     };
+    private static readonly string[] HeaderFields = ["H1", "H2", "H3", "H4"];
+    private static readonly string[] AdvancedRangeFields = ["ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts"];
+    private static readonly HashSet<string> PacketTemplateFields = new(StringComparer.OrdinalIgnoreCase) { "I1", "I2", "I3", "I4", "I5" };
     public IReadOnlyDictionary<string, string> Interface { get; }
     public IReadOnlyDictionary<string, string> Peer { get; }
     public string EndpointHost { get; }
     public ushort EndpointPort { get; }
     public string ProtocolVersion => Interface.ContainsKey("RandomTrailers") || Interface.ContainsKey("DisableCookies") ? "3.1"
-        : Interface.Keys.Any(key => new[] { "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts" }.Contains(key, StringComparer.OrdinalIgnoreCase)) ? "3.0"
-        : Interface.ContainsKey("S3") || Interface.ContainsKey("S4") || Interface.Any(entry => entry.Key.StartsWith('H') && entry.Value.Contains('-')) ? "2.0"
-        : Interface.Keys.Any(key => new[] { "I1", "I2", "I3", "I4", "I5" }.Contains(key, StringComparer.OrdinalIgnoreCase)) ? "1.5" : "1.0";
+        : Interface.ContainsKey("HeaderProtectionKey") || AdvancedRangeFields.Any(Interface.ContainsKey) ? "3.0"
+        : Interface.ContainsKey("S3") || Interface.ContainsKey("S4") || HeaderFields.Any(key => Interface.TryGetValue(key, out var value) && value.Contains('-')) ? "2.0"
+        : PacketTemplateFields.Any(Interface.ContainsKey) ? "1.5" : "1.0";
 
     private AmneziaWgConfiguration(Dictionary<string, string> device, Dictionary<string, string> peer, string host, ushort port)
     {
@@ -42,7 +45,7 @@ public sealed class AmneziaWgConfiguration
     // Configuration keys and packet templates must never appear in diagnostic object formatting.
     public override string ToString() => "AmneziaWG configuration (secrets omitted)";
 
-    public static bool LooksLikeConfiguration(string input) => input.Split(['\r', '\n'])
+    public static bool LooksLikeConfiguration(string input) => input.TrimStart('\uFEFF').Split(['\r', '\n'])
         .Any(line => line.Split('#', 2)[0].Trim().Equals("[Interface]", StringComparison.OrdinalIgnoreCase));
 
     public static AmneziaWgConfiguration Parse(string input)
@@ -78,8 +81,12 @@ public sealed class AmneziaWgConfiguration
             var value = line[(separator + 1)..].Trim();
             // Reject hooks (PreUp/PostUp/etc.) and unknown fields rather than silently dropping them.
             if (!(ReferenceEquals(current, device) ? InterfaceFields : PeerFields).Contains(key) ||
-                value.Length == 0 || value.Any(char.IsControl) || !current.TryAdd(key, value)) throw Invalid();
+                (value.Length == 0 && !PacketTemplateFields.Contains(key)) ||
+                value.Any(char.IsControl) || !current.TryAdd(key, value)) throw Invalid();
         }
+        // Some exports leave disabled packet templates blank. Check duplicates before omitting them.
+        foreach (var key in PacketTemplateFields)
+            if (device.TryGetValue(key, out var value) && value.Length == 0) device.Remove(key);
         ValidateKey(Required(device, "PrivateKey"));
         ValidateKey(Required(peer, "PublicKey"));
         if (peer.TryGetValue("PresharedKey", out var psk)) ValidateKey(psk);
@@ -95,11 +102,19 @@ public sealed class AmneziaWgConfiguration
             if (device.TryGetValue(key, out var value)) ValidateNumber(value, 0, key.StartsWith('S') ? 65535u : uint.MaxValue);
         if (device.TryGetValue("Jmin", out var min) && device.TryGetValue("Jmax", out var max) &&
             uint.Parse(min, CultureInfo.InvariantCulture) > uint.Parse(max, CultureInfo.InvariantCulture)) throw Invalid();
-        foreach (var key in new[] { "H1", "H2", "H3", "H4", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts" })
-            if (device.TryGetValue(key, out var value)) ValidateRange(value);
-        if (peer.TryGetValue("PersistentKeepalive", out var keepalive)) ValidateRange(keepalive);
+        foreach (var key in HeaderFields.Concat(AdvancedRangeFields))
+            if (device.TryGetValue(key, out var value)) device[key] = NormalizeRange(value);
+        if (peer.TryGetValue("PersistentKeepalive", out var keepalive))
+            peer["PersistentKeepalive"] = keepalive.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+                keepalive.Equals("(off)", StringComparison.OrdinalIgnoreCase) ? "0" : NormalizeRange(keepalive);
         foreach (var key in new[] { "RandomTrailers", "DisableCookies" })
-            if (device.TryGetValue(key, out var value) && value is not ("0" or "1") && !bool.TryParse(value, out _)) throw Invalid();
+            if (device.TryGetValue(key, out var value))
+                device[key] = value.ToLowerInvariant() switch
+                {
+                    "1" or "true" or "on" => "true",
+                    "0" or "false" or "off" => "false",
+                    _ => throw Invalid()
+                };
         if (!device.Keys.Any(key => !new[] { "PrivateKey", "Address", "DNS", "MTU", "ListenPort" }.Contains(key, StringComparer.OrdinalIgnoreCase)))
             throw new FormatException("Не удалось импортировать: конфигурация не содержит параметров AmneziaWG.");
         var endpoint = Required(peer, "Endpoint");
@@ -134,13 +149,14 @@ public sealed class AmneziaWgConfiguration
         }
     }
 
-    private static void ValidateRange(string value)
+    private static string NormalizeRange(string value)
     {
-        if (value == "(off)") return;
-        var parts = value.Split('-');
+        if (value == "(off)") return value;
+        var parts = value.Split('-', StringSplitOptions.TrimEntries);
         if (parts.Length is < 1 or > 2) throw Invalid();
         var min = ValidateNumber(parts[0], 0, uint.MaxValue);
         if (parts.Length == 2 && min > ValidateNumber(parts[1], 0, uint.MaxValue)) throw Invalid();
+        return string.Join('-', parts);
     }
 
     private static uint ValidateNumber(string value, uint min, uint max)

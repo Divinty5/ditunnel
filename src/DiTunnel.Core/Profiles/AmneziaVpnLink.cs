@@ -6,10 +6,10 @@ using System.Text.Json;
 
 namespace DiTunnel.Core.Profiles;
 
-// Amnezia self-hosted shares: Base64URL(qCompress(JSON)). qCompress prefixes
-// the zlib stream with the uncompressed byte length as a big-endian uint32.
+// Self-hosted shares wrap JSON in qCompress. 3x-ui encodes the native .conf directly.
 internal static class AmneziaVpnLink
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static FormatException Invalid() => new("Не удалось импортировать: ссылка AmneziaVPN повреждена или содержит некорректную конфигурацию AWG.");
     private static FormatException MissingClient() => new("Ссылка AmneziaVPN не содержит готовой клиентской конфигурации AWG. Экспортируйте в AmneziaVPN конфигурацию AmneziaWG для подключения, а не доступ к управлению сервером или API.");
 
@@ -36,7 +36,7 @@ internal static class AmneziaVpnLink
         return link;
     }
 
-    internal static IReadOnlyList<ImportedProfile> Parse(string link)
+    internal static IReadOnlyList<ImportedProfile> Parse(string link, ref int remainingDecompressedBytes)
     {
         try
         {
@@ -44,12 +44,19 @@ internal static class AmneziaVpnLink
             if (encoded.Any(char.IsWhiteSpace)) throw Invalid();
             encoded = encoded.Replace('-', '+').Replace('_', '/');
             var bytes = Convert.FromBase64String(encoded.PadRight((encoded.Length + 3) / 4 * 4, '='));
-            if (bytes.Length > ProfileParser.MaximumBytes) throw Invalid();
+            if (bytes.Length == 0 || bytes.Length > ProfileParser.MaximumBytes) throw Invalid();
             // Older uncompressed JSON shares are also accepted by AmneziaVPN.
-            if (bytes.Length > 0 && bytes[0] == (byte)'{') return ParseJson(bytes);
+            if (bytes[0] == (byte)'{') return ParseJson(bytes);
+            // A valid qCompress size prefix (big-endian uint32, at most 2 MB) starts with zero.
+            if (bytes[0] != 0)
+            {
+                var content = StrictUtf8.GetString(bytes);
+                if (AmneziaWgConfiguration.LooksLikeConfiguration(content)) return [ProfileParser.ParseAmneziaWg(content)];
+                throw Invalid();
+            }
             if (bytes.Length < 6) throw Invalid();
             var length = BinaryPrimitives.ReadUInt32BigEndian(bytes);
-            if (length == 0 || length > ProfileParser.MaximumBytes) throw Invalid();
+            if (length == 0 || length > remainingDecompressedBytes) throw Invalid();
             using var compressed = new MemoryStream(bytes, 4, bytes.Length - 4);
             using var zlib = new ZLibStream(compressed, CompressionMode.Decompress);
             using var output = new MemoryStream();
@@ -57,6 +64,8 @@ internal static class AmneziaVpnLink
             int read;
             while ((read = zlib.Read(block)) != 0)
             {
+                // Account for actual expansion, even if the link is later rejected.
+                remainingDecompressedBytes = Math.Max(0, remainingDecompressedBytes - read);
                 if (output.Length + read > length) throw Invalid();
                 output.Write(block, 0, read);
             }
