@@ -251,9 +251,12 @@ internal static class Program
             using var cancel = CancellationTokenSource.CreateLinkedTokenSource(token);
             var probe = client.ProbeAsync(profile, cancel.Token);
             using var peer = await remote.AcceptTcpClientAsync(token);
-            var files = Directory.GetFiles(state, "*.json", SearchOption.AllDirectories);
-            if (files.Length == 0 || files.Any(file => File.GetUnixFileMode(file) != (UnixFileMode.UserRead | UnixFileMode.UserWrite)))
-                throw new InvalidOperationException("Probe configuration permissions are not 0600.");
+            var probeDirectories = Directory.GetDirectories(state, "probe-*");
+            if (probeDirectories.Length != 1 || File.GetUnixFileMode(probeDirectories[0]) !=
+                (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute))
+                throw new InvalidOperationException("Probe working directory permissions are not 0700.");
+            if (Directory.EnumerateFiles(state, "*.json", SearchOption.AllDirectories).Any())
+                throw new InvalidOperationException("Xray probe configuration was written to disk instead of being passed through stdin.");
             // The silent synthetic endpoint forces the lease to remain active until cancellation.
             cancel.Cancel();
             try { await probe; throw new InvalidOperationException("Cancelled probe succeeded."); }
@@ -267,7 +270,7 @@ internal static class Program
             var until = Stopwatch.StartNew();
             while (HasRuntimeState(state) && until.Elapsed < TimeSpan.FromSeconds(3)) await Task.Delay(25, token);
             if (HasRuntimeState(state)) throw new InvalidOperationException("Lost sender left a runtime.");
-            Console.WriteLine("PASS_DBUS_CAPABILITIES_CANCEL_OWNERSHIP_AND_PRIVATE_FILES");
+            Console.WriteLine("PASS_DBUS_CAPABILITIES_CANCEL_OWNERSHIP_AND_STDIN_CONFIGURATION");
         }
         finally
         {
