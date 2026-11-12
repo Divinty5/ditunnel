@@ -589,6 +589,7 @@
   "Не удалось применить начальные настройки раздельного туннелирования.": "Could not apply initial split tunneling settings.",
   "Нет совместимого установщика или файла SHA-256. Откройте GitHub в настройках, в разделе «Обновления».": "No compatible installer or SHA-256 file is available. Open GitHub from Settings, under Updates.",
   "Туннель VPN запущен": "VPN tunnel started",
+  "Проверка VPN не пройдена": "VPN check failed",
   "DNS: адрес сервера не найден": "DNS: server address not found",
   "Таймаут проверки": "Probe timed out",
   "Проверка не выполнена": "Probe not completed",

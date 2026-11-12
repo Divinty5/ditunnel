@@ -73,6 +73,65 @@ public sealed class OperationCancellationTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    private sealed class RecoveryEngine : IProfileVpnEngine
+    {
+        public VpnStatus Status { get; private set; } = new(VpnConnectionState.Connected);
+        public bool RequiresAdministrator => false;
+        public int Restarts { get; private set; }
+        public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
+        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+        {
+            Restarts++;
+            return Task.CompletedTask;
+        }
+        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        {
+            Status = VpnStatus.Disconnected;
+            return Task.CompletedTask;
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class HealthProbe : IServerProbe
+    {
+        public bool Available { get; set; }
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        {
+            Assert.Equal(ServerProbeMode.Https, mode);
+            return Task.FromResult(Available ? ProbePolicy.Success(15, "HTTPS", "HTTPS", true)
+                : ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 100));
+        }
+    }
+
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64)]
+    [InlineData(ReleaseTarget.LinuxX64)]
+    [InlineData(ReleaseTarget.AndroidArm64)]
+    public async Task FailedActiveProbeChangesStatusAndRestartsAtMostOncePerOutage(ReleaseTarget target)
+    {
+        var engine = new RecoveryEngine();
+        var probe = new HealthProbe();
+        var platform = target == ReleaseTarget.LinuxX64 ? AppPlatform.Linux
+            : target == ReleaseTarget.AndroidArm64 ? AppPlatform.Android : AppPlatform.Windows;
+        var vm = new MainViewModel(engine, new Store(), probe, platform: platform);
+        try
+        {
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal("Проверка VPN не пройдена", vm.StatusText);
+            Assert.Equal("Отключить", vm.PowerText);
+            Assert.Equal(0, engine.Restarts);
+            await vm.CheckActiveConnectionAsync(default);
+            await vm.CheckActiveConnectionAsync(default);
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal(1, engine.Restarts);
+            probe.Available = true;
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.NotEqual("Проверка VPN не пройдена", vm.StatusText);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
     [Fact]
     public async Task PersistedProtectionIsVisibleWithoutAnActiveTunnel()
     {
@@ -91,7 +150,14 @@ public sealed class OperationCancellationTests
     public async Task CancellationStaysVisibleUntilTheBrokerConfirmsCleanup()
     {
         var engine = new CleaningEngine();
-        var vm = new MainViewModel(engine, new Store());
+        var vm = new MainViewModel(engine, new Store(), new Probe());
+        var probeEnabled = new List<bool>();
+        var probeAllEnabled = new List<bool>();
+        vm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(vm.CanProbe)) probeEnabled.Add(vm.CanProbe);
+            if (args.PropertyName == nameof(vm.CanProbeAll)) probeAllEnabled.Add(vm.CanProbeAll);
+        };
         try
         {
             var cancel = vm.CancelConnectionCommand.ExecuteAsync(null);
@@ -107,6 +173,8 @@ public sealed class OperationCancellationTests
             await cancel.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.False(vm.HasPendingOperation);
             Assert.True(vm.CanSelectProfile);
+            Assert.True(probeEnabled.Last());
+            Assert.True(probeAllEnabled.Last());
         }
         finally { engine.FinishCleanup.TrySetResult(); await vm.ShutdownAsync(); }
     }
@@ -162,6 +230,8 @@ public sealed class OperationCancellationTests
             await operation.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.False(vm.IsProbing);
             Assert.True(vm.CanSelectProfile);
+            Assert.True(vm.CanProbe);
+            Assert.True(vm.CanProbeAll);
         }
         finally { await vm.ShutdownAsync(); }
     }
