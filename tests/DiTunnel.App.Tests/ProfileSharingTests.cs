@@ -9,6 +9,24 @@ namespace DiTunnel.App.Tests;
 
 public sealed class ProfileSharingTests
 {
+    [Theory]
+    [InlineData("AmneziaWG · 192.0.2.10", "AmneziaWG")]
+    [InlineData("AmneziaWG · 2001:db8::10", "AmneziaWG")]
+    [InlineData("203.0.113.3:51820", "AmneziaWG")]
+    [InlineData("Резерв [2001:db8::10]:51820", "Резерв …")]
+    [InlineData("Лондон · 192.0.2.10", "Лондон · …")]
+    [InlineData("AmneziaWG · vpn.example.com", "AmneziaWG · vpn.example.com")]
+    [InlineData("Сервер друга", "Сервер друга")]
+    public void AwgCardHidesIpLiteralsInSavedNames(string name, string expected)
+    {
+        var profile = Profile() with { Name = name };
+        var card = new ServerItemViewModel(profile);
+
+        Assert.Equal(expected, card.Name);
+        Assert.Same(profile, card.Profile);
+        Assert.Equal(name, new ServerItemViewModel(profile with { Kind = "VLESS" }).Name);
+    }
+
     private const string Key = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
     private static ImportedProfile Profile(string extra = "") => new("Сервер друга", "AmneziaWG", $"""
         [Interface]
