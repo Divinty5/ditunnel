@@ -62,6 +62,20 @@ public sealed class AmneziaVpnLinkTests
     }
 
     [Fact]
+    public void ImportsAwg31SwitchesFromStructuredClientExport()
+    {
+        var client = Client;
+        client["random_trailers"] = "on";
+        client["disable_cookies"] = "on";
+        var profile = Assert.Single(ProfileParser.Parse(Link(Share(client).ToJsonString())));
+        var config = AmneziaWgConfiguration.Parse(profile.Content);
+
+        Assert.Equal("3.1", config.ProtocolVersion);
+        Assert.Equal("true", config.Interface["RandomTrailers"]);
+        Assert.Equal("true", config.Interface["DisableCookies"]);
+    }
+
+    [Fact]
     public void ImportsEmbeddedNativeConfigAndBase64WrappedLink()
     {
         var fields = Client;

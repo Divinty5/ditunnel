@@ -51,12 +51,13 @@ public sealed class AmneziaWgProfileConverterTests
     }
 
     [Theory]
-    [InlineData("on", "off", "true", "false")]
-    [InlineData("0", "1", "false", "true")]
-    [InlineData("TRUE", "False", "true", "false")]
-    public void RuntimeUsesCanonicalAwg31SwitchValues(string trailers, string cookies, string expectedTrailers, string expectedCookies)
+    [InlineData("RandomTrailers = on\nDisableCookies = off", "true", "false")]
+    [InlineData("RandomTrailers = 0\nDisableCookies = 1", "false", "true")]
+    [InlineData("RandomTrailers = TRUE\nDisableCookies = False", "true", "false")]
+    [InlineData("random_trailers=on\ndisable_cookies=on", "true", "true")]
+    public void RuntimeUsesCanonicalAwg31SwitchValues(string switches, string expectedTrailers, string expectedCookies)
     {
-        var profile = Profile($"RandomTrailers = {trailers}\nDisableCookies = {cookies}");
+        var profile = Profile(switches);
         var uapi = AmneziaWgProfileConverter.Convert(profile).BuildUserspaceConfiguration("192.0.2.1");
         Assert.Contains($"random_trailers={expectedTrailers}\n", uapi);
         Assert.Contains($"disable_cookies={expectedCookies}\n", uapi);
@@ -244,7 +245,7 @@ public sealed class AmneziaWgProfileConverterTests
     [InlineData("")]
     [InlineData("S3 = 16\nS4 = 20\nI1 = <r 10>\nI2 =")]
     [InlineData("S3 = 16\nS4 = 16\nHeaderProtectionKey = KEY\nContentPaddingAddition = 10-20")]
-    [InlineData("S3 = 16\nS4 = 16\nHeaderProtectionKey = KEY\nContentPaddingAddition = 10-20\nRandomTrailers = on\nDisableCookies = off")]
+    [InlineData("S3 = 16\nS4 = 16\nHeaderProtectionKey = KEY\nContentPaddingAddition = 10-20\nrandom_trailers=on\ndisable_cookies=on")]
     public async Task GeneratedConfigurationIsAcceptedByPinnedKernelWithoutOpeningSockets(string extra)
     {
         if (!OperatingSystem.IsWindows()) return;

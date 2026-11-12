@@ -165,6 +165,8 @@ internal static class AmneziaVpnLink
         Field("MTU", Text(client, "mtu"));
         foreach (var field in new[] { "Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5", "HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime", "RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout", "MaxHandshakeAttempts", "RandomTrailers", "DisableCookies" })
             Field(field, Text(client, field));
+        Field("random_trailers", Text(client, "random_trailers"));
+        Field("disable_cookies", Text(client, "disable_cookies"));
         text.Append("[Peer]\n");
         Field("PublicKey", Required(client, "server_pub_key"));
         Field("PresharedKey", Text(client, "psk_key"));

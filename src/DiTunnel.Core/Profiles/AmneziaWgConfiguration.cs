@@ -79,6 +79,11 @@ public sealed class AmneziaWgConfiguration
             if (current is null || separator <= 0) throw Invalid();
             var key = line[..separator].Trim();
             var value = line[(separator + 1)..].Trim();
+            if (ReferenceEquals(current, device))
+            {
+                if (key.Equals("random_trailers", StringComparison.OrdinalIgnoreCase)) key = "RandomTrailers";
+                else if (key.Equals("disable_cookies", StringComparison.OrdinalIgnoreCase)) key = "DisableCookies";
+            }
             // Reject hooks (PreUp/PostUp/etc.) and unknown fields rather than silently dropping them.
             if (!(ReferenceEquals(current, device) ? InterfaceFields : PeerFields).Contains(key) ||
                 (value.Length == 0 && !PacketTemplateFields.Contains(key)) ||

@@ -69,6 +69,7 @@ public sealed class AmneziaWgConfigurationTests
     [InlineData("ContentPaddingAddition = 10-20", "3.0")]
     [InlineData("RandomTrailers = true", "3.1")]
     [InlineData("DisableCookies = false", "3.1")]
+    [InlineData("random_trailers=on\ndisable_cookies=on", "3.1")]
     public void DisplaysProtocolVersionWithoutChangingStoredKind(string extra, string version)
     {
         var profile = Assert.Single(ProfileParser.Parse(Configuration.Replace("[Peer]", extra + "\n[Peer]")));
@@ -150,6 +151,7 @@ public sealed class AmneziaWgConfigurationTests
     [InlineData("I2 =\ni2 = <r 10>")]
     [InlineData("RandomTrailers = sometimes")]
     [InlineData("DisableCookies = 2")]
+    [InlineData("DisableCookies = on\ndisable_cookies=off")]
     [InlineData("[Interface]")]
     public void RejectsHooksUnknownFieldsAndDuplicates(string line)
         => Assert.Throws<FormatException>(() => ProfileParser.Parse(Configuration.Replace("[Peer]", line + "\n[Peer]")));
