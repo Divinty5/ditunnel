@@ -126,10 +126,20 @@ internal static class Program
         reservation.Start();
         var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
         reservation.Stop();
+        var credentials = ProbeSocksCredentials.Create();
         var config = new JsonObject
         {
             ["log"] = new JsonObject { ["loglevel"] = "none" },
-            ["inbounds"] = new JsonArray(new JsonObject { ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = port, ["settings"] = new JsonObject { ["auth"] = "noauth", ["udp"] = false } }),
+            ["inbounds"] = new JsonArray(new JsonObject
+            {
+                ["protocol"] = "socks", ["listen"] = "127.0.0.1", ["port"] = port,
+                ["settings"] = new JsonObject
+                {
+                    ["auth"] = "password",
+                    ["accounts"] = new JsonArray(new JsonObject { ["user"] = credentials.Username, ["pass"] = credentials.Password }),
+                    ["udp"] = false
+                }
+            }),
             ["outbounds"] = new JsonArray(new JsonObject { ["protocol"] = "freedom" })
         };
         var path = Path.Combine(directory, "loopback.json");
@@ -141,8 +151,8 @@ internal static class Program
             ValidateConfigurationBeforeStart = false, ProcessLifetimeFactory = process => new LinuxProcessLifetime(process)
         });
         await runtime.StartAsync(path, token);
-        await SocksTcpProbe.WaitForListenerAsync(port, () => runtime.IsRunning, token);
-        using var handler = new HttpClientHandler { Proxy = new WebProxy($"socks5://127.0.0.1:{port}") };
+        await SocksTcpProbe.WaitForListenerAsync(port, credentials, () => runtime.IsRunning, token);
+        using var handler = new HttpClientHandler { Proxy = credentials.CreateProxy(port) };
         using var http = new HttpClient(handler);
         var text = await http.GetStringAsync($"http://127.0.0.1:{webPort}/", token);
         if (text != "SYNTHETIC") throw new InvalidOperationException("Loopback response mismatch.");

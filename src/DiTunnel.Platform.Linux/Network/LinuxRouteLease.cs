@@ -32,9 +32,24 @@ public sealed class LinuxRouteLease(ILinuxNetworkCommands commands, string inter
 
     public async Task ClaimLinkAsync(CancellationToken token)
     {
-        var link = (await LinksAsync(token).ConfigureAwait(false)).SingleOrDefault(link => (string?)link?["ifname"] == interfaceName)
-            ?? throw new InvalidOperationException("TUN ещё не готов.");
-        if ((string?)link["linkinfo"]?["info_kind"] != "tun") throw new InvalidOperationException("Ожидался TUN интерфейс.");
+        JsonNode? link;
+        using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
+        {
+            deadline.CancelAfter(TimeSpan.FromSeconds(3));
+            try
+            {
+                while ((link = (await LinksAsync(deadline.Token).ConfigureAwait(false))
+                    .SingleOrDefault(candidate => (string?)candidate?["ifname"] == interfaceName)) is null)
+                    await Task.Delay(100, deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                throw new TimeoutException("Xray не создал интерфейс TUN вовремя.");
+            }
+        }
+        if ((string?)link["linkinfo"]?["info_kind"] != "tun"
+            || (string?)link["ifalias"] is { Length: > 0 } alias && alias != "ditunnel:" + owner)
+            throw new InvalidOperationException("Ожидался TUN интерфейс Di-Tunnel.");
         InterfaceIndex = (int)link["ifindex"]!;
         await commands.IpAsync(token, "link", "set", "dev", interfaceName, "alias", "ditunnel:" + owner).ConfigureAwait(false);
         await commands.IpAsync(token, "-4", "address", "add", "198.18.0.1/32", "dev", interfaceName).ConfigureAwait(false);

@@ -58,7 +58,8 @@ internal static class LinuxVpnSmoke
                     static (message, _) => { var reader = message.GetBodyReader(); return (reader.ReadString(), reader.ReadString(), reader.ReadString()); },
                     (Notification<(string, string, string)> notification) => { if (notification.HasValue && notification.Value.Item3.Length == 0) _ = vpn.SenderDisconnectedAsync(notification.Value.Item1); }, emitOnCapturedContext: false);
                 await bus.RequestNameAsync(LinuxNetworkProtocol.Service);
-                await using var client = new LinuxNetworkClient(DBusAddress.Session);
+                await using var client = new LinuxNetworkClient(DBusAddress.Session,
+                    policy: () => LinuxVpnPolicy.Default with { Ipv4Only = false });
                 if (!(await client.GetCapabilitiesAsync(token)).CanConnect) throw new InvalidOperationException("VPN capability missing.");
                 await client.ConnectAsync(profile, token);
                 if (client.Status.State != VpnConnectionState.Connected) throw new InvalidOperationException("VPN not connected.");

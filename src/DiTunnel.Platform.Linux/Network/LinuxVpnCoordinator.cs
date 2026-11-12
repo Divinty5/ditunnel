@@ -136,12 +136,16 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
             }
             if (!cleanupFailed)
             {
+            var diagnostics = failure is null ? null : ProbePolicy.Failure(failure,
+                operation.Session?.StartupStage ?? "Авторизация polkit", "TUN", watch.Elapsed.TotalMilliseconds, "Linux").Diagnostics;
             lock (gate)
             {
                 active = null;
                 retainedProtection |= operation.Session?.IsProtectionActive == true;
-                status = retainedProtection ? new(VpnConnectionState.Error, "Kill switch сохраняет блокировку. Нажмите «Восстановить сеть» для её снятия.")
-                    : failure is null ? VpnStatus.Disconnected : new(VpnConnectionState.Error, "Подключение VPN завершилось с ошибкой; собственные сетевые объекты очищены.");
+                var message = retainedProtection ? "Kill switch сохраняет блокировку. Нажмите «Восстановить сеть» для её снятия."
+                    : "Подключение VPN завершилось с ошибкой; собственные сетевые объекты очищены.";
+                status = !retainedProtection && failure is null ? VpnStatus.Disconnected : new(VpnConnectionState.Error,
+                    diagnostics is null ? message : message + "\n" + diagnostics.ToDisplayString());
             }
             if (failure is null) operation.Ready.TrySetCanceled();
             else operation.Ready.TrySetException(new InvalidOperationException("Не удалось подключить VPN. Проверьте профиль, права и доступность службы."));

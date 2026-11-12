@@ -69,15 +69,36 @@ public sealed class LinuxRouteLeaseTests
         Assert.Equal("tls", (string?)config["outbounds"]![0]!["streamSettings"]!["security"]);
     }
 
+    [Fact]
+    public async Task Claim_waits_for_the_tun_link_to_appear()
+    {
+        var commands = new Commands
+        {
+            Links = """[{"ifname":"dtn0123456789","ifindex":8,"linkinfo":{"info_kind":"tun"}}]""",
+            MissingLinkReads = 2
+        };
+        var lease = new LinuxRouteLease(commands, Name, Owner);
+        await lease.ClaimLinkAsync(default);
+        Assert.Equal(8, lease.InterfaceIndex);
+        Assert.All(commands.Calls.Take(3), call => Assert.Contains("-j", call));
+        Assert.Contains("ditunnel:" + Owner, commands.Calls[3]);
+    }
+
     private sealed class Commands : ILinuxNetworkCommands
     {
         public string Rules = "[]", Routes = "[]", Links = "[]";
         public bool FailDns;
+        public int MissingLinkReads;
         public List<string[]> Calls = [];
         public List<string[]> Dns = [];
         public Task<string> IpAsync(CancellationToken token, params string[] arguments)
         {
             Calls.Add(arguments);
+            if (arguments.Contains("-j") && arguments.Contains("link") && MissingLinkReads > 0)
+            {
+                MissingLinkReads--;
+                return Task.FromResult("[]");
+            }
             return Task.FromResult(arguments.Contains("-j") ? arguments.Contains("link") ? Links : arguments.Contains("rule") ? Rules : Routes : "");
         }
         public Task ResolvedAsync(CancellationToken token, params string[] arguments)

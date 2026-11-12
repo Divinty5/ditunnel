@@ -13,6 +13,7 @@ public interface ILinuxVpnSession : IAsyncDisposable
     Task StartAsync(ImportedProfile profile, CancellationToken token);
     Task WaitForExitAsync(CancellationToken token);
     bool IsProtectionActive => false;
+    string StartupStage => "TUN";
     Task StartAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token) => StartAsync(profile, token);
     Task ReleaseProtectionAsync() => Task.CompletedTask;
     Task PrepareAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token) => Task.CompletedTask;
@@ -30,6 +31,7 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
     private bool journalWritten;
     private LinuxKillSwitch? protection;
     public bool IsProtectionActive => protection?.Active == true;
+    public string StartupStage { get; private set; } = "Профиль";
     private string Journal => Path.Combine(stateDirectory, "vpn-owner.json");
 
     public Task StartAsync(ImportedProfile profile, CancellationToken token) => StartAsync(profile, LinuxVpnPolicy.Default, token);
@@ -63,7 +65,9 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
         var executable = runtime.VerifyRuntime("xray");
         var awg = AmneziaWgProfileConverter.IsAmneziaWg(profile) ? AmneziaWgProfileConverter.Convert(profile) : null;
         var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
+        StartupStage = "DNS сервера";
         var address = await endpoints.ResolveAsync(profile, policy.Ipv4Only, token, protectedRetry: protection is not null).ConfigureAwait(false);
+        StartupStage = "Проверка маршрутов";
         var name = "dtn" + owner[..10];
         routes = new(commands, name, owner);
         await routes.PreflightAsync(token).ConfigureAwait(false);
@@ -83,13 +87,16 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
         finally { File.Delete(temporaryJournal); }
         directory = Path.Combine(stateDirectory, "vpn-" + owner);
         Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        StartupStage = "Kill switch";
         if (policy.KillSwitch || protection is not null)
         {
             protection = new(commands as ILinuxFirewallCommands ?? throw new InvalidOperationException("nftables недоступен."), owner);
             await protection.ActivateAsync(name, address, awg?.ServerPort ?? converted!.ServerPort,
                 awg is not null ? KillSwitchTransportProtocol.Udp : converted!.ServerTransport, policy.AllowLan, token);
         }
+        StartupStage = awg is null ? "Xray" : "AmneziaWG";
         bridge = awg is null ? null : await runtime.StartAwgAsync(awg, address, directory, token, LinuxRouteLease.Mark).ConfigureAwait(false);
+        StartupStage = "Xray";
         var configuration = (bridge?.Proxy ?? converted!).WithIpv4Only(policy.Ipv4Only);
         var dns = XrayProfileConfiguration.DnsServersFor(policy.Ipv4Only, awg?.DnsServers ?? new[] { "1.1.1.1", "1.0.0.1" });
         var config = BuildConfiguration(configuration, address, name, dns, policy);
@@ -99,8 +106,11 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
             ValidateConfigurationBeforeStart = false, ProcessLifetimeFactory = static process => new LinuxProcessLifetime(process) });
         // Xray's '-test' opens TUN; never run it as a read-only validation.
         await xray.StartAsync(path, token).ConfigureAwait(false);
+        StartupStage = "TUN";
         await routes.ClaimLinkAsync(token).ConfigureAwait(false);
+        StartupStage = "Маршруты и DNS";
         await routes.ActivateAsync(dns, token).ConfigureAwait(false);
+        StartupStage = "Работа VPN";
         if (!xray.IsRunning || bridge is { IsRunning: false }) throw new InvalidOperationException("Ядро VPN завершилось.");
         // Disabling KS during a settings handoff takes effect only after the new
         // tunnel is ready. Failures before this point retain the old protection.

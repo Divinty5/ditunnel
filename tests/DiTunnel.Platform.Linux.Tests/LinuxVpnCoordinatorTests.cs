@@ -120,6 +120,8 @@ public sealed class LinuxVpnCoordinatorTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => host.ConnectAsync(":1.1", Guid.NewGuid(), Profile, Allow));
         Assert.Equal(1, session.Cleanups);
         Assert.True(host.IsIdle);
+        Assert.Contains("Этап: TUN", host.Status.Message);
+        Assert.DoesNotContain("synthetic private endpoint", host.Status.Message);
     }
 
     private sealed class Session : ILinuxVpnSession
@@ -134,7 +136,8 @@ public sealed class LinuxVpnCoordinatorTests
         public int Cleanups;
         public TaskCompletionSource Cleaning = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource AllowCleanup = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public Task StartAsync(ImportedProfile profile, CancellationToken token) => FailStart ? Task.FromException(new Exception()) : Task.CompletedTask;
+        public Task StartAsync(ImportedProfile profile, CancellationToken token) => FailStart
+            ? Task.FromException(new IOException("synthetic private endpoint")) : Task.CompletedTask;
         public Task WaitForExitAsync(CancellationToken token) => Task.Delay(Timeout.Infinite, token);
         public async ValueTask DisposeAsync()
         {

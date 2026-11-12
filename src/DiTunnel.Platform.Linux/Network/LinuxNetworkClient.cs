@@ -152,7 +152,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
             try { await DisconnectCoreAsync().ConfigureAwait(false); }
             catch { await PublishCleanupFailureAsync().ConfigureAwait(false); }
             if (ex is OperationCanceledException) throw;
-            throw new InvalidOperationException(IsNetworkProtectionActive ? "Kill switch сохраняет блокировку. Нажмите «Восстановить сеть» для её снятия."
+            throw new InvalidOperationException(Status.State == VpnConnectionState.Error && Status.Message is { } diagnostic ? diagnostic
                 : "Не удалось подключить VPN. Проверьте профиль, права polkit и состояние сетевой службы.");
         }
     }
