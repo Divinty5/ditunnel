@@ -23,16 +23,29 @@ public static class UpdateFlow
         catch { return vm.Notice = "Не удалось показать предложение обновления. Попробуйте позже."; }
         if (action == "later") return "Напомним об обновлении при следующем запуске.";
         if (action != "install" || !canInstall) return result.Message;
+        string path;
         try
         {
             var progress = new Progress<int>(value => vm.Notice = $"Загрузка обновления: {value}%");
-            var path = await installer.DownloadAsync(release, progress);
-            vm.Notice = "Обновление загружено. Отключаем VPN…";
-            await vm.PrepareToCloseAsync(TimeSpan.FromSeconds(8));
-            installer.Launch(path);
+            path = await installer.DownloadAsync(release, progress);
         }
-        catch { return vm.Notice = "Не удалось скачать или запустить обновление. Контрольная сумма и подключение не прошли проверку."; }
+        catch { return vm.Notice = "Не удалось скачать обновление или проверить контрольную сумму."; }
+        if (vm.IsBusy) return vm.Notice = "Дождитесь завершения текущей операции и повторите обновление.";
+        vm.IsBusy = true;
+        try
+        {
+            vm.Notice = "Обновление загружено. Отключаем VPN…";
+            await vm.DisconnectForUpdateAsync();
+            vm.Notice = "Запускаем установку обновления…";
+            await installer.LaunchAsync(path);
+            if (afterLaunch is not null) await vm.PrepareToCloseAsync(TimeSpan.FromSeconds(8));
+        }
+        catch (UpdateInstallException error) { return vm.Notice = error.Message; }
+        catch { return vm.Notice = "Не удалось запустить обновление. Повторите установку из настроек."; }
+        finally { vm.IsBusy = false; }
         try { afterLaunch?.Invoke(); } catch { }
         return "Установщик обновления запущен.";
     }
 }
+
+public sealed class UpdateInstallException(string message) : Exception(message);

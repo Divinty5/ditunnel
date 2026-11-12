@@ -1239,6 +1239,17 @@ public sealed partial class MainViewModel : ViewModelBase
             await ReconnectSelectedProfileSafelyAsync(best);
         return true;
     }
+    internal async Task DisconnectForUpdateAsync()
+    {
+        CancelProbes();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await CancelConnectionAsync().WaitAsync(timeout.Token);
+        if (engine is null) return;
+        await engine.DisconnectAsync(timeout.Token).WaitAsync(timeout.Token);
+        if (engine.Status.State is not (VpnConnectionState.Disconnected or VpnConnectionState.Error))
+            throw new UpdateInstallException("VPN ещё отключается. Повторите обновление после отключения.");
+    }
+
     public async Task PrepareToCloseAsync(TimeSpan timeout)
     {
         try { await ShutdownAsync().WaitAsync(timeout); }

@@ -107,5 +107,5 @@ public static class ReleaseChecker
 public interface IUpdateInstaller
 {
     Task<string> DownloadAsync(AppRelease release, IProgress<int>? progress = null, CancellationToken cancellationToken = default);
-    void Launch(string installerPath);
+    Task LaunchAsync(string installerPath);
 }

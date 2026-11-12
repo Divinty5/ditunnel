@@ -53,12 +53,13 @@ internal sealed class AndroidUpdateInstaller(Context context) : IUpdateInstaller
             .Equals(expected, StringComparison.OrdinalIgnoreCase);
     }
 
-    public void Launch(string installerPath)
+    public Task LaunchAsync(string installerPath)
     {
         var uri = FileProvider.GetUriForFile(context, context.PackageName + ".updates", new Java.IO.File(installerPath));
         var intent = new Intent(Intent.ActionView).SetDataAndType(uri, "application/vnd.android.package-archive")
             .AddFlags(ActivityFlags.NewTask | ActivityFlags.GrantReadUriPermission);
         context.StartActivity(intent);
+        return Task.CompletedTask;
     }
 
     private static string ParseChecksum(string text, string fileName)

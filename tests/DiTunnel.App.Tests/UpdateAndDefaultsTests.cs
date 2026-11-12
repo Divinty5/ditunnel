@@ -115,13 +115,41 @@ public sealed class UpdateAndDefaultsTests
         Assert.False(callback);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WindowClosesOnlyAfterInstallerCompletesSuccessfully(bool success)
+    {
+        var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var installer = new Installer { LaunchResult = launch.Task };
+        var vm = new MainViewModel(null, new EmptyStore());
+        bool closed = false;
+        var update = UpdateFlow.CheckCoreAsync(vm, true, new UserSettings { InstallUpdatesAutomatically = true }, installer,
+            () => Task.FromResult(new ReleaseCheckResult("Update", Release)), (_, _) => throw new InvalidOperationException(), () => closed = true);
+        Assert.False(update.IsCompleted);
+        Assert.False(closed);
+        if (success) launch.SetResult();
+        else launch.SetException(new UpdateInstallException("Ошибка apt"));
+        var status = await update;
+        Assert.Equal(success, closed);
+        Assert.False(vm.IsBusy);
+        if (!success) Assert.Equal("Ошибка apt", status);
+        await vm.ShutdownAsync();
+    }
+
     private sealed class Installer : IUpdateInstaller
     {
         public int Downloads, Launches;
         public bool Fail;
         public Task<string> DownloadAsync(AppRelease release, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
         { Downloads++; return Fail ? Task.FromException<string>(new IOException()) : Task.FromResult("checked-installer.exe"); }
-        public void Launch(string path) { Assert.Equal("checked-installer.exe", path); Launches++; }
+        public Task LaunchAsync(string path)
+        {
+            Assert.Equal("checked-installer.exe", path);
+            Launches++;
+            return LaunchResult;
+        }
+        public Task LaunchResult { get; init; } = Task.CompletedTask;
     }
     private sealed class EmptyStore : IProfileStore
     {

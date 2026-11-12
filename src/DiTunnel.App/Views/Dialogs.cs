@@ -511,7 +511,8 @@ public static class Dialogs
             owner.Content = original;
             completion.TrySetResult(result);
         }
-        if (canInstall) panel.Children.Add(Button("Скачать и установить", () => Complete("install")));
+        if (canInstall) panel.Children.Add(Button(App.Platform.ReleaseTarget == ReleaseTarget.AndroidArm64
+            ? "Скачать и установить" : "Обновить и перезапустить", () => Complete("install")));
         panel.Children.Add(Button("Позже", () => Complete("later")));
         var card = new Border { Margin = new Thickness(16), MaxWidth = 560, Padding = new Thickness(24), Background = Brushes.Black,
             CornerRadius = new CornerRadius(18), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Child = panel };

@@ -51,6 +51,10 @@ russian.CleanupIncomplete=Di-Tunnel: восстановление сети не 
 english.CleanupIncomplete=Di-Tunnel: network cleanup is not complete. Wait for the network host to exit before updating.
 spanish.CleanupIncomplete=Di-Tunnel: la restauración de la red no ha finalizado. Espera a que el módulo de red se cierre antes de actualizar.
 chinesesimplified.CleanupIncomplete=Di-Tunnel：网络恢复尚未完成。请等待网络模块退出后再更新。
+russian.UpdateHandoffFailed=Di-Tunnel: приложение не подтвердило передачу управления установщику. Повторите обновление из настроек.
+english.UpdateHandoffFailed=Di-Tunnel: the app did not hand over to Setup. Try updating again from Settings.
+spanish.UpdateHandoffFailed=Di-Tunnel: la aplicación no transfirió el control al instalador. Reintenta desde Configuración.
+chinesesimplified.UpdateHandoffFailed=Di-Tunnel：应用未将控制权移交给安装程序。请在设置中重试更新。
 russian.ExitBeforeUninstall=Di-Tunnel: выйдите из приложения через трей и дождитесь восстановления сети перед удалением.
 english.ExitBeforeUninstall=Di-Tunnel: exit the application from the tray and wait for network cleanup before uninstalling.
 spanish.ExitBeforeUninstall=Di-Tunnel: cierra la aplicación desde la bandeja del sistema y espera a que se restaure la red antes de desinstalar.
@@ -76,6 +80,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\Di-Tunnel.exe"; Description: "{cm:LaunchProgram,Di-Tunnel}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\Di-Tunnel.exe"; Flags: nowait skipifnotsilent runasoriginaluser; Check: IsAppUpdate
 
 [Code]
 function OpenSetupExecutable(Window: HWND; Verb, Filename, Params, WorkingDir: String;
@@ -118,6 +123,60 @@ begin
     MsgBox(SysErrorMessage(Integer(LaunchResult)), mbError, MB_OK);
 end;
 
+function OpenUpdateEvent(Access: LongWord; Inherit: Longint; Name: String): LongWord;
+  external 'OpenEventW@kernel32.dll stdcall';
+function SignalUpdateEvent(Event: LongWord): Longint;
+  external 'SetEvent@kernel32.dll stdcall';
+function CloseUpdateEvent(Event: LongWord): Longint;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function UpdateId: String;
+var
+  Index: Integer;
+begin
+  Result := ExpandConstant('{param:DITUNNELUPDATE|}');
+  if Length(Result) <> 32 then
+  begin
+    Result := '';
+    Exit;
+  end;
+  for Index := 1 to Length(Result) do
+    if Pos(Result[Index], '0123456789abcdef') = 0 then
+    begin
+      Result := '';
+      Exit;
+    end;
+end;
+
+function IsAppUpdate: Boolean;
+begin
+  Result := WizardSilent and (UpdateId <> '');
+end;
+
+function WaitForAppExit: Boolean;
+var
+  Event: LongWord;
+  Attempt: Integer;
+begin
+  Result := False;
+  Event := OpenUpdateEvent(2, 0, 'Local\DiTunnel.Update.' + UpdateId);
+  if Event = 0 then Exit;
+  try
+    if SignalUpdateEvent(Event) = 0 then Exit;
+  finally
+    CloseUpdateEvent(Event);
+  end;
+  for Attempt := 1 to 150 do
+  begin
+    if not CheckForMutexes('DiTunnel.Desktop') then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Sleep(100);
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -125,10 +184,20 @@ var
   Attempt: Integer;
 begin
   Result := '';
-  { Avoid the Restart Manager confirmation page: the independent network host restores }
-  { routes/WFP after the UI is terminated, and cleanup below also removes stale objects. }
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Di-Tunnel.exe', '', SW_HIDE,
-    ewWaitUntilTerminated, ResultCode);
+  if IsAppUpdate then
+  begin
+    if not WaitForAppExit then
+    begin
+      Result := CustomMessage('UpdateHandoffFailed');
+      Exit;
+    end;
+  end
+  else
+  begin
+    { Manual Setup can close an existing client before cleaning the network. }
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Di-Tunnel.exe', '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode);
+  end;
   { Wait for the independent host's rollback before replacing its files. }
   CleanupPath := '';
   if FileExists(ExpandConstant('{app}\Di-Tunnel.NetworkHost.exe')) then

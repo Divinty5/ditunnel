@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using DiTunnel.App;
 
 namespace DiTunnel.Desktop;
@@ -62,7 +64,31 @@ internal sealed class WindowsUpdateInstaller : IUpdateInstaller
             .Equals(expectedHash, StringComparison.OrdinalIgnoreCase);
     }
 
-    public void Launch(string installerPath) => Process.Start(new ProcessStartInfo(installerPath) { UseShellExecute = true, Verb = "runas" });
+    public async Task LaunchAsync(string installerPath)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var security = new EventWaitHandleSecurity();
+        using var identity = WindowsIdentity.GetCurrent();
+        security.AddAccessRule(new(identity.User!, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            EventWaitHandleRights.Modify, AccessControlType.Allow));
+        using var ready = EventWaitHandleAcl.Create(false, EventResetMode.ManualReset,
+            @"Local\DiTunnel.Update." + id, out _, security);
+        // Inno elevates its own worker and retains the original user for the relaunch.
+        var start = new ProcessStartInfo(installerPath) { UseShellExecute = false,
+            ArgumentList = { "/ALLUSERS", "/VERYSILENT", "/SP-", "/NORESTART", "/RESTARTEXITCODE=3010", "/DITUNNELUPDATE=" + id } };
+        using var process = Process.Start(start) ?? throw new IOException();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        while (!ready.WaitOne(0))
+        {
+            if (process.HasExited)
+                throw new UpdateInstallException(process.ExitCode == 2 ? "Установка обновления отменена."
+                    : $"Установка пакета Windows завершилась ошибкой (код {process.ExitCode}).");
+            try { await Task.Delay(100, timeout.Token); }
+            catch (OperationCanceledException)
+            { throw new UpdateInstallException("Установщик Windows не подтвердил готовность. Повторите обновление."); }
+        }
+    }
 
     internal static string ParseChecksum(string text, string expectedFileName)
     {

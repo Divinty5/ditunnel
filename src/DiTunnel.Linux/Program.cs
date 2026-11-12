@@ -33,12 +33,12 @@ internal static partial class Program
                 LinuxAutostart.SetEnabled(Path.GetDirectoryName(paths.ConfigDirectory)!, args[0] == "--enable-autostart");
                 return 0;
             }
-            if (args.Any(value => value is not ("--autostart" or "--network-session-development"))) throw new ArgumentException();
+            if (args.Any(value => value is not ("--autostart" or "--network-session-development" or "--after-update"))) throw new ArgumentException();
             SharedApp.Platform = AppPlatform.Linux;
             AppPaths.Configure(paths.ConfigDirectory, paths.DataDirectory, paths.StateDirectory);
             // Serialize profile access even when launches use different state
             // directories but share the same XDG_DATA_HOME.
-            using var instance = LinuxInstanceLock.TryAcquire(paths.DataDirectory);
+            using var instance = AcquireInstance(paths.DataDirectory, args.Contains("--after-update"));
             if (instance is null) { Console.Error.WriteLine("Di-Tunnel уже запущен. Откройте существующее окно."); return 0; }
             if (NormalizeProcessRules(UserSettings.Current))
                 try { UserSettings.Current.Save(); } catch { /* Keep the corrected rules in memory if settings are read-only. */ }
@@ -91,6 +91,19 @@ internal static partial class Program
             Console.Error.WriteLine("Не удалось запустить Di-Tunnel для Linux. Проверьте графическую сессию и права на каталоги XDG.");
             return 1;
         }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private static LinuxInstanceLock? AcquireInstance(string directory, bool afterUpdate)
+    {
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        do
+        {
+            if (LinuxInstanceLock.TryAcquire(directory) is { } instance) return instance;
+            if (!afterUpdate) break;
+            Thread.Sleep(100);
+        } while (deadline.Elapsed < TimeSpan.FromSeconds(20));
+        return null;
     }
 
 #pragma warning disable AVALONIA_X11_FORCE_CSD // Avalonia is pinned; forced decorations keep all Linux captions in the application theme.

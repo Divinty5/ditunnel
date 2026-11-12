@@ -23,6 +23,12 @@ internal sealed class LinuxUpdateInstaller : IUpdateInstaller
         var directory = Path.Combine(AppPaths.StateDirectory, "updates", ReleaseChecker.FormatVersion(release.Version));
         Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var path = Path.Combine(directory, name);
+        if (File.Exists(path) && new FileInfo(path).Length is > 0 and <= MaximumBytes &&
+            await MatchesChecksumAsync(path, hash, cancellationToken))
+        {
+            progress?.Report(100);
+            return path;
+        }
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".download";
         try
         {
@@ -45,14 +51,19 @@ internal sealed class LinuxUpdateInstaller : IUpdateInstaller
                     if (length > 0) progress?.Report((int)Math.Clamp(total * 100 / length.Value, 0, 100));
                 }
             }
-            await using (var file = File.OpenRead(temporary))
-                if (!Convert.ToHexString(await SHA256.HashDataAsync(file, cancellationToken)).Equals(hash, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("Контрольная сумма пакета не совпала.");
+            if (!await MatchesChecksumAsync(temporary, hash, cancellationToken))
+                throw new InvalidDataException("Контрольная сумма пакета не совпала.");
             File.Move(temporary, path, overwrite: true);
             progress?.Report(100);
             return path;
         }
         finally { File.Delete(temporary); }
+    }
+
+    private static async Task<bool> MatchesChecksumAsync(string path, string hash, CancellationToken token)
+    {
+        await using var file = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(file, token)).Equals(hash, StringComparison.OrdinalIgnoreCase);
     }
 
     internal static string ParseChecksum(string text, string name)
@@ -65,12 +76,26 @@ internal sealed class LinuxUpdateInstaller : IUpdateInstaller
         return parts[0];
     }
 
-    public void Launch(string installerPath)
+    public async Task LaunchAsync(string installerPath)
     {
         if (!Path.IsPathFullyQualified(installerPath) || !File.Exists(installerPath) || !installerPath.EndsWith("-linux-amd64.deb", StringComparison.Ordinal)) throw new ArgumentException();
-        // apt resolves native dependencies; pkexec uses the desktop's normal admin
-        // prompt. Arguments are passed directly, never through a shell.
-        _ = Process.Start(new ProcessStartInfo("/usr/bin/pkexec") { UseShellExecute = false,
-            ArgumentList = { "/usr/bin/apt-get", "install", "--yes", "--", installerPath } }) ?? throw new IOException();
+        // Keep the UI alive until apt finishes. Starting pkexec does not mean dpkg installed the package.
+        using var process = Process.Start(new ProcessStartInfo("/usr/bin/pkexec")
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+            ArgumentList = { "--disable-internal-agent", "/usr/bin/apt-get", "-o", "Dpkg::Use-Pty=0",
+                "-o", "DPkg::Lock::Timeout=30", "install", "--yes", "--", installerPath }
+        }) ?? throw new IOException();
+        await Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(Stream.Null),
+            process.StandardError.BaseStream.CopyToAsync(Stream.Null), process.WaitForExitAsync()).ConfigureAwait(false);
+        if (process.ExitCode == 126) throw new UpdateInstallException("Установка обновления отменена.");
+        if (process.ExitCode == 127) throw new UpdateInstallException("Linux не подтвердил права для установки. Проверьте системный запрос пароля.");
+        if (process.ExitCode != 0) throw new UpdateInstallException($"Установка пакета Linux завершилась ошибкой apt (код {process.ExitCode}).");
+        try
+        {
+            using var restart = Process.Start(new ProcessStartInfo("/usr/bin/di-tunnel")
+                { UseShellExecute = false, ArgumentList = { "--after-update" } }) ?? throw new IOException();
+        }
+        catch { throw new UpdateInstallException("Пакет установлен. Закройте Di-Tunnel и запустите новую версию."); }
     }
 }
