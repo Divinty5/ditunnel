@@ -15,7 +15,12 @@ AppSupportURL=https://github.com/Divinty5/ditunnel/issues
 DefaultDirName={autopf}\Di-Tunnel
 DefaultGroupName=Di-Tunnel
 DisableProgramGroupPage=yes
-PrivilegesRequired=admin
+; The first pass only chooses a language. The installation always uses /ALLUSERS.
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=commandline
+UsePreviousPrivileges=no
+ShowLanguageDialog=no
+DisableStartupPrompt=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
@@ -52,7 +57,7 @@ spanish.ExitBeforeUninstall=Di-Tunnel: cierra la aplicación desde la bandeja de
 chinesesimplified.ExitBeforeUninstall=Di-Tunnel：请通过系统托盘退出应用，等待网络恢复后再卸载。
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -73,6 +78,46 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\Di-Tunnel.exe"; Description: "{cm:LaunchProgram,Di-Tunnel}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
+function OpenSetupExecutable(Window: HWND; Verb, Filename, Params, WorkingDir: String;
+  ShowCmd: Integer): LongWord;
+  external 'ShellExecuteW@shell32.dll stdcall';
+
+function InitializeSetup: Boolean;
+var
+  Language, Argument, Arguments: String;
+  Index: Integer;
+  LaunchResult: LongWord;
+begin
+  Result := IsAdminInstallMode;
+  if Result then Exit;
+
+  Language := ExpandConstant('{param:LANG|}');
+  if Language = '' then
+  begin
+    if WizardSilent then Exit;
+    Language := ChooseSetupLanguage;
+    if Language = '' then Exit;
+  end;
+  { ActiveLanguage is chosen before Pascal code starts. Pass the chosen language
+    to the elevated installer so all native pages and messages use that locale. }
+  if (Language <> 'russian') and (Language <> 'english') and
+    (Language <> 'spanish') and (Language <> 'chinesesimplified') then Exit;
+  Arguments := '/ALLUSERS /LANG=' + Language;
+  for Index := 1 to ParamCount do
+  begin
+    Argument := ParamStr(Index);
+    if (CompareText(Argument, '/CURRENTUSER') <> 0) and
+      (CompareText(Copy(Argument, 1, 6), '/LANG=') <> 0) then
+      Arguments := Arguments + ' ' + AddQuotes(Argument);
+  end;
+  { Inno's Exec and ShellExec reject the source package before installation.
+    Open it through Windows and let Inno request elevation itself. }
+  LaunchResult := OpenSetupExecutable(0, 'open', ExpandConstant('{srcexe}'),
+    Arguments, ExpandConstant('{src}'), SW_SHOWNORMAL);
+  if LaunchResult <= 32 then
+    MsgBox(SysErrorMessage(Integer(LaunchResult)), mbError, MB_OK);
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
