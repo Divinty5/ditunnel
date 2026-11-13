@@ -54,6 +54,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private int activeProbeFailures;
     private bool healthRecoveryAttempted;
     private int refreshToastGeneration;
+    internal SemaphoreSlim UpdateGate { get; } = new(1, 1);
     [ObservableProperty] private string subscriptionStatus = "";
     [ObservableProperty] private string refreshToast = "";
     [ObservableProperty] private bool isRefreshToastVisible;
@@ -184,7 +185,10 @@ public sealed partial class MainViewModel : ViewModelBase
     private ProbeDiagnostics? SelectedProbeDiagnostics => SelectedProfile is { } server
         && probeSnapshots.TryGetValue(ProfileKey(server.Profile), out var snapshot) ? snapshot.Diagnostics : null;
     private string DiagnosticNotice => IsSubscriptionExhausted ? SubscriptionAccess.ExhaustedMessage + "\n" + Notice : Notice;
-    public string DiagnosticText => SelectedProbeDiagnostics is { } details
+    public string DiagnosticText => ConnectionState != VpnConnectionState.Error &&
+        !Notice.Contains("Метод:", StringComparison.Ordinal) &&
+        !(lastEngineStatus?.Message == Notice && lastEngineStatus.State == VpnConnectionState.Connected && activeDelayMilliseconds is not null) &&
+        SelectedProbeDiagnostics is { } details
         ? $"{DiagnosticNotice}\n\nПоследняя проверка выбранного профиля:\n{details.ToDisplayString()}" : DiagnosticNotice;
     public string DisplayNotice => IsSubscriptionExhausted ? SubscriptionAccess.ExhaustedMessage : Notice.Split('\n', 2)[0];
     partial void OnNoticeChanged(string value)
@@ -440,7 +444,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelectedFlag));
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(SubscriptionLimits));
-        OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay));
+        NotifyConnectionDelay();
         if (statusChanged && status.Message is not null) Notice = status.Message;
         RefreshSubscriptionPresentation();
     }
@@ -1050,8 +1054,15 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(PowerBorderBrush));
         OnPropertyChanged(nameof(PowerGlowBrush));
         OnPropertyChanged(nameof(ConnectionStateBrush));
+        NotifyConnectionDelay();
+    }
+
+    private void NotifyConnectionDelay()
+    {
         OnPropertyChanged(nameof(ConnectionHint));
         OnPropertyChanged(nameof(HasDisplayDelay));
+        OnPropertyChanged(nameof(DelayBrush));
+        OnPropertyChanged(nameof(ConnectionHintBrush));
     }
 
     private static string ProfileKey(ImportedProfile profile) => $"{profile.SourceId}\n{profile.Content}";
@@ -1184,8 +1195,7 @@ public sealed partial class MainViewModel : ViewModelBase
             SetActiveProbeFailures(failed ? Math.Min(2, activeProbeFailures + 1) : 0);
             if (!failed) healthRecoveryAttempted = false;
             OnPropertyChanged(nameof(StatusText));
-            OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay));
-            OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush));
+            NotifyConnectionDelay();
             if (!failed && tunnel is null && engine?.Status is { State: VpnConnectionState.Connected, Message: { } networkMessage })
                 Notice = networkMessage;
             else

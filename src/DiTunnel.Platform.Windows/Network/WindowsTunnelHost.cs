@@ -331,7 +331,7 @@ internal sealed class WindowsTunnelHost : IDisposable
             if (error is System.Runtime.InteropServices.COMException)
                 Emit("ERROR_HRESULT_" + error.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
             if (error is System.ComponentModel.Win32Exception native) Emit("ERROR_NATIVE_" + native.NativeErrorCode);
-            if (error is InvalidOperationException && error.Message.StartsWith("Обнаружены существующие правила DNS", StringComparison.Ordinal)) Emit("ERROR_DNS_POLICY");
+            if (error is ForeignDnsPolicyException) Emit("ERROR_DNS_POLICY");
             Emit("ERROR_TUN");
             ExitCode = 1;
         }

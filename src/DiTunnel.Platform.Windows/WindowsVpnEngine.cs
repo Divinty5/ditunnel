@@ -356,7 +356,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                         + "\n" + connectionReport.ToDisplayString());
                     ready.TrySetResult();
                     break;
-                case "ERROR_DNS_POLICY": error = "Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их."; break;
+                case "ERROR_DNS_POLICY": error = new ForeignDnsPolicyException().Message; break;
+                case "ERROR_DNS_CLEANUP_PENDING": error = "Windows ещё применяет удаление DNS-правила Di-Tunnel. Повторите подключение через несколько секунд."; break;
                 case "ERROR_VPN_TAKEOVER": error = "Другой VPN блокирует прямой маршрут к серверу. Отключите в нём kill switch или режим блокировки соединений вне VPN."; break;
                 case "ERROR_NETWORK_ACCESS_DENIED": error = "Windows блокирует трафик через Di-Tunnel (код 10013). Проверьте kill switch другого VPN и правила сетевой защиты. Подключение отменено; маршруты будут восстановлены."; break;
                 case "ERROR_PROBE_ROUTE": error = "Контрольный маршрут проходит вне Di-Tunnel. Подключение отменено; маршруты будут восстановлены."; break;

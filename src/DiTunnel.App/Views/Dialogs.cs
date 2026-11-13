@@ -442,10 +442,10 @@ public static class Dialogs
             BeginSection("Обновления");
             var automaticUpdates = new CheckBox { Content = L.T("Автоматически скачивать и устанавливать обновления"), IsChecked = UserSettings.Current.InstallUpdatesAutomatically };
             automaticUpdates.IsCheckedChanged += (_, _) => { UserSettings.Current.InstallUpdatesAutomatically = automaticUpdates.IsChecked == true; Save(); };
-            var updates = Button("Проверить обновления", async () =>
+            var updates = AsyncButton("Проверить обновления", async () =>
             {
                 status.Text = L.T("Проверяем обновления…");
-                status.Text = L.T(owner is MainWindow window
+                status.Text = L.T(TopLevel.GetTopLevel(owner) is MainWindow window
                     ? await window.CheckForUpdatesAsync(true)
                     : await UpdateFlow.CheckAsync(owner, vm, true));
             });

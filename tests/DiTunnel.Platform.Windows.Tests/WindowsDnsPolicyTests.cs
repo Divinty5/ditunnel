@@ -81,8 +81,7 @@ public sealed class WindowsDnsPolicyTests
         var provider = new PolicyProvider();
         (effective ? provider.Effective : provider.Local).Add(rule);
 
-        var error = Assert.Throws<InvalidOperationException>(() => WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush));
-        Assert.StartsWith("Обнаружены существующие правила DNS", error.Message);
+        Assert.Throws<ForeignDnsPolicyException>(() => WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush));
         Assert.Empty(provider.Removed);
         Assert.Contains(rule, effective ? provider.Effective : provider.Local);
         Assert.Equal(0, provider.AddCount);
@@ -93,7 +92,7 @@ public sealed class WindowsDnsPolicyTests
     {
         var provider = new PolicyProvider();
         provider.Local.Add(Row("foreign", "", new[] { ".corp.example", "." }, ["192.0.2.53"]));
-        Assert.Throws<InvalidOperationException>(() => WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush));
+        Assert.Throws<ForeignDnsPolicyException>(() => WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush));
         Assert.Empty(provider.Removed);
     }
 
@@ -111,13 +110,35 @@ public sealed class WindowsDnsPolicyTests
     }
 
     [Fact]
+    public void CleanupWaitsForRemovedOwnedDefaultToDisappearFromEffectivePolicy()
+    {
+        var provider = new PolicyProvider { DelayedRemovalReads = 1 };
+        provider.Local.Add(Row("ditunnel", WindowsDnsPolicy.Comment, new[] { "." }, ["1.1.1.1"]));
+        provider.Effective.Add(Row(null, null, ".", ["1.1.1.1"]));
+
+        WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush);
+
+        Assert.Empty(provider.Effective);
+        Assert.Equal(new[] { "ditunnel" }, provider.Removed);
+    }
+
+    [Fact]
+    public void EffectiveOnlyDefaultWithSameServersIsNotRemoved()
+    {
+        var provider = new PolicyProvider();
+        provider.Effective.Add(Row(null, null, ".", ["1.1.1.1"]));
+        Assert.Throws<ForeignDnsPolicyException>(() => WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush));
+        Assert.Empty(provider.Removed);
+    }
+
+    [Fact]
     public void NewForeignDefaultBetweenPrecheckAndInstallIsRefused()
     {
         var provider = new PolicyProvider();
         WindowsDnsPolicy.Precheck(provider.Invoke, provider.Flush);
         provider.Local.Add(Row("another-vpn", "", new[] { "." }, ["192.0.2.53"]));
 
-        Assert.Throws<InvalidOperationException>(() => WindowsDnsPolicy.Install(["1.1.1.1"], provider.Invoke));
+        Assert.Throws<ForeignDnsPolicyException>(() => WindowsDnsPolicy.Install(["1.1.1.1"], provider.Invoke));
         Assert.Equal(0, provider.AddCount);
         Assert.Empty(provider.Removed);
     }
@@ -211,6 +232,8 @@ public sealed class WindowsDnsPolicyTests
         public List<string> Removed { get; } = [];
         public bool ApplyDefault { get; init; } = true;
         public bool WrongServers { get; init; }
+        public int DelayedRemovalReads { get; init; }
+        private int? removalReads;
         public int AddCount { get; private set; }
         public int FlushCount { get; private set; }
         public void Flush() => FlushCount++;
@@ -221,6 +244,12 @@ public sealed class WindowsDnsPolicyTests
             {
                 Assert.Equal("Get", method);
                 Assert.Equal(true, values!["Effective"]);
+                if (removalReads == 0)
+                {
+                    Effective.RemoveAll(row => Equals(row.Properties_.Item("Namespace")?.Value, "."));
+                    removalReads = null;
+                }
+                else if (removalReads.HasValue) removalReads--;
                 return new(Effective.Cast<object>().ToArray());
             }
             Assert.Equal("PS_DnsClientNrptRule", className);
@@ -232,7 +261,7 @@ public sealed class WindowsDnsPolicyTests
                 var removed = Local.Single(row => Equals(row.Properties_.Item("Name")?.Value, name));
                 Local.Remove(removed);
                 if (Equals(removed.Properties_.Item("Comment")?.Value, WindowsDnsPolicy.Comment))
-                    Effective.RemoveAll(row => Equals(row.Properties_.Item("Namespace")?.Value, "."));
+                    removalReads = DelayedRemovalReads;
                 return new([]);
             }
             Assert.Equal("Add", method);

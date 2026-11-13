@@ -419,7 +419,7 @@ public sealed class TunnelHostTests
         public void PrecheckDns()
         {
             if (PrecheckException is not null) throw PrecheckException;
-            if (FailingStage == "PRECHECK") throw new InvalidOperationException("Обнаружены существующие правила DNS.");
+            if (FailingStage == "PRECHECK") throw new ForeignDnsPolicyException();
         }
         public PhysicalUplink FindUplink() => Uplink;
         public Task<IAsyncDisposable> AcquireServerRouteAsync(IPAddress address, PhysicalUplink uplink, CancellationToken token)

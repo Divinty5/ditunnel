@@ -8,12 +8,15 @@ internal sealed class DnsPolicyException(string code) : InvalidOperationExceptio
     internal string Code { get; } = code;
 }
 
+internal sealed class ForeignDnsPolicyException() : InvalidOperationException(
+    "Действует стороннее правило DNS Windows для всех доменов. Отключите это правило в приложении, которое его создало, или обратитесь к администратору.");
+
 /// <summary>Calls the same Windows DNS CIM provider as DnsClient cmdlets, without PowerShell.</summary>
 internal static class WindowsDnsPolicy
 {
     internal sealed record MethodResult(IReadOnlyList<object> Items);
     internal delegate MethodResult InvokeMethod(string className, string method, IReadOnlyDictionary<string, object>? values = null);
-    private sealed record Rule(string Name, string Comment, string[] Namespaces);
+    private sealed record Rule(string Name, string Comment, string[] Namespaces, string[] Servers);
     internal const string Comment = "DiTunnel managed DNS v1";
     private const string RuleClass = "PS_DnsClientNrptRule";
 
@@ -62,7 +65,8 @@ internal static class WindowsDnsPolicy
         var result = new List<Rule>();
         foreach (dynamic rule in output.Items)
             result.Add(new(Convert.ToString(Property(rule, "Name"))!,
-                Convert.ToString(Property(rule, "Comment")) ?? "", Strings(Property(rule, "Namespace"))));
+                Convert.ToString(Property(rule, "Comment")) ?? "", Strings(Property(rule, "Namespace")),
+                Strings(Property(rule, "NameServers"))));
         return result;
     }
 
@@ -70,10 +74,30 @@ internal static class WindowsDnsPolicy
 
     internal static void CleanupOwned(InvokeMethod invoke, Action flush)
     {
-        foreach (var rule in Rules(invoke).Where(r => r.Comment == Comment))
+        var owned = Rules(invoke).Where(r => r.Comment == Comment).ToArray();
+        foreach (var rule in owned)
             invoke(RuleClass, "Remove", new Dictionary<string, object> { ["Name"] = rule.Name, ["Force"] = true });
         flush();
+        var removedDefaults = owned.Where(rule => ConflictsWithDefault(rule.Namespaces) && rule.Servers.Length > 0).ToArray();
+        if (removedDefaults.Length == 0) return;
+        // The effective policy can briefly retain a rule after the local store removes it.
+        // Wait for propagation without treating a matching effective rule as proof of ownership.
+        var wait = System.Diagnostics.Stopwatch.StartNew();
+        while (HasRemovedDefault(invoke, removedDefaults))
+        {
+            if (Rules(invoke).Any(rule => rule.Comment != Comment && ConflictsWithDefault(rule.Namespaces))) return;
+            if (wait.Elapsed >= TimeSpan.FromSeconds(2)) throw new DnsPolicyException("CLEANUP_PENDING");
+            Thread.Sleep(100);
+        }
     }
+
+    private static bool HasRemovedDefault(InvokeMethod invoke, Rule[] removed) =>
+        EffectivePolicy(invoke).Any(row =>
+        {
+            var namespaces = Strings(Property(row, "Namespace"));
+            var servers = Strings(Property(row, "NameServers")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return removed.Any(rule => namespaces.SequenceEqual(rule.Namespaces, StringComparer.OrdinalIgnoreCase) && servers.SetEquals(rule.Servers));
+        });
 
     internal static void Precheck() => Precheck(Invoke, Flush);
 
@@ -81,7 +105,7 @@ internal static class WindowsDnsPolicy
     {
         CleanupOwned(invoke, flush);
         if (HasConflictingPolicy(invoke))
-            throw new InvalidOperationException("Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их.");
+            throw new ForeignDnsPolicyException();
     }
 
     // More specific host/suffix rules take precedence over our default namespace (".").
@@ -94,10 +118,12 @@ internal static class WindowsDnsPolicy
 
     private static bool HasConflictingPolicy(InvokeMethod invoke)
     {
-        var output = invoke("PS_DnsClientNrptPolicy", "Get", new Dictionary<string, object> { ["Effective"] = true });
         return Rules(invoke).Any(r => r.Comment != Comment && ConflictsWithDefault(r.Namespaces)) ||
-            output.Items.Any(row => ConflictsWithDefault(Strings(Property(row, "Namespace"))));
+            EffectivePolicy(invoke).Any(row => ConflictsWithDefault(Strings(Property(row, "Namespace"))));
     }
+
+    private static IReadOnlyList<object> EffectivePolicy(InvokeMethod invoke) =>
+        invoke("PS_DnsClientNrptPolicy", "Get", new Dictionary<string, object> { ["Effective"] = true }).Items;
 
     internal static bool Install(string[] servers, Action? installInterface = null) => Install(servers, Invoke, Flush, installInterface);
 
@@ -105,7 +131,7 @@ internal static class WindowsDnsPolicy
     {
         // Recheck immediately before the mutation in case another VPN installed a default rule.
         if (HasConflictingPolicy(invoke))
-            throw new InvalidOperationException("Обнаружены существующие правила DNS. Подключение отменено, чтобы не изменять их.");
+            throw new ForeignDnsPolicyException();
         invoke(RuleClass, "Add", new Dictionary<string, object>
         {
             ["Namespace"] = new[] { "." }, ["NameServers"] = servers, ["Comment"] = Comment,
@@ -114,8 +140,8 @@ internal static class WindowsDnsPolicy
         flush?.Invoke();
         // A local rule may be ignored by domain Group Policy, including an empty policy store.
         // The fallback configures only our newly created tunnel adapter, never a policy store.
-        var effective = invoke("PS_DnsClientNrptPolicy", "Get", new Dictionary<string, object> { ["Effective"] = true });
-        var defaults = effective.Items.Where(row => Strings(Property(row, "Namespace")).Contains(".")).ToArray();
+        var effective = EffectivePolicy(invoke);
+        var defaults = effective.Where(row => Strings(Property(row, "Namespace")).Contains(".")).ToArray();
         var rules = Rules(invoke);
         if (!rules.Any(r => r.Comment == Comment && r.Namespaces.SequenceEqual(new[] { "." })))
             throw new DnsPolicyException("LOCAL_MISSING");
@@ -123,7 +149,7 @@ internal static class WindowsDnsPolicy
             throw new DnsPolicyException("DEFAULT_CONFLICT");
         if (defaults.Length == 0)
         {
-            if (installInterface is null || effective.Items.Any(row => ConflictsWithDefault(Strings(Property(row, "Namespace")))))
+            if (installInterface is null || effective.Any(row => ConflictsWithDefault(Strings(Property(row, "Namespace")))))
                 throw new DnsPolicyException("EFFECTIVE_MISSING");
             CleanupOwned(invoke, flush ?? (() => { }));
             installInterface(); // Must verify the adapter's DNS settings before returning.

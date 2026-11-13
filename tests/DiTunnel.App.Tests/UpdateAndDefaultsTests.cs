@@ -115,6 +115,25 @@ public sealed class UpdateAndDefaultsTests
         Assert.False(callback);
     }
 
+    [Fact]
+    public async Task ManualCheckDoesNotDuplicateAnAutomaticDownload()
+    {
+        var download = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var installer = new Installer { DownloadResult = download.Task };
+        var vm = new MainViewModel(null, new EmptyStore());
+        var settings = new UserSettings { InstallUpdatesAutomatically = true };
+        Task<ReleaseCheckResult> Check() => Task.FromResult(new ReleaseCheckResult("Update", Release));
+        Task<string?> Prompt(AppRelease _, bool __) => throw new InvalidOperationException();
+        var automatic = UpdateFlow.CheckCoreAsync(vm, false, settings, installer, Check, Prompt);
+        Assert.Equal("Проверка или установка обновления уже выполняется.",
+            await UpdateFlow.CheckCoreAsync(vm, true, settings, installer, Check, Prompt));
+        download.SetResult("checked-installer.exe");
+        await automatic;
+        Assert.Equal(1, installer.Downloads);
+        Assert.Equal(1, installer.Launches);
+        await vm.ShutdownAsync();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -142,7 +161,7 @@ public sealed class UpdateAndDefaultsTests
         public int Downloads, Launches;
         public bool Fail;
         public Task<string> DownloadAsync(AppRelease release, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
-        { Downloads++; return Fail ? Task.FromException<string>(new IOException()) : Task.FromResult("checked-installer.exe"); }
+        { Downloads++; return Fail ? Task.FromException<string>(new IOException()) : DownloadResult; }
         public Task LaunchAsync(string path)
         {
             Assert.Equal("checked-installer.exe", path);
@@ -150,6 +169,7 @@ public sealed class UpdateAndDefaultsTests
             return LaunchResult;
         }
         public Task LaunchResult { get; init; } = Task.CompletedTask;
+        public Task<string> DownloadResult { get; init; } = Task.FromResult("checked-installer.exe");
     }
     private sealed class EmptyStore : IProfileStore
     {

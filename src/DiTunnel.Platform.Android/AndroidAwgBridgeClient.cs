@@ -110,7 +110,17 @@ internal sealed class AndroidAwgBridgeClient : IDisposable
                 owner.HandshakeMilliseconds = data.GetDouble("delay");
                 owner.started.TrySetResult(data.GetInt("port"));
             }
-            else if (message.What == ErrorMessage) owner.started.TrySetException(new InvalidOperationException(data.GetString("error") ?? "Не удалось запустить служебный процесс AmneziaWG."));
+            else if (message.What == ErrorMessage)
+            {
+                var phase = data.GetString("stage") switch
+                {
+                    nameof(VpnStartupStage.AwgTransport) => "Транспорт AWG",
+                    nameof(VpnStartupStage.AwgHandshake) => "Handshake AWG",
+                    _ => "AmneziaWG"
+                };
+                owner.started.TrySetException(new AndroidProbeException(phase, data.GetString("errorType") ?? "Runtime",
+                    data.GetString("error") ?? "Не удалось запустить служебный процесс AmneziaWG."));
+            }
         }
     }
 }

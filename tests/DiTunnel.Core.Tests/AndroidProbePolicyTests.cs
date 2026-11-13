@@ -35,7 +35,7 @@ public sealed class AndroidProbePolicyTests
     {
         var result = await AndroidProbePolicy.CheckHttpsAsync((target, _) => Task.FromException(
             target == AndroidProbePolicy.Primary ? new AuthenticationException("synthetic") : new TimeoutException()), CancellationToken.None);
-        Assert.Equal("Ошибка TLS. HTTPS не проверен", result.Message);
+        Assert.Equal("Ошибка TLS", result.Message);
         Assert.Equal("Tls", result.Diagnostics!.ErrorType);
         Assert.True(result.Message.Length <= 45);
     }
@@ -110,11 +110,23 @@ public sealed class AndroidProbePolicyTests
         Assert.Null(result.Milliseconds);
         Assert.False(result.Diagnostics!.ProfileConfirmed);
         Assert.Equal("Timeout", result.Diagnostics.ErrorType);
-        Assert.Contains("HTTPS не проверен", result.Message);
+        Assert.Equal("HTTPS · Тайм-аут", result.Message);
         Assert.DoesNotContain("истек", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("недоступен", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Туннель запущен", AndroidProbePolicy.TunnelMessage(result));
         Assert.Equal(2, result.Diagnostics.Attempts.Split('\n').Length);
+    }
+
+    [Fact]
+    public void FailureKeepsItsOwnStageAndCannotReuseSuccessfulDiagnostics()
+    {
+        var earlier = ProbePolicy.Success(389, "HTTPS", "HTTPS", true).Diagnostics;
+        var failure = new ProbeFailureException("Handshake AWG", "Timeout") { Diagnostics = earlier };
+        var result = ProbePolicy.Failure(failure, "AmneziaWG", "HTTPS", 18000);
+        Assert.Equal("Handshake AWG · Тайм-аут", result.Message);
+        Assert.Equal("Handshake AWG", result.Diagnostics!.Stage);
+        Assert.Equal("Timeout", result.Diagnostics.ErrorType);
+        Assert.False(result.Diagnostics.ProfileConfirmed);
     }
 
     [Fact]

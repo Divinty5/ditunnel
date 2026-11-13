@@ -47,6 +47,11 @@ internal static class Program
             WindowsCaptionSmoke.Run();
             return;
         }
+        if (OperatingSystem.IsWindows() && args is ["--windows-update-handoff"])
+        {
+            VerifyManualUpdateHandoff();
+            return;
+        }
         if (OperatingSystem.IsLinux() && args is ["--linux-desktop", var desktopOutput])
         {
             VerifyLinuxDesktop(Path.GetFullPath(desktopOutput));
@@ -172,6 +177,64 @@ internal static class Program
         Require(ReferenceEquals(window.Icon, red), "Disposal unsubscribes state changes");
         window.Close();
         Console.WriteLine(OperatingSystem.IsLinux() ? "PASS_NATIVE_X11_VPN_ICON_COLOURS_CACHE_DISPOSAL" : "PASS_NATIVE_WINDOWS_VPN_ICON_COLOURS_CACHE_DISPOSAL");
+    }
+
+    private static void VerifyManualUpdateHandoff()
+    {
+        var previousCheck = UpdateFlow.CheckRelease;
+        var previousInstaller = App.UpdateInstaller;
+        var installer = new UpdateHandoffInstaller();
+        var model = new MainViewModel(null, new EmptyStore());
+        var window = new MainWindow(enableShellHook: false) { DataContext = model, ShowInTaskbar = false };
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            App.UpdateInstaller = null;
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var host = ((ApplicationShell)window.Content!).NavigationHost;
+            Dialogs.Settings(host, model).GetAwaiter().GetResult();
+            Dispatcher.UIThread.RunJobs();
+            var section = host.GetVisualDescendants().OfType<Expander>()
+                .Single(item => item.Header is TextBlock title && title.Text == L.T("Обновления"));
+            section.IsExpanded = true;
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            var button = section.GetVisualDescendants().OfType<Button>()
+                .Single(item => Equals(item.Content, L.T("Проверить обновления")));
+
+            UserSettings.Current.InstallUpdatesAutomatically = true;
+            App.UpdateInstaller = installer;
+            var release = new AppRelease(new Version(99, 0, 0), "https://example.invalid/release",
+                "https://example.invalid/setup.exe", "https://example.invalid/setup.exe.sha256");
+            UpdateFlow.CheckRelease = () => Task.FromResult(new ReleaseCheckResult("Update", release));
+            var closed = false;
+            window.Closed += (_, _) => { closed = true; deadline.Cancel(); };
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Require(installer.Launched && window.IsVisible, "Manual update waits for the installer before closing the window");
+            installer.Ready.SetResult();
+            if (!closed) Dispatcher.UIThread.MainLoop(deadline.Token);
+            Require(closed, "Manual update from the navigation host closes the desktop window after handoff");
+        }
+        finally
+        {
+            App.UpdateInstaller = previousInstaller;
+            UpdateFlow.CheckRelease = previousCheck;
+        }
+        Console.WriteLine("PASS_MANUAL_WINDOWS_UPDATE_CLOSES_DESKTOP_AFTER_HANDOFF");
+    }
+
+    private sealed class UpdateHandoffInstaller : IUpdateInstaller
+    {
+        public TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Launched { get; private set; }
+        public Task<string> DownloadAsync(AppRelease release, IProgress<int>? progress = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult("fixture.exe");
+        public Task LaunchAsync(string installerPath)
+        {
+            Launched = true;
+            return Ready.Task;
+        }
     }
 
     private static void VerifySettingsPresentation(Window window, string output)

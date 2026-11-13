@@ -55,6 +55,10 @@ russian.UpdateHandoffFailed=Di-Tunnel: приложение не подтвер�
 english.UpdateHandoffFailed=Di-Tunnel: the app did not hand over to Setup. Try updating again from Settings.
 spanish.UpdateHandoffFailed=Di-Tunnel: la aplicación no transfirió el control al instalador. Reintenta desde Configuración.
 chinesesimplified.UpdateHandoffFailed=Di-Tunnel：应用未将控制权移交给安装程序。请在设置中重试更新。
+russian.ExitBeforeInstall=Di-Tunnel: выйдите из приложения через трей, затем продолжите установку.
+english.ExitBeforeInstall=Di-Tunnel: exit the app from the notification area, then continue setup.
+spanish.ExitBeforeInstall=Di-Tunnel: sal de la aplicación desde la bandeja del sistema y continúa con la instalación.
+chinesesimplified.ExitBeforeInstall=Di-Tunnel：请通过系统托盘退出应用，然后继续安装。
 russian.ExitBeforeUninstall=Di-Tunnel: выйдите из приложения через трей и дождитесь восстановления сети перед удалением.
 english.ExitBeforeUninstall=Di-Tunnel: exit the application from the tray and wait for network cleanup before uninstalling.
 spanish.ExitBeforeUninstall=Di-Tunnel: cierra la aplicación desde la bandeja del sistema y espera a que se restaure la red antes de desinstalar.
@@ -160,9 +164,17 @@ var
 begin
   Result := False;
   Event := OpenUpdateEvent(2, 0, 'Local\DiTunnel.Update.' + UpdateId);
-  if Event = 0 then Exit;
+  if Event = 0 then
+  begin
+    Log('Update handoff: the application event could not be opened.');
+    Exit;
+  end;
   try
-    if SignalUpdateEvent(Event) = 0 then Exit;
+    if SignalUpdateEvent(Event) = 0 then
+    begin
+      Log('Update handoff: the application event could not be signaled.');
+      Exit;
+    end;
   finally
     CloseUpdateEvent(Event);
   end;
@@ -175,6 +187,7 @@ begin
     end;
     Sleep(100);
   end;
+  Log('Update handoff: timed out waiting for the application to exit.');
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -194,9 +207,12 @@ begin
   end
   else
   begin
-    { Manual Setup can close an existing client before cleaning the network. }
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Di-Tunnel.exe', '', SW_HIDE,
-      ewWaitUntilTerminated, ResultCode);
+    { Leave the running client and its network host in control of shutdown. }
+    if CheckForMutexes('DiTunnel.Desktop') then
+    begin
+      Result := CustomMessage('ExitBeforeInstall');
+      Exit;
+    end;
   end;
   { Wait for the independent host's rollback before replacing its files. }
   CleanupPath := '';

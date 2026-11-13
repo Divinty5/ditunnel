@@ -8,7 +8,7 @@ using DiTunnel.Core.Connection;
 
 namespace DiTunnel.Core.Connection;
 
-public class ProbeFailureException(string stage, string errorType) : InvalidOperationException(ProbePolicy.ShortFailure(errorType, "HTTPS"))
+public class ProbeFailureException(string stage, string errorType, string? message = null) : InvalidOperationException(message ?? ProbePolicy.ShortFailure(errorType, stage))
 {
     public ProbeDiagnostics? Diagnostics { get; init; }
     public string Stage { get; } = stage;
@@ -35,13 +35,12 @@ public static class ProbePolicy
         if (stage == "HTTPS" && kind is "Tls" or "Dns") stage = kind == "Tls" ? "TLS" : "DNS контрольного адреса";
         if (error is ProbeFailureException known) { stage = known.Stage; kind = known.ErrorType; }
         if (stage is "Профиль" or "Profile" && error is InvalidOperationException) kind = "Configuration";
-        return new(null, ShortFailure(kind, method),
-            Diagnostics: error is ProbeFailureException { Diagnostics: { } details }
-                ? details with { DurationMilliseconds = milliseconds, Platform = platform, ClientVersion = VersionFor(platform) }
-                : new(method, stage, kind, milliseconds, false, VersionFor(platform), Platform: platform));
+        var attempts = (error as ProbeFailureException)?.Diagnostics?.Attempts ?? "";
+        return new(null, ShortFailure(kind, stage),
+            Diagnostics: new(method, stage, kind, milliseconds, false, VersionFor(platform), attempts, platform));
     }
 
-    public static string ShortFailure(string kind, string method)
+    public static string ShortFailure(string kind, string stage)
     {
         var reason = kind switch
         {
@@ -51,10 +50,23 @@ public static class ProbePolicy
             "Connection" => "Ошибка соединения",
             "ControlService" => "Ошибка контрольного сайта",
             "Configuration" => "Ошибка конфигурации",
-            "Runtime" => "Ошибка запуска Xray",
+            "Runtime" => "Ошибка запуска",
             _ => "Ошибка проверки"
         };
-        return method == "HTTPS" ? $"{reason}. HTTPS не проверен" : reason;
+        var label = stage switch
+        {
+            "DNS сервера" => "DNS сервера",
+            "DNS контрольного адреса" => "DNS теста",
+            "Подключение к серверу" => "Соединение",
+            "Профиль" => "Профиль",
+            "Служба проверки" => "Служба проверки",
+            "Транспорт AWG" => "Транспорт AWG",
+            "AmneziaWG" => "AmneziaWG",
+            "Handshake AWG" => "Handshake AWG",
+            "HTTPS" or "HTTP" or "TLS" or "TUN" or "Xray" => stage,
+            _ => ""
+        };
+        return label.Length == 0 || reason.Contains(label, StringComparison.OrdinalIgnoreCase) ? reason : $"{label} · {reason}";
     }
 
     public static string Classify(Exception error)

@@ -178,9 +178,10 @@ public partial class MainWindow : Window
         if (DataContext is not MainViewModel vm) return "Автообновление недоступно на этой платформе.";
         return await UpdateFlow.CheckAsync(pageHost, vm, manual, () =>
         {
+            canClose = true;
             SavePlacement();
-            canClose = true; Close();
             if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
+            else Close();
         });
     }
 }

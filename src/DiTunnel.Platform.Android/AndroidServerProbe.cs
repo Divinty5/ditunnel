@@ -95,7 +95,7 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
     private async Task<ServerProbeResult> ProbeAmneziaWgAsync(ImportedProfile profile, ServerProbeMode mode, CancellationToken cancellationToken)
     {
         var watch = Stopwatch.StartNew();
-        var stage = "AmneziaWG";
+        var stage = "Профиль";
         if (AndroidVpnRuntimeState.ReadActiveProfile(context)?.Content != profile.Content)
         {
             using var permission = global::Android.Net.VpnService.Prepare(context);
@@ -119,6 +119,7 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
                 using var bridge = new AndroidAwgBridgeClient(context, configuration, address, _ => { }, probe: true);
                 await bridge.StartAsync(timeout.Token);
                 // An authenticated handshake alone does not verify HTTPS/data forwarding.
+                stage = "HTTPS";
                 var result = await bridge.ProbeHttpsAsync(timeout.Token);
                 return result with { Diagnostics = result.Diagnostics! with { DurationMilliseconds = watch.Elapsed.TotalMilliseconds } };
             }

@@ -2,6 +2,7 @@ using Android.App;
 using Android.Content;
 using Android.OS;
 using Android.Runtime;
+using DiTunnel.Core.Connection;
 
 namespace DiTunnel.Platform.Android;
 
@@ -84,11 +85,14 @@ public class DiTunnelAwgService : global::Android.Net.VpnService
         {
             var message = error is InvalidOperationException or FormatException or NotSupportedException or TimeoutException
                 ? error.Message : "Не удалось запустить служебный процесс AmneziaWG.";
-            Send(reply, AndroidAwgBridgeClient.ErrorMessage, error: $"{message} ({stage}; {error.GetType().Name})");
+            var kind = ProbePolicy.Classify(error);
+            if (kind == "Internal" && stage is VpnStartupStage.AwgTransport or VpnStartupStage.AwgRuntime)
+                kind = stage == VpnStartupStage.AwgTransport ? "Connection" : "Runtime";
+            Send(reply, AndroidAwgBridgeClient.ErrorMessage, stage: stage, error: $"{message} ({stage}; {error.GetType().Name})", errorType: kind);
         }
         finally { data.Dispose(); reply.Dispose(); }
     }
-    private static void Send(Messenger reply, int code, VpnStartupStage? stage = null, int port = 0, string? error = null, double delay = 0)
+    private static void Send(Messenger reply, int code, VpnStartupStage? stage = null, int port = 0, string? error = null, double delay = 0, string? errorType = null)
     {
         try
         {
@@ -98,6 +102,7 @@ public class DiTunnelAwgService : global::Android.Net.VpnService
             if (port > 0) data.PutInt("port", port);
             data.PutDouble("delay", delay);
             if (error is not null) data.PutString("error", error);
+            if (errorType is not null) data.PutString("errorType", errorType);
             message.Data = data;
             reply.Send(message);
         }

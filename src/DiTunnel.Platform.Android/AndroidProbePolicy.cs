@@ -1,6 +1,6 @@
 using DiTunnel.Core.Connection;
 namespace DiTunnel.Platform.Android;
-internal sealed class AndroidProbeException(string stage, string errorType) : ProbeFailureException(stage, errorType);
+internal sealed class AndroidProbeException(string stage, string errorType, string? message = null) : ProbeFailureException(stage, errorType, message);
 internal static class AndroidProbePolicy
 {
     internal static Uri Primary => ProbePolicy.Primary;
