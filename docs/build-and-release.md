@@ -1,6 +1,6 @@
 # Сборка и публикация
 
-Последний релиз Windows — 0.6.11. Android и Linux выпускаются отдельно и сейчас имеют версию 0.6.10. Версии платформ задаются в `Directory.Build.props`, Android versionCode 60010 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
+Последний публичный релиз Windows и Android — 0.6.12, Linux — 0.6.10. Версии в исходниках задаются в `Directory.Build.props`, Android versionCode 60012 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
 
 ## Windows
 
@@ -10,7 +10,7 @@
 ./scripts/Build-WindowsInstaller.ps1
 ```
 
-`-CompilerPath` задаёт путь ISCC.exe. Скрипт создаёт `artifacts/installer/Di-Tunnel-0.6.11-Setup-x64.exe` и `.exe.sha256`. Оформление и выбор языка определяются файлами `.iss` в `installer/`. Установщик выпускается без подписи Authenticode.
+`-CompilerPath` задаёт путь ISCC.exe. Скрипт создаёт `artifacts/installer/Di-Tunnel-0.6.12-Setup-x64.exe` и `.exe.sha256`. Оформление и выбор языка определяются файлами `.iss` в `installer/`. Установщик выпускается без подписи Authenticode.
 
 ## Android
 
@@ -18,7 +18,7 @@
 
 Для воспроизведения APK 0.6.10 файлы `geoip.dat` и `geosite.dat` берутся из Windows-архива Xray 26.3.27 и читаются из `.tools/xray/26.3.27/windows-x64/`. SHA-256 архива закреплён в манифесте общего релиза. [Манифест 0.6.10](https://github.com/Divinty5/ditunnel/blob/v0.6.10/eng/xray-version.json).
 
-Release APK подписывается существующим ключом вне Git. Пароли передаются apksigner через файлы. Проверяются сертификат, application ID, 0.6.10/60010, minSdk 27, единственная ABI arm64-v8a, native-библиотеки и `zipalign -c -P 16`. Workflow создаёт `artifacts/android/0.6.10/Di-Tunnel-0.6.10-arm64.apk` и `.apk.sha256`. ADB не требуется.
+Release APK подписывается существующим ключом вне Git. Пароли передаются apksigner через файлы. Проверяются сертификат, application ID, 0.6.12/60012, minSdk 27, единственная ABI arm64-v8a, native-библиотеки и `zipalign -c -P 16`. Workflow создаёт `artifacts/android/0.6.12/Di-Tunnel-0.6.12-arm64.apk` и `.apk.sha256`. ADB не требуется.
 
 ## Linux
 
