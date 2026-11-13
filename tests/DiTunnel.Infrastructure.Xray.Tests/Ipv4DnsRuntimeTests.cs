@@ -71,9 +71,8 @@ public sealed class Ipv4DnsRuntimeTests
                 var query = new List<byte> { 0x12, (byte)type, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
                 foreach (var label in "example.test".Split('.')) { query.Add((byte)label.Length); query.AddRange(Encoding.ASCII.GetBytes(label)); }
                 query.AddRange([0, 0, (byte)type, 0, 1]);
-                // Process startup does not prove UDP listener readiness. UDP silently
-                // drops a datagram sent before bind; retry the query under the original
-                // test deadline instead of losing the only request on a loaded builder.
+                // A query before bind can be dropped or produce an ICMP reset on Windows.
+                // Retry under the original deadline while the core is still starting.
                 while (true)
                 {
                     Assert.True(manager.IsRunning);
@@ -83,6 +82,8 @@ public sealed class Ipv4DnsRuntimeTests
                     await client.SendAsync(query.ToArray(), new IPEndPoint(IPAddress.Loopback, port), timeout.Token);
                     try { return (await client.ReceiveAsync(attempt.Token)).Buffer; }
                     catch (OperationCanceledException) when (!timeout.IsCancellationRequested) { }
+                    catch (SocketException error) when (error.SocketErrorCode == SocketError.ConnectionReset && !timeout.IsCancellationRequested)
+                    { await Task.Delay(25, timeout.Token); }
                 }
             }
             var a = await Query(1);
