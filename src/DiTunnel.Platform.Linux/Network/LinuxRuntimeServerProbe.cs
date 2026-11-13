@@ -39,7 +39,9 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
             var awg = isAwg ? AmneziaWgProfileConverter.Convert(profile) : null;
             var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
             stage = "DNS сервера";
-            var address = await (endpoints ?? new()).ResolveAsync(profile, false, timeout.Token).ConfigureAwait(false);
+            IPAddress address;
+            try { address = await (endpoints ?? new()).ResolveAsync(profile, false, timeout.Token).ConfigureAwait(false); }
+            catch (InvalidOperationException) { throw new ProbeFailureException(stage, "Dns"); }
             stage = "Подключение к серверу";
             await using var permit = new LinuxProbeFirewallLease(firewall);
             await permit.PermitAsync(address, awg?.ServerPort ?? converted!.ServerPort,

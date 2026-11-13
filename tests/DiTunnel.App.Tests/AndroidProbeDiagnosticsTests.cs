@@ -171,10 +171,11 @@ public sealed class AndroidProbeDiagnosticsTests
         finally { await vm.ShutdownAsync(); }
     }
 
-    [Fact]
-    public async Task ConnectionFailureDoesNotAppendPreviousSuccessfulProfileCheck()
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64)] [InlineData(ReleaseTarget.AndroidArm64)] [InlineData(ReleaseTarget.LinuxX64)]
+    public async Task ConnectionFailureDoesNotAppendPreviousSuccessfulProfileCheck(ReleaseTarget target)
     {
-        var vm = new MainViewModel(null, new Store(), new Probe(), platform: AppPlatform.Windows);
+        var vm = new MainViewModel(null, new Store(), new Probe(), platform: PlatformFor(target));
         try
         {
             await vm.ProbeAllCommand.ExecuteAsync(null);
@@ -184,6 +185,57 @@ public sealed class AndroidProbeDiagnosticsTests
             Assert.Equal("HTTPS · Тайм-аут", vm.DiagnosticText);
         }
         finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64, "Windows")]
+    [InlineData(ReleaseTarget.AndroidArm64, "Android")]
+    [InlineData(ReleaseTarget.LinuxX64, "Linux")]
+    public async Task SingleProbeFailureKeepsItsReportWhenSelectionChanges(ReleaseTarget target, string platformName)
+    {
+        var platform = PlatformFor(target);
+        var probe = new RepeatProbe(platformName);
+        var vm = new MainViewModel(null, new Store(), probe, platform: platform);
+        try
+        {
+            vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "A");
+            await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            Assert.Contains("Тип ошибки: None", vm.DiagnosticText);
+            vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "B");
+            await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            Assert.Equal("B: HTTPS · Тайм-аут.", vm.DisplayNotice);
+            Assert.Equal("HTTPS · Тайм-аут", vm.SelectedProfile.ProbeText);
+            vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "A");
+            Assert.StartsWith(vm.DisplayNotice, vm.DiagnosticText);
+            Assert.Contains($"Di-Tunnel {platformName} ", vm.DiagnosticText);
+            Assert.Contains("Тип ошибки: Timeout", vm.DiagnosticText);
+            Assert.Contains("Работа профиля подтверждена: нет", vm.DiagnosticText);
+            Assert.DoesNotContain("Тип ошибки: None", vm.DiagnosticText);
+            Assert.DoesNotContain("Последняя проверка выбранного профиля", vm.DiagnosticText);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private static AppPlatform PlatformFor(ReleaseTarget target) => target switch
+    {
+        ReleaseTarget.WindowsX64 => AppPlatform.Windows,
+        ReleaseTarget.AndroidArm64 => AppPlatform.Android,
+        ReleaseTarget.LinuxX64 => AppPlatform.Linux,
+        _ => throw new ArgumentOutOfRangeException(nameof(target))
+    };
+
+    private sealed class RepeatProbe(string platform) : IServerProbe
+    {
+        private bool checkedB;
+
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        {
+            if (profile.Name == "B" && checkedB)
+                return Task.FromResult(ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 75, platform));
+            checkedB |= profile.Name == "B";
+            return Task.FromResult(ProbePolicy.Success(20, "HTTPS", "HTTPS", true, platform: platform));
+        }
     }
 
     private sealed class ActiveProbe : IServerProbe, IActiveTunnelProbe

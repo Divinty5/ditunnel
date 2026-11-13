@@ -51,6 +51,8 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly DispatcherTimer subscriptionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private bool androidTunnelConfirmed;
     private VpnStatus? lastEngineStatus;
+    private bool noticeDescribesOperation;
+    private ProbeDiagnostics? noticeDiagnostics;
     private int activeProbeFailures;
     private bool healthRecoveryAttempted;
     private int refreshToastGeneration;
@@ -180,20 +182,30 @@ public sealed partial class MainViewModel : ViewModelBase
     public string PowerText => IsCancellingConnection ? "Отменяем" : CanCancelConnection ? "Отменить" : ConnectionState == VpnConnectionState.Connected ? "Отключить" : "Подключить";
     public string CopyErrorText => "⧉";
     public bool HasConnectionError => ConnectionState == VpnConnectionState.Error && !string.IsNullOrWhiteSpace(Notice)
-        || IsSubscriptionExhausted || SelectedProbeDiagnostics is not null || Notice.Contains("Метод:", StringComparison.Ordinal);
+        || IsSubscriptionExhausted || noticeDiagnostics is not null || SelectedProbeDiagnostics is not null || Notice.Contains("Метод:", StringComparison.Ordinal);
     private ProbeDiagnostics? SelectedProbeDiagnostics => SelectedProfile is { } server
         && probeSnapshots.TryGetValue(ProfileKey(server.Profile), out var snapshot) ? snapshot.Diagnostics : null;
     private string DiagnosticNotice => IsSubscriptionExhausted ? SubscriptionAccess.ExhaustedMessage + "\n" + Notice : Notice;
-    public string DiagnosticText => ConnectionState != VpnConnectionState.Error &&
-        !Notice.Contains("Метод:", StringComparison.Ordinal) &&
-        !(lastEngineStatus?.Message == Notice && lastEngineStatus.State == VpnConnectionState.Connected && activeDelayMilliseconds is not null) &&
-        SelectedProbeDiagnostics is { } details
-        ? $"{DiagnosticNotice}\n\nПоследняя проверка выбранного профиля:\n{details.ToDisplayString()}" : DiagnosticNotice;
+    public string DiagnosticText => noticeDiagnostics is { } current
+        ? $"{DiagnosticNotice}\n\n{current.ToDisplayString()}"
+        : !noticeDescribesOperation && ConnectionState != VpnConnectionState.Error &&
+            !Notice.Contains("Метод:", StringComparison.Ordinal) && SelectedProbeDiagnostics is { } previous
+                ? $"{DiagnosticNotice}\n\nПоследняя проверка выбранного профиля:\n{previous.ToDisplayString()}" : DiagnosticNotice;
     public string DisplayNotice => IsSubscriptionExhausted ? SubscriptionAccess.ExhaustedMessage : Notice.Split('\n', 2)[0];
     partial void OnNoticeChanged(string value)
     {
+        noticeDescribesOperation = false;
+        noticeDiagnostics = null;
         OnPropertyChanged(nameof(HasConnectionError));
         OnPropertyChanged(nameof(DisplayNotice));
+    }
+
+    private void SetOperationNotice(string message, ProbeDiagnostics? diagnostics = null)
+    {
+        Notice = message;
+        noticeDescribesOperation = true;
+        noticeDiagnostics = diagnostics;
+        OnPropertyChanged(nameof(HasConnectionError));
     }
     private double? DisplayDelay => ConnectionState == VpnConnectionState.Connected && activeProbeFailures == 0
         ? Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 ? activeDelayMilliseconds : activeDelayMilliseconds ?? engine?.Status.DelayMilliseconds
@@ -444,7 +456,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(SubscriptionLimits));
         NotifyConnectionDelay();
-        if (statusChanged && status.Message is not null) Notice = status.Message;
+        if (statusChanged && status.Message is not null) SetOperationNotice(status.Message);
         RefreshSubscriptionPresentation();
     }
     partial void OnConnectionStateChanged(VpnConnectionState value)
@@ -694,9 +706,9 @@ public sealed partial class MainViewModel : ViewModelBase
                     await engine.ConnectAsync(target.Profile, cancellation.Token);
             activeProfile = target;
         }
-        catch (OperationCanceledException) { Notice = "Переключение сервера отменено."; }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { Notice = e.Message; }
-        catch { Notice = "Не удалось переключить сервер. Предыдущее подключение отключено; выберите сервер и подключитесь снова."; }
+        catch (OperationCanceledException) { SetOperationNotice("Переключение сервера отменено."); }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { SetOperationNotice(e.Message); }
+        catch { SetOperationNotice("Не удалось переключить сервер. Предыдущее подключение отключено; выберите сервер и подключитесь снова."); }
         finally
         {
             ConnectionState = engine.Status.State;
@@ -759,10 +771,10 @@ public sealed partial class MainViewModel : ViewModelBase
                 }
             }
         }
-        catch (OperationCanceledException) { Notice = "Подключение отменено."; }
-        catch (TimeoutException e) { Notice = e.Message; }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException) { Notice = e.Message; }
-        catch { Notice = "Не удалось изменить состояние VPN. Сетевые изменения отменены; проверьте права и доступность сервера."; }
+        catch (OperationCanceledException) { SetOperationNotice("Подключение отменено."); }
+        catch (TimeoutException e) { SetOperationNotice(e.Message); }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException) { SetOperationNotice(e.Message); }
+        catch { SetOperationNotice("Не удалось изменить состояние VPN. Сетевые изменения отменены; проверьте права и доступность сервера."); }
         finally { ConnectionState = engine.Status.State; IsConnecting = false; connectionCancellation.Dispose(); connectionCancellation = null; }
     }
     [RelayCommand] private void RemoveProfile()
@@ -990,16 +1002,16 @@ public sealed partial class MainViewModel : ViewModelBase
         probeCancellation = new CancellationTokenSource();
         try
         {
-            Notice = servers.Length == 1 ? $"Проверяем сервер {servers[0].Name}…" : $"Проверяем серверы: {servers.Length}…";
+            SetOperationNotice(servers.Length == 1 ? $"Проверяем сервер {servers[0].Name}…" : $"Проверяем серверы: {servers.Length}…");
             var results = await ProbeServersAsync(servers, probeCancellation.Token);
             SortProfilesByProbe();
             var changed = all && IsLowestMode && await SelectLowestProfileAsync();
-            if (!changed) Notice = all
-                ? $"Проверены: {servers.Length}. Ответили: {results.Count(result => result.Milliseconds is not null)}. Ошибки: {results.Count(result => !result.IsDeferred && result.Milliseconds is null)}."
-                : $"{servers[0].Name}: {results[0].Message}.";
+            if (!changed && all)
+                Notice = $"Проверены: {servers.Length}. Ответили: {results.Count(result => result.Milliseconds is not null)}. Ошибки: {results.Count(result => !result.IsDeferred && result.Milliseconds is null)}.";
+            else if (!changed) SetOperationNotice($"{servers[0].Name}: {results[0].Message}.", results[0].Diagnostics);
         }
-        catch (OperationCanceledException) { Notice = "Проверка отменена."; }
-        catch { Notice = "Не удалось выполнить проверку сервера."; }
+        catch (OperationCanceledException) { SetOperationNotice("Проверка отменена."); }
+        catch { SetOperationNotice("Не удалось выполнить проверку сервера."); }
         finally
         {
             foreach (var server in servers.Where(s => s.ProbeText == "Проверяем…")) server.ProbeText = "Не проверен";
@@ -1196,11 +1208,10 @@ public sealed partial class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(StatusText));
             NotifyConnectionDelay();
             if (!failed && tunnel is null && engine?.Status is { State: VpnConnectionState.Connected, Message: { } networkMessage })
-                Notice = networkMessage;
+                SetOperationNotice(networkMessage);
             else
-                Notice = (failed ? "Туннель запущен. " + result.Message
-                    : tunnel is not null ? "VPN подключён." : "Туннель запущен. Профиль проверен.")
-                    + "\n" + result.Diagnostics?.ToDisplayString();
+                SetOperationNotice(failed ? "Туннель запущен. " + result.Message
+                    : tunnel is not null ? "VPN подключён." : "Туннель запущен. Профиль проверен.", result.Diagnostics);
         }
         catch (OperationCanceledException) when (check.IsCancellationRequested) { return; }
         catch { return; }

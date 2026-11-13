@@ -35,6 +35,7 @@ public static class ProbePolicy
         if (stage == "HTTPS" && kind is "Tls" or "Dns") stage = kind == "Tls" ? "TLS" : "DNS контрольного адреса";
         if (error is ProbeFailureException known) { stage = known.Stage; kind = known.ErrorType; }
         if (stage is "Профиль" or "Profile" && error is InvalidOperationException) kind = "Configuration";
+        if (stage is "AmneziaWG" or "Xray" && kind == "Internal") kind = "Runtime";
         var attempts = (error as ProbeFailureException)?.Diagnostics?.Attempts ?? "";
         return new(null, ShortFailure(kind, stage),
             Diagnostics: new(method, stage, kind, milliseconds, false, VersionFor(platform), attempts, platform));

@@ -92,7 +92,7 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
             }
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception error) { return ProbePolicy.Failure(error, "Сетевая служба", mode == ServerProbeMode.Https ? "HTTPS" : "HTTP", 0, "Linux"); }
+        catch (Exception error) { return ProbePolicy.Failure(error, "Служба проверки", mode == ServerProbeMode.Https ? "HTTPS" : "HTTP", 0, "Linux"); }
     }
 
     private MessageBuffer CreateProbe(Guid id, string content, ServerProbeMode mode)

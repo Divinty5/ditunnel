@@ -31,6 +31,7 @@ public static class XrayServerProbe
         });
         var certificateError = 0;
         var listenerError = 0;
+        var stage = "Xray";
         manager.LogReceived += entry =>
         {
             if (entry.Message.Contains("x509:", StringComparison.OrdinalIgnoreCase) || entry.Message.Contains("failed to verify certificate", StringComparison.OrdinalIgnoreCase))
@@ -44,11 +45,13 @@ public static class XrayServerProbe
             await SocksTcpProbe.WaitForListenerAsync(port, credentials, () => manager.IsRunning, timeout.Token).ConfigureAwait(false);
             if (tcpOnly)
             {
+                stage = "TLS";
                 if (configuration.SupportsIpv4)
                     return await SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("1.1.1.1"), 443, credentials, timeout.Token);
                 return await SocksTcpProbe.MeasureAsync(port, IPAddress.Parse("2606:4700:4700::1111"), 443, credentials, timeout.Token,
                     new System.Net.Security.SslClientAuthenticationOptions { TargetHost = "one.one.one.one" });
             }
+            stage = useHttps ? "HTTPS" : "HTTP";
             using var handler = new HttpClientHandler { UseProxy = true, Proxy = credentials.CreateProxy(port) };
             using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
             if (useHttps)
@@ -69,18 +72,19 @@ public static class XrayServerProbe
         {
             throw new ProbeFailureException("Xray", "Runtime");
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException error)
         {
             await manager.StopAsync(CancellationToken.None);
             if (Volatile.Read(ref certificateError) != 0)
                 throw new ProbeFailureException("TLS", "Tls");
-            throw new ProbeFailureException("HTTPS", "Connection");
+            var failure = ProbePolicy.Failure(error, stage, stage, 0, platform).Diagnostics!;
+            throw new ProbeFailureException(failure.Stage, failure.ErrorType);
         }
         catch (IOException) { throw new ProbeFailureException("Подключение к серверу", "Connection"); }
         catch (System.Security.Authentication.AuthenticationException) { throw new ProbeFailureException("TLS", "Tls"); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException($"Проверка сервера превысила {budget.TotalSeconds:F0} секунд.");
+            throw new ProbeFailureException(stage, "Timeout");
         }
     }
 }

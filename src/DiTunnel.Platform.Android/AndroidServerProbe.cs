@@ -52,7 +52,7 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
                         var measured = await Task.WhenAll(chunk.Select(index => MeasureTcpProfileAsync(
                             configurations[index]!, timeout.Token, cancellationToken)));
                         for (var offset = 0; offset < chunk.Length; offset++)
-                            results[chunk[offset]] = offset < measured.Length ? measured[offset] : new(null, "Проверка не выполнена");
+                            results[chunk[offset]] = measured[offset];
                     }
                     else
                     {
@@ -62,7 +62,8 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
                             error => (IReadOnlyList<ServerProbeResult>)Enumerable.Repeat(
                                 ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested, duration: chunkWatch.Elapsed.TotalMilliseconds), chunk.Length).ToArray(), cancellationToken);
                         for (var offset = 0; offset < chunk.Length; offset++)
-                            results[chunk[offset]] = offset < measured.Count ? measured[offset] : new(null, "Проверка не выполнена");
+                            results[chunk[offset]] = offset < measured.Count ? measured[offset]
+                                : ProbeFailure(new InvalidOperationException(), "Служба проверки");
                     }
                 }
                 foreach (var index in Enumerable.Range(0, profiles.Count).Where(index => mode == ServerProbeMode.Fast && configurations[index]?.ServerTransport == KillSwitchTransportProtocol.Udp))
@@ -74,9 +75,9 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
             }
             finally { XrayProbeGate.Release(); }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { FillMissing(results, "Таймаут проверки"); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { FillMissing(results, ProbeFailure(new TimeoutException(), "Служба проверки")); }
         catch (OperationCanceledException) { throw; }
-        catch (TimeoutException) { FillMissing(results, "Таймаут проверки"); }
+        catch (TimeoutException error) { FillMissing(results, ProbeFailure(error, "Служба проверки")); }
         catch (Exception error) when (error is InvalidOperationException or NotSupportedException or FormatException)
         {
             FillMissing(results, ProbeFailure(error, "Профиль"));
@@ -85,7 +86,7 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
         {
             FillMissing(results, ProbeFailure(error, "Проверка"));
         }
-        FillMissing(results, "Проверка не выполнена");
+        FillMissing(results, ProbeFailure(new InvalidOperationException(), "Служба проверки"));
         return results.Select(result => result!).ToArray();
     }
 
@@ -172,10 +173,6 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
             finally { connection.Disconnect(); }
         }, token), cancellationToken);
     }
-
-    private static void FillMissing(ServerProbeResult?[] results, string message) =>
-        FillMissing(results, AndroidProbePolicy.Failure(new AndroidProbeException("Проверка",
-            message.Contains("Таймаут", StringComparison.Ordinal) ? "Timeout" : "Internal"), "Проверка", "HTTPS", 0));
 
     private static void FillMissing(ServerProbeResult?[] results, ServerProbeResult failure)
     {

@@ -24,8 +24,8 @@ internal static class AndroidXrayProbeRunner
         var results = new ServerProbeResult?[profiles.Count];
         var prepared = new AndroidProbeOutbound?[profiles.Count];
         var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager
-            ?? throw new AndroidProbeException("Сеть", "Connection");
-        var network = FindPhysicalNetwork(manager) ?? throw new AndroidProbeException("Сеть", "Connection");
+            ?? throw new AndroidProbeException("Подключение к серверу", "Connection");
+        var network = FindPhysicalNetwork(manager) ?? throw new AndroidProbeException("Подключение к серверу", "Connection");
         // Resolve independently and in parallel. A malformed or unresolvable peer never
         // enters the shared runtime and cannot discard neighbouring results.
         await Task.WhenAll(profiles.Select(async (profile, index) =>
@@ -49,7 +49,7 @@ internal static class AndroidXrayProbeRunner
             catch (Exception error) { results[index] = AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds); }
         }));
         if (prepared.All(item => item is null)) return results.Select(item => item!).ToArray();
-        if (!manager.BindProcessToNetwork(network)) throw new AndroidProbeException("Сеть", "Connection");
+        if (!manager.BindProcessToNetwork(network)) throw new AndroidProbeException("Подключение к серверу", "Connection");
         using var controller = new UnchangedSocketController();
         try
         {

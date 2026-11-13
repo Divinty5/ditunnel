@@ -6,6 +6,29 @@ namespace DiTunnel.Core.Tests;
 public sealed class ProbePlatformTests
 {
     [Theory]
+    [InlineData("DNS сервера", "Dns", "DNS сервера · Ошибка DNS")]
+    [InlineData("HTTPS", "Timeout", "HTTPS · Тайм-аут")]
+    [InlineData("TLS", "Tls", "Ошибка TLS")]
+    [InlineData("HTTPS", "ControlService", "HTTPS · Ошибка контрольного сайта")]
+    [InlineData("AmneziaWG", "Runtime", "AmneziaWG · Ошибка запуска")]
+    [InlineData("Xray", "Runtime", "Xray · Ошибка запуска")]
+    [InlineData("Служба проверки", "Connection", "Служба проверки · Ошибка соединения")]
+    public void SharedFailuresUseTheSameShortTextAndReportFields(string stage, string kind, string message)
+    {
+        foreach (var platform in new[] { "Windows", "Android", "Linux" })
+        {
+            var error = kind == "Runtime" ? new InvalidOperationException() : new ProbeFailureException(stage, kind);
+            var result = ProbePolicy.Failure(error, stage, "HTTPS", 75, platform);
+            Assert.Equal(message, result.Message);
+            Assert.Null(result.Milliseconds);
+            Assert.Equal(stage, result.Diagnostics!.Stage);
+            Assert.Equal(kind, result.Diagnostics.ErrorType);
+            Assert.Equal(platform, result.Diagnostics.Platform);
+            Assert.False(result.Diagnostics.ProfileConfirmed);
+        }
+    }
+
+    [Theory]
     [InlineData("Windows")]
     [InlineData("Android")]
     [InlineData("Linux")]

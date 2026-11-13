@@ -54,7 +54,7 @@ public sealed class ConnectionInteractionTests
     {
         public int Calls;
         public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
-        { Calls++; return Task.FromResult(new ServerProbeResult(42, "HTTPS · 42 мс")); }
+        { Calls++; return Task.FromResult(ProbePolicy.Success(42, "HTTPS", "HTTPS", true)); }
     }
     [Fact]
     public async Task SuccessfulProfileProbeDoesNotOverwriteTunnelWarning()
@@ -73,6 +73,7 @@ public sealed class ConnectionInteractionTests
             Assert.True(probe.Calls > 0);
             Assert.Equal(42d, vm.Profiles[0].ProbeMilliseconds);
             Assert.Equal(warning, vm.Notice);
+            Assert.Equal(warning, vm.DiagnosticText);
         }
         finally { await vm.ShutdownAsync(); }
     }
