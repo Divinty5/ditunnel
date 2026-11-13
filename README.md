@@ -12,7 +12,7 @@ Di-Tunnel — VPN-клиент для Windows, Android и Linux на базе Xr
 | Android ARM64 | Android 8.1 (API 27), включая проверенный HarmonyOS 2 | `Di-Tunnel-<версия>-arm64.apk` |
 | Linux amd64 | Ubuntu 24.04 LTS | `Di-Tunnel-<версия>-linux-amd64.deb` |
 
-Последний релиз для Windows и Android — [**0.6.12**](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.12). В нём исправлены запуск обновления из настроек Windows, цвет задержки на Android и отчёты проверки. Android ARM64 требует Android 8.1 (API 27), versionCode 60012. Пакет Ubuntu доступен в [релизе 0.6.10](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.10).
+Последний релиз для Windows, Android и Ubuntu 24.04 — [**0.6.12**](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.12). В нём исправлены запуск обновления из настроек Windows, цвет задержки на Android и отчёты проверки. Android ARM64 требует Android 8.1 (API 27), versionCode 60012.
 
 Унифицированы сообщения проверок и подробности в копировании, ускорены проверки Android, добавлены неподвижные кнопки остановки/отмены, общие уведомления обновления и цвета лимитов подписки. В Windows сохранена совместимость с OpenVPN при выключенном kill switch и добавлен фирменный установщик. [Накопленные изменения](docs/release-0.6.8-windows-0.6.7-mobile-linux.md), [каталог документации](docs/README.md).
 

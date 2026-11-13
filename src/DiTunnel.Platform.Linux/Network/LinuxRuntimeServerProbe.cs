@@ -34,18 +34,21 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
         Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            var xray = VerifyRuntime("xray");
             XrayProfileConfiguration configuration;
             var isAwg = AmneziaWgProfileConverter.IsAmneziaWg(profile);
             var awg = isAwg ? AmneziaWgProfileConverter.Convert(profile) : null;
             var converted = awg is null ? XrayProfileConverter.Convert(profile) : null;
             stage = "DNS сервера";
             var address = await (endpoints ?? new()).ResolveAsync(profile, false, timeout.Token).ConfigureAwait(false);
+            stage = "Подключение к серверу";
             await using var permit = new LinuxProbeFirewallLease(firewall);
             await permit.PermitAsync(address, awg?.ServerPort ?? converted!.ServerPort,
                 awg is not null ? KillSwitchTransportProtocol.Udp : converted!.ServerTransport, timeout.Token).ConfigureAwait(false);
             // Linux AWG supports both transport families; IPv6 sockets are explicit.
+            if (awg is not null) stage = "AmneziaWG";
             await using var bridge = awg is null ? null : await StartAwgAsync(awg, address, directory, timeout.Token, transportMark).ConfigureAwait(false);
+            stage = "Xray";
+            var xray = VerifyRuntime("xray");
             configuration = bridge?.Proxy ?? converted!;
             if (transportMark != 0 && !configuration.IsLocalProxy)
             {
@@ -57,7 +60,6 @@ public sealed class LinuxRuntimeServerProbe(string runtimeDirectory, string stat
                 sockopt["mark"] = transportMark;
                 configuration = configuration with { Outbound = outbound };
             }
-            stage = "Xray";
             var milliseconds = await XrayServerProbe.MeasureAsync(configuration, address, xray, timeout.Token,
                 useHttps: mode == ServerProbeMode.Https, tcpOnly: awg is not null && mode == ServerProbeMode.Fast, probeTimeout: budget,
                 processLifetimeFactory: static process => new LinuxProcessLifetime(process), platform: "Linux").ConfigureAwait(false);

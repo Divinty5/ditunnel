@@ -1,6 +1,6 @@
 # Сборка и публикация
 
-Последний публичный релиз Windows и Android — 0.6.12, Linux — 0.6.10. Версии в исходниках задаются в `Directory.Build.props`, Android versionCode 60012 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
+Последний публичный релиз Windows, Android и Linux — 0.6.12. Версии в исходниках задаются в `Directory.Build.props`, Android versionCode 60012 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
 
 ## Windows
 
@@ -37,4 +37,4 @@ python3 scripts/Build-LinuxPackage.py --test
 3. Создать тег `v<версия>` на этом commit и черновик релиза с пакетами обновлённых платформ и их `.sha256`. Проверить имена, размеры и SHA-256 загруженных файлов, затем опубликовать стабильный latest.
 4. Проверить публичные ссылки и выбор assets для всех платформ. Номер в имени файла должен совпадать с тегом: установленный ReleaseChecker не угадывает отличающиеся версии.
 
-Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения и проверки](release-0.6.10.md).
+Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения выпуска](release-0.6.12.md).

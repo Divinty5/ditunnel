@@ -10,7 +10,7 @@
     <WindowsVersion>0.6.12</WindowsVersion>
     <AndroidVersion>0.6.12</AndroidVersion>
     <AndroidMinimumApiLevel>27</AndroidMinimumApiLevel>
-    <LinuxVersion>0.6.10</LinuxVersion>
+    <LinuxVersion>0.6.12</LinuxVersion>
     <Company>Di Vinty Interactive</Company>
     <Authors>Di Vinty Interactive</Authors>
     <Copyright>Copyright © 2026 Di Vinty Interactive</Copyright>
