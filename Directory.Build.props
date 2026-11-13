@@ -6,8 +6,8 @@
     <Deterministic>true</Deterministic>
     <AnalysisLevel>latest</AnalysisLevel>
     <Product>Di-Tunnel</Product>
-    <Version>0.6.10</Version>
-    <WindowsVersion>0.6.10</WindowsVersion>
+    <Version>0.6.11</Version>
+    <WindowsVersion>0.6.11</WindowsVersion>
     <AndroidVersion>0.6.10</AndroidVersion>
     <AndroidMinimumApiLevel>27</AndroidMinimumApiLevel>
     <LinuxVersion>0.6.10</LinuxVersion>
