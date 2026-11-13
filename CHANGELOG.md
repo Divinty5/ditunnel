@@ -1,5 +1,10 @@
 # История изменений
 
+## 0.6.11 — 13 ноября 2026 (Windows)
+
+- Обновлён Xray-core для Windows с 26.3.27 до 26.6.27. Проверено принятие прежних конфигураций VLESS и Trojan, включая профили без TLS, а также TLS, REALITY, VMess, Shadowsocks и Hysteria 2.
+- Подготовлено обновление с Windows 0.6.10 через встроенный механизм установки и перезапуска. Для Android и Linux актуальна версия 0.6.10. [Подробности выпуска](docs/release-0.6.11-windows.md).
+
 ## 0.6.10 — 13 ноября 2026 (Windows, Android и Linux)
 
 - Расширен импорт AmneziaWG 2.0 и 3.1. Добавлены варианты `random_trailers` и `disable_cookies`, в карточках AmneziaWG скрыты IP-адреса.

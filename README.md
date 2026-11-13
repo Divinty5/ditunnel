@@ -12,7 +12,7 @@ Di-Tunnel — VPN-клиент для Windows, Android и Linux на базе Xr
 | Android ARM64 | Android 8.1 (API 27), включая проверенный HarmonyOS 2 | `Di-Tunnel-<версия>-arm64.apk` |
 | Linux amd64 | Ubuntu 24.04 LTS | `Di-Tunnel-<версия>-linux-amd64.deb` |
 
-Текущий общий релиз — [**0.6.10 для Windows, Android и Linux**](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.10). В нём расширен импорт AmneziaWG, улучшены точная проверка и восстановление VPN, обновлены установщик и управление окном Windows. Android ARM64 по-прежнему требует Android 8.1 (API 27), versionCode 60010. [Изменения, пакеты и результаты проверок](docs/release-0.6.10.md).
+Последний выпуск Windows — [**0.6.11**](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.11) с Xray-core 26.6.27. Для Android и Linux актуален [общий релиз **0.6.10**](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.10) с расширенным импортом AmneziaWG и улучшениями проверки и восстановления VPN. Android ARM64 требует Android 8.1 (API 27), versionCode 60010. [Подробности выпуска Windows](docs/release-0.6.11-windows.md), [результаты общего релиза](docs/release-0.6.10.md).
 
 Унифицированы сообщения проверок и подробности в копировании, ускорены проверки Android, добавлены неподвижные кнопки остановки/отмены, общие уведомления обновления и цвета лимитов подписки. В Windows сохранена совместимость с OpenVPN при выключенном kill switch и добавлен фирменный установщик. [Накопленные изменения](docs/release-0.6.8-windows-0.6.7-mobile-linux.md), [каталог документации](docs/README.md).
 
@@ -182,7 +182,7 @@ dotnet build src\DiTunnel.Desktop\DiTunnel.Desktop.csproj -c Release
 
 ## Сторонние компоненты
 
-Windows распространяет закреплённый Xray-core `v26.3.27` и Wintun. Android использует закреплённый libXray `v26.7.28`. Версии, источники и SHA-256 записаны в `eng/`. Xray-core/libXray распространяются по MPL-2.0; сторонние уведомления включаются в релизные материалы. Собственный код Di-Tunnel распространяется по [лицензии MIT](LICENSE).
+Windows распространяет закреплённый Xray-core `v26.6.27` и Wintun. Android использует libXray `v26.7.28`, Linux — Xray-core `v26.3.27` с патчем поиска процессов. Версии, источники и SHA-256 записаны в `eng/`. Xray-core/libXray распространяются по MPL-2.0, сторонние уведомления входят в пакеты. Собственный код Di-Tunnel распространяется по [лицензии MIT](LICENSE).
 
 Windows-компонент значка статически использует MinHook 1.3.4 с лицензиями BSD; исходники и уведомления находятся в `src/DiTunnel.ShellIcon/vendor/minhook`, а в установщике — в `Licenses/ShellIcon`.
 
