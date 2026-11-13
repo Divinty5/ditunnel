@@ -21,7 +21,7 @@ public sealed class VmessRuntimeTests
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
         Assert.NotNull(root);
-        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.3.27", "windows-x64", "xray.exe");
+        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.6.27", "windows-x64", "xray.exe");
         Assert.True(File.Exists(runtime));
         var directory = Path.Combine(Path.GetTempPath(), "ditunnel-vmess-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -49,7 +49,7 @@ public sealed class VmessRuntimeTests
                 }),
                 ["outbounds"] = new JsonArray(new JsonObject
                 {
-                    ["protocol"] = "freedom", ["settings"] = new JsonObject { ["redirect"] = "127.0.0.1:" + httpPort }
+                    ["protocol"] = "freedom", ["settings"] = XrayRuntimeCollection.AllowTestHttpEndpoint(httpPort, redirect: true)
                 })
             };
             var path = Path.Combine(directory, "server.json");

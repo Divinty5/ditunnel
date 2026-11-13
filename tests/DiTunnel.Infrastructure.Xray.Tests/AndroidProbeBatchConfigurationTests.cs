@@ -14,7 +14,7 @@ public sealed class AndroidProbeBatchConfigurationTests
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
         Assert.NotNull(root);
-        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.3.27", "windows-x64", "xray.exe");
+        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.6.27", "windows-x64", "xray.exe");
         Assert.True(File.Exists(runtime));
         var profile = Profile("00000000-0000-0000-0000-000000000001", "192.0.2.1");
         var path = Path.Combine(Path.GetTempPath(), $"ditunnel-probe-{Guid.NewGuid():N}.json");

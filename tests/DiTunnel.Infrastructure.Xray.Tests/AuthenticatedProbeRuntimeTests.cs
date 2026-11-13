@@ -31,7 +31,11 @@ public sealed class AuthenticatedProbeRuntimeTests
                 ["settings"] = new JsonObject { ["decryption"] = "none",
                     ["clients"] = new JsonArray(new JsonObject { ["id"] = id }) }
             }),
-            ["outbounds"] = new JsonArray(new JsonObject { ["protocol"] = "freedom", ["tag"] = "direct" })
+            ["outbounds"] = new JsonArray(new JsonObject
+            {
+                ["protocol"] = "freedom", ["tag"] = "direct",
+                ["settings"] = XrayRuntimeCollection.AllowTestHttpEndpoint(targetPort)
+            })
         };
         await using var upstream = Manager(runtime);
         await upstream.StartFromJsonAsync(server.ToJsonString(), token);
@@ -122,7 +126,7 @@ public sealed class AuthenticatedProbeRuntimeTests
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
         Assert.NotNull(root);
-        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.3.27", "windows-x64", "xray.exe");
+        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.6.27", "windows-x64", "xray.exe");
         Assert.True(OperatingSystem.IsWindows() && File.Exists(runtime), "Set DITUNNEL_TEST_XRAY to the pinned local native runtime.");
         return runtime;
     }

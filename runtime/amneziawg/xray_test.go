@@ -18,7 +18,7 @@ func xrayProxy(t *testing.T, bridge *socksServer) (int, bool) {
 	t.Helper()
 	executable := os.Getenv("DITUNNEL_XRAY")
 	if executable == "" {
-		executable = filepath.Join("..", "..", ".tools", "xray", "26.3.27", "windows-x64", "xray.exe")
+		executable = filepath.Join("..", "..", ".tools", "xray", "26.6.27", "windows-x64", "xray.exe")
 	}
 	executable, err := filepath.Abs(executable)
 	if err != nil {

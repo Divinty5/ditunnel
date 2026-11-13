@@ -42,16 +42,14 @@ public sealed class ProbeLifecycleTests
         await using var recovered = await gate.AcquireAsync(() => Task.CompletedTask, () => ValueTask.CompletedTask, default).WaitAsync(TimeSpan.FromSeconds(2));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ActualXrayProbeDoesNotNeedUdpInbound(bool enableUdp)
+    [Fact]
+    public async Task ActualXrayProbeStartsWithUdpPortOccupiedAndRejectsUdpAssociate()
     {
         if (!OperatingSystem.IsWindows()) return;
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
         Assert.NotNull(root);
-        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.3.27", "windows-x64", "xray.exe");
+        var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.6.27", "windows-x64", "xray.exe");
         Assert.True(File.Exists(runtime));
         // Windows can assign UDP an ephemeral port reserved/excluded for TCP. Reserve
         // a usable TCP number first, then hold its UDP counterpart for the conflict test.
@@ -61,28 +59,23 @@ public sealed class ProbeLifecycleTests
         try
         {
             var configuration = XrayProfileConverter.Convert(new("Synthetic", "VLESS", "vless://11111111-1111-4111-8111-111111111111@192.0.2.1:443?security=none"));
-            await File.WriteAllTextAsync(path, configuration.Build("192.0.2.1", false, port, enableSocksUdp: enableUdp, proxyCredentials: ProbeSocksCredentials.Create()));
+            var credentials = ProbeSocksCredentials.Create();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var token = deadline.Token;
+            await File.WriteAllTextAsync(path, configuration.Build("192.0.2.1", false, port, enableSocksUdp: false, proxyCredentials: credentials), token);
             await using var manager = new XrayProcessManager(new XrayOptions
             { ExecutablePath = runtime, WorkingDirectory = Path.GetDirectoryName(runtime)!, ValidateConfigurationBeforeStart = false, ShutdownTimeout = TimeSpan.FromMilliseconds(100) });
-            if (enableUdp)
-            {
-                var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-                var udpFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                manager.Exited += code => exited.TrySetResult(code);
-                manager.LogReceived += entry =>
-                {
-                    if (entry.Message.Contains("UDP", StringComparison.OrdinalIgnoreCase)
-                        && entry.Message.Contains("failed", StringComparison.OrdinalIgnoreCase))
-                        udpFailure.TrySetResult();
-                };
-                // A loaded host can report the bind failure after StartupGracePeriod.
-                // Assert the actual native failure, not the timing of StartAsync's return.
-                try { await manager.StartAsync(path); }
-                catch (InvalidOperationException) { }
-                Assert.NotEqual(0, await exited.Task.WaitAsync(TimeSpan.FromSeconds(5)));
-                await udpFailure.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            else { await manager.StartAsync(path); Assert.True(manager.IsRunning); }
+            await manager.StartAsync(path, token);
+            await SocksTcpProbe.WaitForListenerAsync(port, credentials, () => manager.IsRunning, token);
+            using var client = new TcpClient(AddressFamily.InterNetwork);
+            await client.ConnectAsync(IPAddress.Loopback, port, token);
+            using var stream = client.GetStream();
+            await credentials.AuthenticateAsync(stream, token);
+            // SOCKS5 UDP ASSOCIATE for an unspecified client address and port.
+            await stream.WriteAsync(new byte[] { 5, 3, 0, 1, 0, 0, 0, 0, 0, 0 }, token);
+            var response = new byte[10];
+            await stream.ReadExactlyAsync(response, token);
+            Assert.Equal(new byte[] { 5, 7 }, response[..2]);
         }
         finally { File.Delete(path); }
     }

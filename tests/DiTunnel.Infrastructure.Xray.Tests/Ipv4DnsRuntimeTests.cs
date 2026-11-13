@@ -18,7 +18,7 @@ public sealed class Ipv4DnsRuntimeTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "DiTunnel.sln"))) root = root.Parent;
         Assert.NotNull(root);
         var executable = Environment.GetEnvironmentVariable("DITUNNEL_TEST_XRAY") ?? (OperatingSystem.IsWindows()
-            ? Path.Combine(root.FullName, ".tools/xray/26.3.27/windows-x64/xray.exe")
+            ? Path.Combine(root.FullName, ".tools/xray/26.6.27/windows-x64/xray.exe")
             : Path.Combine(root.FullName, ".tools/linux-runtime/linux-x64/xray"));
         Assert.True(File.Exists(executable));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
