@@ -116,22 +116,24 @@ public sealed class UpdateAndDefaultsTests
     }
 
     [Fact]
-    public async Task ManualCheckDoesNotDuplicateAnAutomaticDownload()
+    public async Task ManualCheckFromAnotherViewModelDoesNotDuplicateAnAutomaticDownload()
     {
         var download = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var installer = new Installer { DownloadResult = download.Task };
         var vm = new MainViewModel(null, new EmptyStore());
+        var reopenedVm = new MainViewModel(null, new EmptyStore());
         var settings = new UserSettings { InstallUpdatesAutomatically = true };
         Task<ReleaseCheckResult> Check() => Task.FromResult(new ReleaseCheckResult("Update", Release));
         Task<string?> Prompt(AppRelease _, bool __) => throw new InvalidOperationException();
         var automatic = UpdateFlow.CheckCoreAsync(vm, false, settings, installer, Check, Prompt);
-        Assert.Equal("Проверка или установка обновления уже выполняется.",
-            await UpdateFlow.CheckCoreAsync(vm, true, settings, installer, Check, Prompt));
+        var manual = UpdateFlow.CheckCoreAsync(reopenedVm, true, settings, installer, Check, Prompt);
         download.SetResult("checked-installer.exe");
         await automatic;
+        Assert.Equal("Проверка или установка обновления уже выполняется.", await manual);
         Assert.Equal(1, installer.Downloads);
         Assert.Equal(1, installer.Launches);
         await vm.ShutdownAsync();
+        await reopenedVm.ShutdownAsync();
     }
 
     [Theory]

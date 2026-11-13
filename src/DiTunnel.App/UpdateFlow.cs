@@ -6,6 +6,7 @@ namespace DiTunnel.App;
 
 public static class UpdateFlow
 {
+    private static readonly SemaphoreSlim UpdateGate = new(1, 1);
     internal static Func<Task<ReleaseCheckResult>> CheckRelease { get; set; } = () => ReleaseChecker.CheckAsync();
 
     public static Task<string> CheckAsync(ContentControl owner, MainViewModel vm, bool manual, Action? afterLaunch = null) =>
@@ -16,9 +17,9 @@ public static class UpdateFlow
         Func<Task<ReleaseCheckResult>> check, Func<AppRelease, bool, Task<string?>> prompt, Action? afterLaunch = null)
     {
         if (installer is null) return "Автообновление недоступно на этой платформе.";
-        if (!vm.UpdateGate.Wait(0)) return "Проверка или установка обновления уже выполняется.";
+        if (!UpdateGate.Wait(0)) return "Проверка или установка обновления уже выполняется.";
         try { return await RunUpdateAsync(vm, manual, settings, installer, check, prompt, afterLaunch); }
-        finally { vm.UpdateGate.Release(); }
+        finally { UpdateGate.Release(); }
     }
 
     private static async Task<string> RunUpdateAsync(MainViewModel vm, bool manual, UserSettings settings, IUpdateInstaller installer,

@@ -54,7 +54,6 @@ public sealed partial class MainViewModel : ViewModelBase
     private int activeProbeFailures;
     private bool healthRecoveryAttempted;
     private int refreshToastGeneration;
-    internal SemaphoreSlim UpdateGate { get; } = new(1, 1);
     [ObservableProperty] private string subscriptionStatus = "";
     [ObservableProperty] private string refreshToast = "";
     [ObservableProperty] private bool isRefreshToastVisible;
