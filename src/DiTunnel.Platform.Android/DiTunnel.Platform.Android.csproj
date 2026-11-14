@@ -4,6 +4,7 @@
     <TargetFramework>net10.0-android36.0</TargetFramework>
     <SupportedOSPlatformVersion>$(AndroidMinimumApiLevel).0</SupportedOSPlatformVersion>
     <LibXrayAarPath Condition="'$(LibXrayAarPath)' == '' and '$(DITUNNEL_LIBXRAY_AAR)' != ''">$(DITUNNEL_LIBXRAY_AAR)</LibXrayAarPath>
+    <LibXrayAarSha256>4708A361A74F7E955635DBE3661CEFB459BDC867423C3B1826A2C5A6EA4AC77D</LibXrayAarSha256>
   </PropertyGroup>
 
   <ItemGroup Condition="Exists('$(LibXrayAarPath)')">
@@ -29,6 +30,11 @@
     <Error
         Condition="!Exists('$(LibXrayAarPath)')"
         Text="libXray.aar v26.7.28 не найден. Задайте LibXrayAarPath или DITUNNEL_LIBXRAY_AAR; ожидаемый SHA-256 указан в eng/android-runtime.json." />
+    <GetFileHash Files="$(LibXrayAarPath)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="ActualLibXrayAarSha256" />
+    </GetFileHash>
+    <Error Condition="'$(ActualLibXrayAarSha256)' != '$(LibXrayAarSha256)'"
+        Text="SHA-256 файла libXray.aar не соответствует закреплённой версии v26.7.28." />
   </Target>
 
 </Project>

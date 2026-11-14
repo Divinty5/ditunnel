@@ -13,7 +13,8 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repositoryRoot 'src\DiTunnel.Android\DiTunnel.Android.csproj'
 $propsPath = Join-Path $repositoryRoot 'Directory.Build.props'
 $dotnetPath = Join-Path $AndroidRoot 'dotnet\dotnet.exe'
-$publishRoot = Join-Path $AndroidRoot 'build-release\publish'
+$buildRoot = Join-Path $AndroidRoot ("build-release\" + [Guid]::NewGuid().ToString('N'))
+$publishRoot = Join-Path $buildRoot 'publish'
 $releaseRoot = Join-Path $AndroidRoot 'releases'
 
 if (-not (Test-Path -LiteralPath $dotnetPath -PathType Leaf)) {
@@ -43,7 +44,7 @@ $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 $env:ANDROID_USER_HOME = Join-Path $AndroidRoot 'android-user'
 $env:DOTNET_CLI_HOME = Join-Path $AndroidRoot 'dotnet-home'
 $env:NUGET_PACKAGES = Join-Path $AndroidRoot 'nuget-packages'
-$env:DITUNNEL_BUILD_ROOT = Join-Path $AndroidRoot 'build-release'
+$env:DITUNNEL_BUILD_ROOT = $buildRoot
 $env:DITUNNEL_LIBXRAY_AAR = Join-Path $AndroidRoot 'libxray\v26.7.28\libxray-android\libXray.aar'
 $env:DITUNNEL_ANDROID_AWG_ROOT = Join-Path $AndroidRoot 'amneziawg\native'
 $env:TEMP = Join-Path $AndroidRoot 'temp'
