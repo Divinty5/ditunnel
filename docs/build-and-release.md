@@ -1,6 +1,6 @@
 # Сборка и публикация
 
-Последний публичный релиз Windows, Android и Linux — 0.6.12. Версии в исходниках задаются в `Directory.Build.props`, Android versionCode 60012 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
+Последний публичный релиз Windows, Android и Linux — 0.6.13. Версии в исходниках задаются в `Directory.Build.props`, Android versionCode 60013 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
 
 ## Windows
 
@@ -10,7 +10,7 @@
 ./scripts/Build-WindowsInstaller.ps1
 ```
 
-`-CompilerPath` задаёт путь ISCC.exe. Скрипт создаёт `artifacts/installer/Di-Tunnel-0.6.12-Setup-x64.exe` и `.exe.sha256`. Оформление и выбор языка определяются файлами `.iss` в `installer/`. Установщик выпускается без подписи Authenticode.
+`-CompilerPath` задаёт путь ISCC.exe. Скрипт создаёт `artifacts/installer/Di-Tunnel-0.6.13-Setup-x64.exe` и `.exe.sha256`. Оформление и выбор языка определяются файлами `.iss` в `installer/`. Установщик выпускается без подписи Authenticode.
 
 ## Android
 
@@ -18,7 +18,7 @@
 
 Для воспроизведения APK 0.6.10 файлы `geoip.dat` и `geosite.dat` берутся из Windows-архива Xray 26.3.27 и читаются из `.tools/xray/26.3.27/windows-x64/`. SHA-256 архива закреплён в манифесте общего релиза. [Манифест 0.6.10](https://github.com/Divinty5/ditunnel/blob/v0.6.10/eng/xray-version.json).
 
-Release APK подписывается существующим ключом вне Git. Пароли передаются apksigner через файлы. Проверяются сертификат, application ID, 0.6.12/60012, minSdk 27, единственная ABI arm64-v8a, native-библиотеки и `zipalign -c -P 16`. Workflow создаёт `artifacts/android/0.6.12/Di-Tunnel-0.6.12-arm64.apk` и `.apk.sha256`. ADB не требуется.
+Release APK подписывается существующим ключом вне Git. Пароли передаются apksigner через файлы. Проверяются сертификат, application ID, 0.6.13/60013, minSdk 27, единственная ABI arm64-v8a, native-библиотеки и `zipalign -c -P 16`. Workflow создаёт `artifacts/android/0.6.13/Di-Tunnel-0.6.13-arm64.apk` и `.apk.sha256`. ADB не требуется.
 
 ## Linux
 
@@ -38,4 +38,4 @@ python3 scripts/Build-LinuxPackage.py --test
 4. Проверить публичные ссылки и выбор assets для всех платформ. Номер в имени файла должен совпадать с тегом: установленный ReleaseChecker не угадывает отличающиеся версии.
 5. При изменении диагностики сверить короткое сообщение и поля отчёта на Windows, Android и Linux. Одинаковый этап и причина дают одинаковый текст. При повторной проверке отчёт должен соответствовать текущей попытке, в том числе при переходе от успеха к ошибке.
 
-Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения выпуска](release-0.6.12.md).
+Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения выпуска](release-0.6.13.md).

@@ -1,14 +1,14 @@
-# Установка Di-Tunnel 0.6.12 для Linux
+# Установка Di-Tunnel для Linux
 
-Установочный пакет предназначен для **Ubuntu 24.04 LTS, amd64**, с systemd, systemd-resolved и рабочим столом GNOME/XWayland либо X11. Пакет включает .NET, Xray и AmneziaWG. [Скачать пакет 0.6.12](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.12).
+Установочный пакет предназначен для **Ubuntu 24.04 LTS, amd64**, с systemd, systemd-resolved и рабочим столом GNOME/XWayland либо X11. Пакет включает .NET, Xray и AmneziaWG. [Скачать пакет 0.6.13](https://github.com/Divinty5/ditunnel/releases/tag/v0.6.13).
 
 ## Установка
 
-Скачайте `Di-Tunnel-0.6.12-linux-amd64.deb` и соседний `.sha256` из одного релиза. Для установки можно открыть `.deb` в графическом установщике пакетов, если он настроен в системе, или выполнить команды из каталога загрузки.
+Возьмите `Di-Tunnel-0.6.13-linux-amd64.deb` и соседний `.sha256` из одной сборки. Для установки можно открыть `.deb` в графическом установщике пакетов, если он настроен в системе, или выполнить команды из каталога загрузки.
 
 ```bash
-sha256sum -c Di-Tunnel-0.6.12-linux-amd64.deb.sha256
-sudo apt install ./Di-Tunnel-0.6.12-linux-amd64.deb
+sha256sum -c Di-Tunnel-0.6.13-linux-amd64.deb.sha256
+sudo apt install ./Di-Tunnel-0.6.13-linux-amd64.deb
 di-tunnel
 ```
 
