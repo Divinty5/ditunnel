@@ -160,10 +160,16 @@ public static class XrayProfileConverter
         string Get(string key, string fallback = "") => query.GetValueOrDefault(key, fallback);
         if (Get("insecure").ToLowerInvariant() is "1" or "true" || Get("allowInsecure").ToLowerInvariant() is "1" or "true")
             throw new NotSupportedException("Профиль отключает проверку TLS. Для подключения используйте сертификат сервера с корректным SNI.");
-        if (Get("obfs") != "" || Get("mport") != "" || Get("plugin") != "")
-            throw new NotSupportedException("Obfs, смена портов и плагины пока не поддерживаются.");
         var scheme = uri.Scheme;
         var hy2 = scheme is "hy2" or "hysteria2";
+        if (Get("mport") != "" || Get("plugin") != "")
+            throw new NotSupportedException("Смена портов и плагины пока не поддерживаются.");
+        var obfuscation = Get("obfs");
+        if (obfuscation.Length != 0 && (!hy2 || !obfuscation.Equals("salamander", StringComparison.OrdinalIgnoreCase)))
+            throw new NotSupportedException("Поддерживается только обфускация Salamander для Hysteria 2.");
+        var obfuscationPassword = Get("obfs-password");
+        if (obfuscation.Length == 0 && obfuscationPassword.Length != 0)
+            throw new FormatException("Для пароля обфускации укажите тип Salamander.");
         if (uri.Port is <= 0 or > ushort.MaxValue) throw new FormatException("В профиле должен быть указан корректный порт сервера.");
         var stream = new JsonObject();
         var outbound = new JsonObject { ["tag"] = "proxy", ["protocol"] = hy2 ? "hysteria" : scheme == "ss" ? "shadowsocks" : scheme };
@@ -173,6 +179,19 @@ public static class XrayProfileConverter
             outbound["settings"] = new JsonObject { ["version"] = 2, ["address"] = uri.Host, ["port"] = uri.Port };
             stream["network"] = "hysteria";
             stream["hysteriaSettings"] = new JsonObject { ["version"] = 2, ["auth"] = credential };
+            if (obfuscation.Length != 0)
+            {
+                if (obfuscationPassword.Length == 0)
+                    throw new FormatException("Для Salamander нужен пароль обфускации (obfs-password).");
+                stream["finalmask"] = new JsonObject
+                {
+                    ["udp"] = new JsonArray(new JsonObject
+                    {
+                        ["type"] = "salamander",
+                        ["settings"] = new JsonObject { ["password"] = obfuscationPassword }
+                    })
+                };
+            }
         }
         else if (scheme is "vless" or "vmess")
         {

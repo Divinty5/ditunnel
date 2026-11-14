@@ -24,6 +24,7 @@ public sealed class XrayProfileConverterTests
         Assert.Equal("192.0.2.1", outbound.GetProperty("settings").GetProperty("address").GetString());
         Assert.Equal("a:b", outbound.GetProperty("streamSettings").GetProperty("hysteriaSettings").GetProperty("auth").GetString());
         Assert.Equal("cert.example.com", outbound.GetProperty("streamSettings").GetProperty("tlsSettings").GetProperty("serverName").GetString());
+        Assert.False(outbound.GetProperty("streamSettings").TryGetProperty("finalmask", out _));
         Assert.Equal("tun", config.RootElement.GetProperty("inbounds")[0].GetProperty("protocol").GetString());
     }
     [Fact] public void SocksProbeOnlyListensOnLoopback()
@@ -42,8 +43,45 @@ public sealed class XrayProfileConverterTests
     }
     [Theory]
     [InlineData("hy2://pass@example.com:443?insecure=1")]
-    [InlineData("hy2://pass@example.com:443?obfs=salamander")]
+    [InlineData("hy2://pass@example.com:443?obfs=unknown&obfs-password=synthetic")]
+    [InlineData("trojan://pass@example.com:443?obfs=salamander&obfs-password=synthetic")]
     public void UnsupportedSettingsAreNotSilentlyDropped(string link) => Assert.Throws<NotSupportedException>(() => XrayProfileConverter.Convert(new("Test", "Test", link)));
+
+    [Fact]
+    public void HysteriaWithSalamanderStillRejectsDisabledTlsValidation()
+    {
+        var profile = new ImportedProfile("Test", "Hysteria 2",
+            "hy2://pass@example.com:443?insecure=1&obfs=salamander&obfs-password=synthetic");
+        var error = Assert.Throws<NotSupportedException>(() => XrayProfileConverter.Convert(profile));
+        Assert.Contains("отключает проверку TLS", error.Message);
+    }
+
+    [Theory]
+    [InlineData("obfs=salamander")]
+    [InlineData("obfs=salamander&obfs-password=")]
+    [InlineData("obfs-password=synthetic")]
+    public void HysteriaRejectsIncompleteObfuscation(string query) =>
+        Assert.Throws<FormatException>(() => XrayProfileConverter.Convert(new("Test", "Hysteria 2", $"hy2://pass@example.com:443?{query}")));
+
+    [Theory]
+    [InlineData("hy2", false)]
+    [InlineData("hysteria2", true)]
+    public void HysteriaKeepsSalamanderInTheGeneratedRuntimeConfig(string scheme, bool tun)
+    {
+        var profile = new ImportedProfile("Test", "Hysteria 2",
+            $"{scheme}://synthetic-auth@example.com:443?obfs=salamander&obfs-password=synthetic%2B%26%3D%20key&sni=cert.example.com");
+        var converted = XrayProfileConverter.Convert(profile);
+        using var config = JsonDocument.Parse(converted.Build("192.0.2.1", tun, proxyCredentials: ProbeSocksCredentials.Create()));
+        var stream = config.RootElement.GetProperty("outbounds")[0].GetProperty("streamSettings");
+        var mask = Assert.Single(stream.GetProperty("finalmask").GetProperty("udp").EnumerateArray());
+
+        Assert.Equal(KillSwitchTransportProtocol.Udp, converted.ServerTransport);
+        Assert.Equal("salamander", mask.GetProperty("type").GetString());
+        Assert.Equal("synthetic+&= key", mask.GetProperty("settings").GetProperty("password").GetString());
+        Assert.Equal("synthetic-auth", stream.GetProperty("hysteriaSettings").GetProperty("auth").GetString());
+        Assert.Equal("cert.example.com", stream.GetProperty("tlsSettings").GetProperty("serverName").GetString());
+        Assert.False(stream.GetProperty("tlsSettings").GetProperty("allowInsecure").GetBoolean());
+    }
     [Fact]
     public void VlessPreservesRealitySettings()
     {

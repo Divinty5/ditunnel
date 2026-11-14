@@ -17,11 +17,14 @@ public sealed class AndroidProbeBatchConfigurationTests
         var runtime = Path.Combine(root.FullName, ".tools", "xray", "26.6.27", "windows-x64", "xray.exe");
         Assert.True(File.Exists(runtime));
         var profile = Profile("00000000-0000-0000-0000-000000000001", "192.0.2.1");
+        var hysteria = XrayProfileConverter.Convert(new ImportedProfile("Synthetic", "Hysteria 2",
+            "hy2://synthetic-auth@192.0.2.3:443?obfs=salamander&obfs-password=synthetic-mask"));
         var path = Path.Combine(Path.GetTempPath(), $"ditunnel-probe-{Guid.NewGuid():N}.json");
         try
         {
             await File.WriteAllTextAsync(path, AndroidProbeBatchConfiguration.Build(
-                [new(profile, "192.0.2.1", 31001), new(profile with { SupportsIpv6 = false }, "192.0.2.2", 31002)]));
+                [new(profile, "192.0.2.1", 31001), new(profile with { SupportsIpv6 = false }, "192.0.2.2", 31002),
+                    new(hysteria, "192.0.2.3", 31003)]));
             var start = new ProcessStartInfo(runtime) { UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var argument in new[] { "run", "-test", "-config", path }) start.ArgumentList.Add(argument);
