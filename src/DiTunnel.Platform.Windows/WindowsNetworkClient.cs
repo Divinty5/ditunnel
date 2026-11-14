@@ -12,7 +12,7 @@ namespace DiTunnel.Platform.Windows;
 
 /// <summary>Unprivileged UI facade. Only the separately authenticated broker touches the network.</summary>
 public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<ConnectionPolicy> connection,
-    Func<bool> blockAds, Func<bool> strictAds) : IProfileVpnEngine, IServerProbe, INetworkRecoveryEngine
+    Func<bool> blockAds, Func<bool> strictAds) : IProfileVpnEngine, IServerProbe, IActiveTunnelProbe, INetworkRecoveryEngine
 {
     private readonly SemaphoreSlim startup = new(1, 1);
     private readonly SemaphoreSlim writing = new(1, 1);
@@ -56,6 +56,17 @@ public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<Con
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
         (await RequestAsync("probe", profile, cancellationToken, mode)).Probe
             ?? ProbePolicy.Failure(new IOException(), "Служба проверки", mode == ServerProbeMode.Https ? "HTTPS" : "HTTP", 0, "Windows");
+
+    public async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        if (Status.State != VpnConnectionState.Connected) return ProbePolicy.ActiveTunnelDeferred("Windows");
+        try
+        {
+            return (await RequestAsync("probe-active", null, cancellationToken)).Probe
+                ?? ProbePolicy.ActiveTunnelDeferred("Windows");
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested) { return ProbePolicy.ActiveTunnelDeferred("Windows"); }
+    }
 
     private async Task EnsureStartedAsync(CancellationToken token)
     {
@@ -104,7 +115,8 @@ public sealed class WindowsNetworkClient(Func<SplitTunnelPolicy> split, Func<Con
         pending[id] = completion;
         try
         {
-            await WriteAsync(new(id, operation, profile, split(), connection(), blockAds(), strictAds(), mode), token);
+            await WriteAsync(operation == "probe-active" ? new(id, operation) :
+                new(id, operation, profile, split(), connection(), blockAds(), strictAds(), mode), token);
             using var registration = token.Register(() => _ = CancelRequestAsync(id));
             // Wait for cancellation acknowledgement, including rollback, before the UI starts another operation.
             var reply = await completion.Task;

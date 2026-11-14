@@ -35,7 +35,12 @@ internal static class LinuxVpnSmoke
         {
             var path = Path.Combine(directory, "synthetic-server.json");
             await File.WriteAllTextAsync(path, """
-                {"log":{"loglevel":"none"},"inbounds":[{"listen":"10.77.0.2","port":18080,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111"}],"decryption":"none"}}],"outbounds":[{"protocol":"freedom"}]}
+                {
+                  "log":{"loglevel":"none"},
+                  "inbounds":[{"listen":"10.77.0.2","port":18080,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111"}],"decryption":"none"}}],
+                  "outbounds":[{"protocol":"freedom"},{"tag":"control","protocol":"freedom","settings":{"redirect":"127.0.0.1:18443"}}],
+                  "routing":{"rules":[{"ip":["1.1.1.1","8.8.8.8","2606:4700:4700::1111","2001:4860:4860::8888"],"port":443,"outboundTag":"control"}]}
+                }
                 """, token);
             var start = new ProcessStartInfo("/usr/bin/nsenter") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var arg in new[] { "-t", peerPid.ToString(), "-n", Path.Combine(runtime, "xray"), "run", "-c", path }) start.ArgumentList.Add(arg);
@@ -63,6 +68,12 @@ internal static class LinuxVpnSmoke
                 if (!(await client.GetCapabilitiesAsync(token)).CanConnect) throw new InvalidOperationException("VPN capability missing.");
                 await client.ConnectAsync(profile, token);
                 if (client.Status.State != VpnConnectionState.Connected) throw new InvalidOperationException("VPN not connected.");
+                var health = await client.ProbeActiveTunnelAsync(token);
+                if (health.Diagnostics is not { ProfileConfirmed: true, ErrorType: "None", Stage: "HTTPS" } diagnostics ||
+                    !diagnostics.Attempts.Contains("one.one.one.one: ControlService", StringComparison.Ordinal) ||
+                    !diagnostics.Attempts.Contains("dns.google: None", StringComparison.Ordinal))
+                    throw new InvalidOperationException("Tunnel-bound HTTPS fallback failed. " + health.Diagnostics?.ToDisplayString());
+                Console.WriteLine("PASS_VPN_ACTIVE_TUN_HTTPS_FALLBACK");
                 foreach (var address in new[] { "198.51.100.20", "2001:db8:77::20" })
                 {
                     var route = JsonNode.Parse(await commands.IpAsync(token, "-j", "route", "get", address))![0]!;

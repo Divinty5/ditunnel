@@ -29,6 +29,12 @@ public interface IServerBatchProbe : IServerProbe
     Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast);
 }
 
+public interface IProgressiveServerProbe : IServerBatchProbe
+{
+    Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+        IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode);
+}
+
 public interface IActiveTunnelProbe
 {
     Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default);

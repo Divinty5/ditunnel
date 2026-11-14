@@ -77,12 +77,13 @@ public sealed class OperationCancellationTests
     {
         public VpnStatus Status { get; private set; } = new(VpnConnectionState.Connected);
         public bool RequiresAdministrator => false;
-        public int Restarts { get; private set; }
+        public List<string> SwitchedServers { get; } = [];
+        public int Restarts => SwitchedServers.Count;
         public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
         public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task SwitchAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
         {
-            Restarts++;
+            SwitchedServers.Add(profile.Name);
             return Task.CompletedTask;
         }
         public Task DisconnectAsync(CancellationToken cancellationToken = default)
@@ -93,15 +94,61 @@ public sealed class OperationCancellationTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class HealthProbe : IServerProbe
+    private class HealthProbe : IServerProbe
     {
         public bool Available { get; set; }
+        public string FailureKind { get; set; } = "Timeout";
         public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
         {
-            Assert.Equal(ServerProbeMode.Https, mode);
-            return Task.FromResult(Available ? ProbePolicy.Success(15, "HTTPS", "HTTPS", true)
-                : ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 100));
+            return CheckAsync();
         }
+
+        protected Task<ServerProbeResult> CheckAsync()
+        {
+            return Task.FromResult(Available ? ProbePolicy.Success(15, "HTTPS", "HTTPS", true)
+                : ProbePolicy.Failure(new ProbeFailureException("HTTPS", FailureKind), "HTTPS", "HTTPS", 100));
+        }
+    }
+
+    private sealed class TunnelHealthProbe : HealthProbe, IActiveTunnelProbe
+    {
+        public bool Deferred { get; set; }
+        public Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default) =>
+            Deferred ? Task.FromResult(ProbePolicy.ActiveTunnelDeferred("Windows")) : CheckAsync();
+    }
+
+    private sealed class LowestStore : IProfileStore
+    {
+        public IReadOnlyList<ImportedProfile> Load() =>
+            [new("A", "VLESS", "synthetic-a", "source", "Subscription"), new("B", "VLESS", "synthetic-b", "source", "Subscription")];
+        public void Save(IEnumerable<ImportedProfile> profiles) { }
+    }
+
+    [Fact]
+    public async Task LowestUsesAlternativeOnlyAfterRestartingCurrentServer()
+    {
+        var engine = new RecoveryEngine();
+        var probe = new TunnelHealthProbe { Available = true };
+        var settings = new UserSettings { LowestMode = true };
+        var vm = new MainViewModel(engine, new LowestStore(), probe, platform: AppPlatform.Android,
+            selectionSettings: settings, persistSelection: () => { });
+        try
+        {
+            vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "B");
+            await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            Assert.Equal(15, vm.SelectedProfile.ProbeMilliseconds);
+            vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "A");
+            probe.Available = false;
+
+            for (var attempt = 0; attempt < 2; attempt++)
+                await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal(["A"], engine.SwitchedServers);
+
+            for (var attempt = 0; attempt < 3; attempt++)
+                await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal(["A", "B"], engine.SwitchedServers);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
 
     [Theory]
@@ -111,14 +158,15 @@ public sealed class OperationCancellationTests
     public async Task FailedActiveProbeChangesStatusAndRestartsAtMostOncePerOutage(ReleaseTarget target)
     {
         var engine = new RecoveryEngine();
-        var probe = new HealthProbe();
+        var probe = new TunnelHealthProbe();
         var platform = target == ReleaseTarget.LinuxX64 ? AppPlatform.Linux
             : target == ReleaseTarget.AndroidArm64 ? AppPlatform.Android : AppPlatform.Windows;
         var vm = new MainViewModel(engine, new Store(), probe, platform: platform);
         try
         {
             await vm.CheckActiveConnectionAsync(default);
-            Assert.Equal("Проверка VPN не пройдена", vm.StatusText);
+            Assert.Equal("Туннель запущен · Проверяем связь", vm.StatusText);
+            Assert.Equal(ConnectionPalette.AccentFor(VpnConnectionState.Connecting).ToString(), vm.PowerBorderBrush.ToString());
             Assert.Equal("Отключить", vm.PowerText);
             Assert.Equal(0, engine.Restarts);
             await vm.CheckActiveConnectionAsync(default);
@@ -127,7 +175,59 @@ public sealed class OperationCancellationTests
             Assert.Equal(1, engine.Restarts);
             probe.Available = true;
             await vm.CheckActiveConnectionAsync(default);
-            Assert.NotEqual("Проверка VPN не пройдена", vm.StatusText);
+            Assert.Equal("VPN подключён", vm.StatusText);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task TransientTunnelTimeoutDoesNotReplaceProfileResultOrCountAcrossDeferredCheck()
+    {
+        var engine = new RecoveryEngine();
+        var probe = new TunnelHealthProbe { Available = true };
+        var vm = new MainViewModel(engine, new Store(), probe, platform: AppPlatform.Windows);
+        try
+        {
+            Assert.Equal("Туннель VPN запущен", vm.StatusText);
+            await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal("VPN подключён", vm.StatusText);
+            probe.Available = false;
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal("Туннель запущен · Проверяем связь", vm.StatusText);
+            Assert.Contains("Тип ошибки: Timeout", vm.DiagnosticText);
+            Assert.DoesNotContain("Тип ошибки: None", vm.DiagnosticText);
+            Assert.Equal(15, vm.SelectedProfile!.ProbeMilliseconds);
+            probe.Deferred = true;
+            await vm.CheckActiveConnectionAsync(default);
+            probe.Deferred = false;
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal(0, engine.Restarts);
+            probe.Available = true;
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal("VPN подключён", vm.StatusText);
+            Assert.Contains("Тип ошибки: None", vm.DiagnosticText);
+            Assert.DoesNotContain("Тайм-аут", vm.DiagnosticText);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false, "Timeout")]
+    [InlineData(true, "ControlService")]
+    public async Task ProfileTimeoutOrControlSiteErrorNeverRestartsTunnel(bool throughTunnel, string kind)
+    {
+        var engine = new RecoveryEngine();
+        HealthProbe probe = throughTunnel ? new TunnelHealthProbe() : new HealthProbe();
+        probe.FailureKind = kind;
+        var vm = new MainViewModel(engine, new Store(), probe, platform: AppPlatform.Windows);
+        try
+        {
+            await vm.CheckActiveConnectionAsync(default);
+            await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal(0, engine.Restarts);
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+            Assert.Equal(ConnectionPalette.AccentFor(VpnConnectionState.Connecting).ToString(), vm.PowerBorderBrush.ToString());
         }
         finally { await vm.ShutdownAsync(); }
     }

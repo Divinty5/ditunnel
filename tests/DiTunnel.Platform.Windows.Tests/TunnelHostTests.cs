@@ -8,6 +8,22 @@ namespace DiTunnel.Platform.Windows.Tests;
 public sealed class TunnelHostTests
 {
     [Theory]
+    [InlineData(SplitTunnelMode.ProxyAll)]
+    [InlineData(SplitTunnelMode.ProxySelected)]
+    public async Task ActiveHttpsDefersWhenNeitherControlTargetCanUseTheVpn(SplitTunnelMode mode)
+    {
+        await using var fixture = new Fixture(mode: mode);
+        using var host = fixture.Start();
+        await ReadUntilAsync(host, "CONNECTED");
+        var result = await host.ProbeActiveAsync(default);
+        Assert.True(result.IsDeferred);
+        Assert.Equal(("HTTPS", "TUN", "Unconfirmed", false), (result.Diagnostics!.Method,
+            result.Diagnostics.Stage, result.Diagnostics.ErrorType, result.Diagnostics.ProfileConfirmed));
+        host.RequestStop();
+        Assert.Contains("STOPPED", await DrainAsync(host));
+    }
+
+    [Theory]
     [InlineData(SplitTunnelMode.BypassSelected)]
     [InlineData(SplitTunnelMode.ProxySelected)]
     public async Task DomainZonesConnectWithoutInitialAddresses(SplitTunnelMode mode)
@@ -373,7 +389,7 @@ public sealed class TunnelHostTests
             File.WriteAllText(Path.Combine(Directory, "amneziawg.json"), "{}");
             Options = new("synthetic-xray", config, IPAddress.Parse("192.0.2.11"), "DiTunnel-test", mode,
                 selectedAddresses ? [IPAddress.Parse("203.0.113.20")] : [], domains ?? [], protection ? Path.Combine(Directory, "kill-switch.ready") : null,
-                amnezia ? "synthetic-awg" : null, ["10.20.30.1"], SupportsIpv6: ipv6, HasProcessRules: applications);
+                amnezia ? "synthetic-awg" : null, ["10.20.30.1"], SupportsIpv6: ipv6, SplitProcesses: applications ? ["synthetic.exe"] : []);
         }
         internal WindowsTunnelHost Start() => host = new(Options, Network, (path, _) =>
         {

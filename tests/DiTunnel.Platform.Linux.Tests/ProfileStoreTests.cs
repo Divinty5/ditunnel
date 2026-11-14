@@ -31,6 +31,25 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void EmptySubscriptionIsEncryptedAndSurvivesReopeningAlongsideProfiles()
+    {
+        var key = RandomNumberGenerator.GetBytes(32);
+        var subscription = new EmptySubscription("empty", "Test subscription", "https://example.com/synthetic-token");
+        using (var store = new LinuxProfileStore(FilePath, key))
+        {
+            store.Load();
+            store.Save([Profile]);
+            Assert.Empty(store.LoadLibrary().EmptySubscriptions);
+            store.SaveLibrary(new([Profile], [subscription]));
+        }
+        Assert.DoesNotContain(subscription.SourceUrl, Encoding.UTF8.GetString(File.ReadAllBytes(FilePath)));
+        using var reopened = new LinuxProfileStore(FilePath, key);
+        var library = reopened.LoadLibrary();
+        Assert.Equal(subscription, Assert.Single(library.EmptySubscriptions));
+        Assert.Equal(Profile, Assert.Single(reopened.Load()));
+    }
+
+    [Fact]
     public void CorruptionCannotBeOverwrittenByEmptySave()
     {
         using var store = new LinuxProfileStore(FilePath, RandomNumberGenerator.GetBytes(32));

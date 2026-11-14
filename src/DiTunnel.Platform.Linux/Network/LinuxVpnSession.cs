@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using System.Text;
 using System.Text.Json.Nodes;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
@@ -17,6 +18,8 @@ public interface ILinuxVpnSession : IAsyncDisposable
     Task StartAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token) => StartAsync(profile, token);
     Task ReleaseProtectionAsync() => Task.CompletedTask;
     Task PrepareAsync(ImportedProfile profile, LinuxVpnPolicy policy, CancellationToken token) => Task.CompletedTask;
+    Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken token) =>
+        Task.FromResult(ProbePolicy.ActiveTunnelDeferred("Linux"));
 }
 
 [SupportedOSPlatform("linux")]
@@ -30,6 +33,7 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
     private string? directory;
     private bool journalWritten;
     private LinuxKillSwitch? protection;
+    private Func<CancellationToken, Task<ServerProbeResult>>? probeTunnel;
     public bool IsProtectionActive => protection?.Active == true;
     public string StartupStage { get; private set; } = "Профиль";
     private string Journal => Path.Combine(stateDirectory, "vpn-owner.json");
@@ -121,6 +125,27 @@ public sealed class LinuxVpnSession(string runtimeDirectory, string stateDirecto
             await LinuxRuntimeServerProbe.WritePrivateAsync(temporaryJournal, data.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
             File.Move(temporaryJournal, Journal, overwrite: true);
         }
+        probeTunnel = cancellation => DesktopTunnelProbe.CheckAsync("Linux", policy.Split,
+            configuration.SupportsIpv4, configuration.SupportsIpv6,
+            !policy.Ipv4Only || configuration.IsLocalProxy || policy.Mode == SplitTunnelMode.ProxySelected ? dns : [],
+            target => !target.Equals(address), socket => BindTunnelSocket(socket, name), cancellation);
+    }
+
+    public async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken token)
+    {
+        if (routes is not { } lease || probeTunnel is not { } probe)
+            return ProbePolicy.ActiveTunnelDeferred("Linux");
+        try { await lease.VerifyLinkAsync(token).ConfigureAwait(false); }
+        catch (Exception) when (!token.IsCancellationRequested) { return ProbePolicy.ActiveTunnelDeferred("Linux"); }
+        return await probe(token).ConfigureAwait(false);
+    }
+
+    private static void BindTunnelSocket(Socket socket, string name)
+    {
+        const int solSocket = 1, soBindToDevice = 25;
+        socket.SetRawSocketOption(solSocket, soBindToDevice, Encoding.ASCII.GetBytes(name + "\0"));
+        var source = socket.AddressFamily == AddressFamily.InterNetwork ? LinuxRouteLease.Ipv4Address : LinuxRouteLease.Ipv6Address;
+        socket.Bind(new IPEndPoint(IPAddress.Parse(source), 0));
     }
 
     public static string BuildConfiguration(XrayProfileConfiguration configuration, IPAddress endpoint, string name, IReadOnlyList<string> dns, LinuxVpnPolicy? policy = null)

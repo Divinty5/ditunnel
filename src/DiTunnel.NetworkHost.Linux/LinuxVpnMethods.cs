@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using DiTunnel.Core;
 using DiTunnel.Platform.Linux.Network;
 using Tmds.DBus.Protocol;
 
@@ -10,6 +12,17 @@ internal sealed class LinuxVpnMethods(LinuxVpnCoordinator coordinator, LinuxProb
     {
         var request = context.Request;
         var sender = request.SenderAsString!;
+        if (request.MemberAsString == "ProbeActive" && request.SignatureAsString == "s")
+        {
+            try
+            {
+                var id = ReadId(request.GetBodyReader().ReadStringAsSpan());
+                context.DisposesAsynchronously = true;
+                _ = ReplyActiveProbeAsync(context, sender, id);
+            }
+            catch { Invalid(context); }
+            return true;
+        }
         if (request.MemberAsString == "GetStatus" && request.SignatureAsString == "")
         {
             var status = coordinator.StatusFor(sender);
@@ -66,6 +79,18 @@ internal sealed class LinuxVpnMethods(LinuxVpnCoordinator coordinator, LinuxProb
     private static Guid ReadId(ReadOnlySpan<byte> value) => value.Length == 36 && Guid.TryParseExact(Encoding.UTF8.GetString(value), "D", out var id) && id != Guid.Empty
         ? id : throw new ArgumentException();
     private static void Invalid(MethodContext context) => context.ReplyError("org.divinty5.DiTunnel.InvalidRequest", "Некорректный запрос VPN.");
+    private async Task ReplyActiveProbeAsync(MethodContext context, string sender, Guid id)
+    {
+        try
+        {
+            var result = await coordinator.ProbeActiveTunnelAsync(sender, id, context.RequestAborted).ConfigureAwait(false);
+            using var writer = context.CreateReplyWriter("s");
+            writer.WriteString(JsonSerializer.Serialize(result, DiTunnelJsonContext.Default.ServerProbeResult));
+            context.Reply(writer.CreateMessage());
+        }
+        catch { context.ReplyError("org.divinty5.DiTunnel.ProbeFailed", "Не удалось проверить туннель."); }
+        finally { context.Dispose(); }
+    }
     private async Task ReplyAsync(MethodContext context, Func<Task> action, bool serialize = true)
     {
         var acquired = false;

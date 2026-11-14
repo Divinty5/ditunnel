@@ -14,26 +14,33 @@ internal static class AndroidProbeServiceBridge
     internal const string ActionCancel = "com.divintyinteractive.ditunnel.action.CANCEL_PROBE";
     internal const string ActionStarted = "com.divintyinteractive.ditunnel.status.PROBE_STARTED";
     internal const string ActionResult = "com.divintyinteractive.ditunnel.status.PROBE_RESULT";
+    internal const string ActionProgress = "com.divintyinteractive.ditunnel.status.PROBE_PROGRESS";
     internal const string ExtraRequestId = "request_id";
     internal const string ExtraProfiles = "profiles";
     internal const string ExtraMode = "mode";
     internal const string ExtraLegacy = "legacy";
     internal const string ExtraResult = "result";
+    internal const string ExtraIndex = "index";
     internal const string ExtraProcessId = "process_id";
-    private sealed class ProbeRequest
+    private sealed class ProbeRequest(int count, Action<int, ServerProbeResult>? report)
     {
         public TaskCompletionSource<IReadOnlyList<ServerProbeResult>> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int ProcessId;
+        public void Report(int index, ServerProbeResult result)
+        {
+            if (!Completion.Task.IsCompleted && index >= 0 && index < count) report?.Invoke(index, result);
+        }
     }
     private static readonly ConcurrentDictionary<string, ProbeRequest> Pending = new();
     private static readonly object Sync = new();
     private static ResultReceiver? receiver;
 
-    public static async Task<IReadOnlyList<ServerProbeResult>> ProbeAsync(Context context, IReadOnlyList<ImportedProfile> profiles, ServerProbeMode mode, CancellationToken cancellationToken, bool legacy = false)
+    public static async Task<IReadOnlyList<ServerProbeResult>> ProbeAsync(Context context, IReadOnlyList<ImportedProfile> profiles,
+        ServerProbeMode mode, CancellationToken cancellationToken, bool legacy = false, Action<int, ServerProbeResult>? report = null)
     {
         Register(context);
         var requestId = Guid.NewGuid().ToString("N");
-        var pending = new ProbeRequest();
+        var pending = new ProbeRequest(profiles.Count, report);
         var completion = pending.Completion;
         Pending[requestId] = pending;
         var started = false;
@@ -70,6 +77,7 @@ internal static class AndroidProbeServiceBridge
             receiver = new ResultReceiver();
             var filter = new IntentFilter(ActionResult);
             filter.AddAction(ActionStarted);
+            filter.AddAction(ActionProgress);
             if (OperatingSystem.IsAndroidVersionAtLeast(33)) context.RegisterReceiver(receiver, filter, ReceiverFlags.NotExported);
             else
 #pragma warning disable CA1422
@@ -120,6 +128,16 @@ internal static class AndroidProbeServiceBridge
             var requestId = intent?.GetStringExtra(ExtraRequestId);
             var json = intent?.GetStringExtra(ExtraResult);
             if (requestId is null || !Pending.TryGetValue(requestId, out var pending)) return;
+            if (intent!.Action == ActionProgress && json is not null)
+            {
+                try
+                {
+                    var result = JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResult);
+                    if (result is not null) pending.Report(intent.GetIntExtra(ExtraIndex, -1), result);
+                }
+                catch (JsonException) { }
+                return;
+            }
             Volatile.Write(ref pending.ProcessId, intent!.GetIntExtra(ExtraProcessId, 0));
             if (intent.Action != ActionResult || json is null) return;
             try { pending.Completion.TrySetResult(JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResultArray) ?? []); }

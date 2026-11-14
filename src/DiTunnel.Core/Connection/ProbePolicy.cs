@@ -4,7 +4,6 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Authentication;
-using DiTunnel.Core.Connection;
 
 namespace DiTunnel.Core.Connection;
 
@@ -21,6 +20,10 @@ public static class ProbePolicy
     // The primary matches the desktop HTTPS check. The independent fallback also tests DNS.
     public static readonly Uri Primary = new("https://1.1.1.1/cdn-cgi/trace");
     public static readonly Uri Fallback = new("https://www.gstatic.com/generate_204");
+    public static TimeSpan ActiveHttpsAttemptBudget { get; } = TimeSpan.FromSeconds(5);
+    public static ServerProbeResult ActiveTunnelDeferred(string platform) => new(null,
+        "Проверка через туннель недоступна", IsDeferred: true,
+        Diagnostics: new("HTTPS", "TUN", "Unconfirmed", 0, false, VersionFor(platform), Platform: platform));
     public static string VersionFor(string platform) => typeof(ProbePolicy).Assembly
         .GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(item => item.Key == platform + "Version")?.Value ?? "unknown";
 
@@ -107,8 +110,11 @@ public static class ProbePolicy
     // One budget per site. Start the independent fallback after a short head start,
     // rather than waiting for two full sequential timeouts on every dead profile.
     public static async Task<ServerProbeResult> CheckHttpsAsync(Func<Uri, CancellationToken, Task> request,
-        CancellationToken cancellationToken, TimeSpan? attemptBudget = null, string platform = "Android")
+        CancellationToken cancellationToken, TimeSpan? attemptBudget = null, string platform = "Android",
+        IReadOnlyList<Uri>? targets = null)
     {
+        targets ??= [Primary, Fallback];
+        if (targets.Count is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(targets));
         var total = Stopwatch.StartNew();
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         async Task<ServerProbeResult> Attempt(Uri target)
@@ -136,7 +142,8 @@ public static class ProbePolicy
                 Attempts = $"{target.Host}: {result.Diagnostics.ErrorType} ({watch.Elapsed.TotalMilliseconds:F0} мс)"
             } };
         }
-        var primary = Attempt(Primary);
+        var primary = Attempt(targets[0]);
+        if (targets.Count == 1) return await primary;
         using var headStart = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         await Task.WhenAny(primary, Task.Delay(TimeSpan.FromMilliseconds(600), headStart.Token));
         cancellationToken.ThrowIfCancellationRequested();
@@ -146,7 +153,7 @@ public static class ProbePolicy
             return primary.Result;
         }
         headStart.Cancel();
-        var fallback = Attempt(Fallback);
+        var fallback = Attempt(targets[1]);
         var remaining = new List<Task<ServerProbeResult>> { primary, fallback };
         ServerProbeResult? winner = null;
         while (remaining.Count > 0)
@@ -159,7 +166,7 @@ public static class ProbePolicy
         // Both real request implementations honour cancellation and close their sockets.
         var attempts = await Task.WhenAll(primary, fallback);
         cancellationToken.ThrowIfCancellationRequested();
-        winner ??= attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType is "Tls" or "Dns" or "ControlService") ?? attempts[0];
+        winner ??= attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType is not ("Timeout" or "Connection")) ?? attempts[0];
         return winner with { Diagnostics = winner.Diagnostics! with
         {
             DurationMilliseconds = total.Elapsed.TotalMilliseconds,

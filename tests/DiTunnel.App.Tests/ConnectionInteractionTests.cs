@@ -151,10 +151,11 @@ public sealed class ConnectionInteractionTests
     {
         public TaskCompletionSource ReleaseSuccessfulProbe { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool SuccessfulProbeWasCancelled { get; private set; }
+        public bool HoldSuccessfulProbe { get; set; } = true;
         public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
         {
             if (profile.Name == "B2") return new(null, "Таймаут");
-            try { await ReleaseSuccessfulProbe.Task.WaitAsync(cancellationToken); }
+            try { if (HoldSuccessfulProbe) await ReleaseSuccessfulProbe.Task.WaitAsync(cancellationToken); }
             catch (OperationCanceledException) { SuccessfulProbeWasCancelled = true; throw; }
             return new(48, "HTTP · 48 мс");
         }
@@ -174,6 +175,7 @@ public sealed class ConnectionInteractionTests
 
         Assert.Equal("b", vm.SelectedGroup?.Id);
         Assert.True(vm.IsProbing);
+        Assert.Equal("Проверяем…", Assert.Single(vm.Profiles).ProbeDisplayText);
         probe.ReleaseSuccessfulProbe.SetResult();
         await checking;
 
@@ -182,6 +184,30 @@ public sealed class ConnectionInteractionTests
         Assert.Equal("B1", remaining.Name);
         Assert.Equal(48, remaining.ProbeMilliseconds);
         Assert.Equal("b", vm.SelectedGroup?.Id);
+    }
+
+    [Fact]
+    public async Task CancellingProbeRestoresPreviousResultAfterFilteringRebuildsRows()
+    {
+        var probe = new ProgressiveProbe { HoldSuccessfulProbe = false };
+        var vm = new MainViewModel(null, new GroupedStore(), probe);
+        try
+        {
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "b");
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            probe.HoldSuccessfulProbe = true;
+
+            var checking = vm.ProbeAllCommand.ExecuteAsync(null);
+            await WaitForAsync(() => vm.CanRemoveUnavailable);
+            vm.RemoveUnavailableCommand.Execute(null);
+            Assert.Equal("Проверяем…", Assert.Single(vm.Profiles).ProbeDisplayText);
+            vm.CancelProbesCommand.Execute(null);
+            await checking.WaitAsync(TimeSpan.FromSeconds(3));
+
+            Assert.True(probe.SuccessfulProbeWasCancelled);
+            Assert.Equal("48 мс · HTTP", Assert.Single(vm.Profiles).ProbeDisplayText);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
 
     private sealed class BatchProbe : IServerBatchProbe
@@ -210,6 +236,43 @@ public sealed class ConnectionInteractionTests
 
         Assert.Equal([5, 5, 2], probe.BatchSizes);
         Assert.All(vm.Profiles, profile => Assert.Equal(30, profile.ProbeMilliseconds));
+    }
+
+    [Fact]
+    public async Task ProgressiveBatchShowsCompletedProfileBeforeSlowPeer()
+    {
+        var probe = new ProgressiveBatchProbe();
+        var vm = new MainViewModel(null, new GroupedStore(), probe, platform: AppPlatform.Android);
+        try
+        {
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "b");
+            var checking = vm.ProbeAllCommand.ExecuteAsync(null);
+            await WaitForAsync(() => vm.Profiles.Any(row => row.Name == "B1" && row.ProbeMilliseconds == 30));
+            Assert.Equal("Проверяем…", vm.Profiles.Single(row => row.Name == "B2").ProbeDisplayText);
+            Assert.False(checking.IsCompleted);
+            probe.Release.SetResult();
+            await checking.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.All(vm.Profiles, row => Assert.Equal(30, row.ProbeMilliseconds));
+        }
+        finally { probe.Release.TrySetResult(); await vm.ShutdownAsync(); }
+    }
+
+    private sealed class ProgressiveBatchProbe : IProgressiveServerProbe
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+            => throw new NotSupportedException();
+        public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) => throw new NotSupportedException();
+
+        public async Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode)
+        {
+            var result = new ServerProbeResult(30, "HTTP · 30 мс");
+            progress.Report((0, result));
+            await Release.Task.WaitAsync(cancellationToken);
+            return [result, result];
+        }
     }
     [Fact] public async Task ProbeAllRemainsAvailableWhileVpnIsConnected()
     {

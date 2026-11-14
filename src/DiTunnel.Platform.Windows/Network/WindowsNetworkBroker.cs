@@ -79,6 +79,8 @@ public static class WindowsNetworkBroker
                 ServerProbeResult? result = null;
                 if (request.Operation == "probe")
                     result = await probe.ProbeAsync(request.Profile ?? throw new FormatException("Профиль отсутствует."), cancellation.Token, request.ProbeMode);
+                else if (request.Operation == "probe-active")
+                    result = await engine.ProbeActiveTunnelAsync(cancellation.Token);
                 else
                 {
                     await commands.WaitAsync(cancellation.Token);

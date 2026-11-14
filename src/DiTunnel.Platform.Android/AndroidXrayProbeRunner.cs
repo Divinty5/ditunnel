@@ -17,11 +17,17 @@ internal static class AndroidXrayProbeRunner
     public static async Task<ServerProbeResult> MeasureAsync(Context context, ImportedProfile profile, ServerProbeMode mode, CancellationToken cancellationToken)
         => (await MeasureBatchAsync(context, [profile], mode, cancellationToken))[0];
 
-    public static async Task<IReadOnlyList<ServerProbeResult>> MeasureBatchAsync(Context context, IReadOnlyList<ImportedProfile> profiles, ServerProbeMode mode, CancellationToken cancellationToken)
+    public static async Task<IReadOnlyList<ServerProbeResult>> MeasureBatchAsync(Context context, IReadOnlyList<ImportedProfile> profiles,
+        ServerProbeMode mode, CancellationToken cancellationToken, Action<int, ServerProbeResult>? report = null)
     {
         if (profiles.Count is < 1 or > 5) throw new ArgumentOutOfRangeException(nameof(profiles));
         var watch = Stopwatch.StartNew();
         var results = new ServerProbeResult?[profiles.Count];
+        void Complete(int index, ServerProbeResult result)
+        {
+            results[index] = result;
+            report?.Invoke(index, result);
+        }
         var prepared = new AndroidProbeOutbound?[profiles.Count];
         var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager
             ?? throw new AndroidProbeException("Подключение к серверу", "Connection");
@@ -46,7 +52,7 @@ internal static class AndroidXrayProbeRunner
                 prepared[index] = item;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception error) { results[index] = AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds); }
+            catch (Exception error) { Complete(index, AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds)); }
         }));
         if (prepared.All(item => item is null)) return results.Select(item => item!).ToArray();
         if (!manager.BindProcessToNetwork(network)) throw new AndroidProbeException("Подключение к серверу", "Connection");
@@ -84,10 +90,10 @@ internal static class AndroidXrayProbeRunner
                                 };
                                 using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
                                 var result = await AndroidProbePolicy.CheckHttpClientAsync(http, cancellationToken);
-                                results[index] = result with { Diagnostics = result.Diagnostics! with { DurationMilliseconds = watch.Elapsed.TotalMilliseconds } };
+                                Complete(index, result with { Diagnostics = result.Diagnostics! with { DurationMilliseconds = watch.Elapsed.TotalMilliseconds } });
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                            catch (Exception error) { results[index] = AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds); }
+                            catch (Exception error) { Complete(index, AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds)); }
                         }));
                     }
                 }
@@ -98,7 +104,7 @@ internal static class AndroidXrayProbeRunner
                 }
                 if (started) return;
                 if (indexes.Length == 1)
-                    results[indexes[0]] = AndroidProbePolicy.Failure(new AndroidProbeException("Xray", "Runtime"), "Xray", "HTTPS", watch.Elapsed.TotalMilliseconds);
+                    Complete(indexes[0], AndroidProbePolicy.Failure(new AndroidProbeException("Xray", "Runtime"), "Xray", "HTTPS", watch.Elapsed.TotalMilliseconds));
                 else
                 {
                     // Only a failed native start needs subdivision; healthy batches start once.

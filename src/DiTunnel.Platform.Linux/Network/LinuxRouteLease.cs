@@ -6,6 +6,8 @@ namespace DiTunnel.Platform.Linux.Network;
 // No flush/replace, no saved global default route, and no changes to other links' DNS.
 public sealed class LinuxRouteLease(ILinuxNetworkCommands commands, string interfaceName, string owner)
 {
+    internal const string Ipv4Address = "198.18.0.1";
+    internal const string Ipv6Address = "fd71:6469:7475::1";
     public const uint Mark = 51820;
     public const uint DirectMark = 51821;
     private const string MarkSelector = "51820/4294967294";
@@ -52,8 +54,8 @@ public sealed class LinuxRouteLease(ILinuxNetworkCommands commands, string inter
             throw new InvalidOperationException("Ожидался TUN интерфейс Di-Tunnel.");
         InterfaceIndex = (int)link["ifindex"]!;
         await commands.IpAsync(token, "link", "set", "dev", interfaceName, "alias", "ditunnel:" + owner).ConfigureAwait(false);
-        await commands.IpAsync(token, "-4", "address", "add", "198.18.0.1/32", "dev", interfaceName).ConfigureAwait(false);
-        await commands.IpAsync(token, "-6", "address", "add", "fd71:6469:7475::1/128", "dev", interfaceName, "nodad").ConfigureAwait(false);
+        await commands.IpAsync(token, "-4", "address", "add", Ipv4Address + "/32", "dev", interfaceName).ConfigureAwait(false);
+        await commands.IpAsync(token, "-6", "address", "add", Ipv6Address + "/128", "dev", interfaceName, "nodad").ConfigureAwait(false);
     }
 
     public async Task ActivateAsync(IReadOnlyList<string> dns, CancellationToken token)
@@ -132,7 +134,7 @@ public sealed class LinuxRouteLease(ILinuxNetworkCommands commands, string inter
             && (priority == 100 && table is "main" or "254" && !inverted
                 || priority == 101 && table == Table && inverted);
     }
-    private async Task VerifyLinkAsync(CancellationToken token)
+    internal async Task VerifyLinkAsync(CancellationToken token)
     {
         if (!(await LinksAsync(token).ConfigureAwait(false)).Any(link => (string?)link?["ifname"] == interfaceName
             && (int?)link?["ifindex"] == InterfaceIndex && (string?)link?["ifalias"] == "ditunnel:" + owner))

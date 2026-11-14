@@ -1,6 +1,4 @@
 using System.Security.Cryptography;
-using System.Text.Json;
-using DiTunnel.Core;
 using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.Platform.Linux.Storage;
@@ -21,7 +19,9 @@ public sealed class LinuxProfileStore : IProfileStore, IDisposable
         this.key = key.ToArray();
     }
 
-    public IReadOnlyList<ImportedProfile> Load()
+    public IReadOnlyList<ImportedProfile> Load() => LoadLibrary().Profiles;
+
+    public ProfileLibrary LoadLibrary()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         loaded = false;
@@ -37,7 +37,7 @@ public sealed class LinuxProfileStore : IProfileStore, IDisposable
         catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
         {
             loaded = true;
-            return [];
+            return new([], []);
         }
         if (!bytes.AsSpan(0, Header.Length).SequenceEqual(Header)) throw new CryptographicException("Неизвестный формат хранилища профилей.");
         var plaintext = new byte[bytes.Length - Header.Length - NonceSize - TagSize];
@@ -46,19 +46,20 @@ public sealed class LinuxProfileStore : IProfileStore, IDisposable
             using var aes = new AesGcm(key, TagSize);
             aes.Decrypt(bytes.AsSpan(Header.Length, NonceSize), bytes.AsSpan(Header.Length + NonceSize + TagSize),
                 bytes.AsSpan(Header.Length + NonceSize, TagSize), plaintext, Header);
-            var profiles = JsonSerializer.Deserialize(plaintext, DiTunnelJsonContext.Default.ImportedProfileArray)
-                ?? throw new JsonException("Хранилище не содержит список профилей.");
+            var library = ProfileLibrary.Read(plaintext);
             loaded = true;
-            return profiles;
+            return library;
         }
         finally { CryptographicOperations.ZeroMemory(plaintext); }
     }
 
-    public void Save(IEnumerable<ImportedProfile> profiles)
+    public void Save(IEnumerable<ImportedProfile> profiles) => SaveLibrary(new(profiles.ToArray(), []));
+
+    public void SaveLibrary(ProfileLibrary library)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         if (!loaded) throw new InvalidOperationException("Сначала требуется успешно прочитать хранилище профилей.");
-        var plaintext = JsonSerializer.SerializeToUtf8Bytes(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray);
+        var plaintext = library.Write();
         var temporary = filePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {

@@ -4,14 +4,16 @@ using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DiTunnel.Core.Connection;
+using DiTunnel.Infrastructure.Xray;
 
 namespace DiTunnel.Platform.Windows.Network;
 
 internal sealed record TunnelHostOptions(string Runtime, string Config, IPAddress Server, string Name,
     SplitTunnelMode SplitMode, IPAddress[] SplitAddresses, string[] SplitDomains, string? ProtectionReady,
-    string? AmneziaRuntime, string[] DnsServers, bool SupportsIpv4 = true, bool SupportsIpv6 = true, bool HasProcessRules = false)
+    string? AmneziaRuntime, string[] DnsServers, bool SupportsIpv4 = true, bool SupportsIpv6 = true,
+    IReadOnlyList<string>? SplitProcesses = null)
 {
-    internal bool CaptureAllTraffic => SplitMode != SplitTunnelMode.ProxySelected || HasProcessRules || SplitDomains.Any(SplitTunnelPolicy.IsTopLevelDomain);
+    internal bool CaptureAllTraffic => SplitMode != SplitTunnelMode.ProxySelected || SplitProcesses is { Count: > 0 } || SplitDomains.Any(SplitTunnelPolicy.IsTopLevelDomain);
 }
 
 /// <summary>Runs in the elevated broker. The GUI can disappear while rollback continues here.</summary>
@@ -28,6 +30,7 @@ internal sealed class WindowsTunnelHost : IDisposable
     private ITunnelCore? amnezia;
     private readonly List<Task> drainTasks = [];
     private uint tunnelIndex;
+    private int probing;
     private string stage = "PRECHECK";
     private readonly Task completion;
     internal bool HasExited => completion.IsCompleted;
@@ -43,6 +46,24 @@ internal sealed class WindowsTunnelHost : IDisposable
 
     internal async Task<string?> ReadLineAsync() => await events.Reader.WaitToReadAsync() ? await events.Reader.ReadAsync() : null;
     internal Task WaitForExitAsync() => completion;
+    internal async Task<ServerProbeResult> ProbeActiveAsync(CancellationToken token)
+    {
+        if (Interlocked.Exchange(ref probing, 1) != 0) return ProbePolicy.ActiveTunnelDeferred("Windows");
+        try
+        {
+            using var check = CancellationTokenSource.CreateLinkedTokenSource(token, stopping.Token);
+            var split = new SplitTunnelPolicy(options.SplitMode, options.SplitDomains, options.SplitProcesses ?? []);
+            var forced = options.AmneziaRuntime is not null || options.SplitMode == SplitTunnelMode.ProxySelected ? options.DnsServers : [];
+            return await DesktopTunnelProbe.CheckAsync("Windows", split, options.SupportsIpv4, options.SupportsIpv6,
+                forced, address => !address.Equals(options.Server) && network.UsesTunnel(tunnelIndex, address),
+                socket => network.BindTunnelSocket(socket, tunnelIndex), check.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            return ProbePolicy.ActiveTunnelDeferred("Windows");
+        }
+        finally { Volatile.Write(ref probing, 0); }
+    }
     internal void RequestStop() => stopping.Cancel();
     public void Dispose() => stopping.Dispose();
     private void Emit(string value) => events.Writer.TryWrite(value);
@@ -214,8 +235,8 @@ internal sealed class WindowsTunnelHost : IDisposable
                 return tunnelIndex != 0;
             }, TimeSpan.FromSeconds(20));
             Stage("ADDRESSES");
-            if (options.SupportsIpv4) await network.AddAddressAsync(tunnelIndex, "172.31.255.1", 30, stopping.Token);
-            if (options.SupportsIpv6) await network.AddAddressAsync(tunnelIndex, "fd52:d17::1", 64, stopping.Token);
+            if (options.SupportsIpv4) await network.AddAddressAsync(tunnelIndex, TunnelNetwork.Ipv4Address, 30, stopping.Token);
+            if (options.SupportsIpv6) await network.AddAddressAsync(tunnelIndex, TunnelNetwork.Ipv6Address, 64, stopping.Token);
             network.SetMetric(tunnelIndex, false);
             network.SetMetric(tunnelIndex, true);
             Emit("TUNNEL_INTERFACE_" + tunnelIndex);
@@ -337,6 +358,7 @@ internal sealed class WindowsTunnelHost : IDisposable
         }
         finally
         {
+            stopping.Cancel();
             Emit("STAGE_CLEANUP");
             foreach (var route in ownedRoutes.AsEnumerable().Reverse())
                 try { network.RemoveRoute(route); }

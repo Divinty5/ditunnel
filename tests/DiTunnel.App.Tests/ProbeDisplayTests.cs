@@ -24,8 +24,9 @@ public sealed class ProbeDisplayTests
         Assert.Equal("428 мс", row.ProbeDisplayText);
         Assert.Contains("через туннель", row.ProbeText);
         Assert.Contains(nameof(row.ProbeDisplayText), changed);
-        row.ProbeText = "Проверяем…";
+        row.IsProbePending = true;
         Assert.Equal("Проверяем…", row.ProbeDisplayText);
+        row.IsProbePending = false;
         row.ProbeMilliseconds = null;
         row.ProbeText = "Нет ответа";
         Assert.Equal("Нет ответа", row.ProbeDisplayText);

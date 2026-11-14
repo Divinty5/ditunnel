@@ -17,6 +17,7 @@ internal sealed class LinuxNetworkService(LinuxProbeCoordinator coordinator, Lin
           <method name="GetCapabilities"><arg direction="out" type="u" name="version"/><arg direction="out" type="b" name="probe"/><arg direction="out" type="b" name="connect"/><arg direction="out" type="b" name="killSwitch"/><arg direction="out" type="b" name="splitTunnel"/></method>
           <method name="Probe"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="u" name="mode"/><arg direction="out" type="b" name="success"/><arg direction="out" type="d" name="milliseconds"/><arg direction="out" type="s" name="message"/><arg direction="out" type="b" name="deferred"/><arg direction="out" type="s" name="diagnostics"/></method>
           <method name="CancelProbe"><arg direction="in" type="s" name="id"/></method>
+          <method name="ProbeActive"><arg direction="in" type="s" name="session"/><arg direction="out" type="s" name="result"/></method>
           <method name="Connect"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="s" name="policy"/></method>
           <method name="Switch"><arg direction="in" type="u" name="version"/><arg direction="in" type="s" name="id"/><arg direction="in" type="s" name="profile"/><arg direction="in" type="s" name="policy"/></method>
           <method name="Disconnect"><arg direction="in" type="s" name="id"/></method>

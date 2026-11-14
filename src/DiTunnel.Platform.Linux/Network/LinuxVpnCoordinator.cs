@@ -38,6 +38,35 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
         public ILinuxVpnSession? Session { get; set; }
         public bool ReleaseProtection { get; set; }
         public bool CancelledByClient { get; set; }
+        public bool Probing { get; set; }
+    }
+
+    public async Task<ServerProbeResult> ProbeActiveTunnelAsync(string sender, Guid id, CancellationToken token)
+    {
+        Operation operation;
+        ILinuxVpnSession session;
+        CancellationTokenSource check;
+        lock (gate)
+        {
+            if (active is not { } current || current.Sender != sender || current.Id != id ||
+                status.State != VpnConnectionState.Connected || switching || current.Probing || current.Session is not { } running)
+                return ProbePolicy.ActiveTunnelDeferred("Linux");
+            operation = current;
+            session = running;
+            check = CancellationTokenSource.CreateLinkedTokenSource(token, operation.Cancellation.Token);
+            operation.Probing = true;
+        }
+        using (check)
+        try
+        {
+            check.CancelAfter(TimeSpan.FromSeconds(8));
+            var result = await session.ProbeActiveTunnelAsync(check.Token).ConfigureAwait(false);
+            lock (gate)
+                return active == operation && !switching && status.State == VpnConnectionState.Connected && !check.IsCancellationRequested
+                    ? result : ProbePolicy.ActiveTunnelDeferred("Linux");
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { return ProbePolicy.ActiveTunnelDeferred("Linux"); }
+        finally { lock (gate) operation.Probing = false; }
     }
 
     public Task ConnectAsync(string sender, Guid id, ImportedProfile profile, Func<CancellationToken, Task<bool>> authorize, LinuxVpnPolicy? policy = null)
@@ -116,6 +145,7 @@ public sealed class LinuxVpnCoordinator(Func<ILinuxVpnSession> createSession) : 
         {
             var cleanupFailed = false;
             lock (gate) status = new(VpnConnectionState.Disconnecting);
+            operation.Cancellation.Cancel();
             try
             {
                 if (operation.Session is not null)

@@ -31,8 +31,15 @@ public sealed class SettingsAndRefreshTests
     {
         public List<ImportedProfile> Items = [new("Old", "VLESS", "old", "sub", "Subscription", "https://example.com/sub"), new("Manual", "SS", "manual", "manual", "Manual")];
         public bool Fail;
+        public EmptySubscription[] EmptySubscriptions { get; private set; } = [];
         public IReadOnlyList<ImportedProfile> Load() => Items;
         public void Save(IEnumerable<ImportedProfile> profiles) { if (Fail) throw new IOException(); Items = profiles.ToList(); }
+        public ProfileLibrary LoadLibrary() => new(Items.ToArray(), EmptySubscriptions);
+        public void SaveLibrary(ProfileLibrary library)
+        {
+            Save(library.Profiles);
+            EmptySubscriptions = library.EmptySubscriptions;
+        }
     }
     [Fact] public async Task RefreshReplacesSnapshotButKeepsManualProfiles()
     {
@@ -43,6 +50,107 @@ public sealed class SettingsAndRefreshTests
         Assert.Contains(store.Items, p => p.Content == "manual");
         Assert.Equal("sub", vm.SelectedProfile!.Profile.SourceId);
         Assert.Equal("https://example.com/sub", vm.SelectedProfile.Profile.SourceUrl);
+    }
+
+    [Fact]
+    public async Task RefreshSelectedPreservesOtherSourcesAndResetsResultsForReturningServers()
+    {
+        var store = new Store();
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2"));
+        var vm = new MainViewModel(null, store, new TimeoutProbe());
+        try
+        {
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "sub");
+            await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            Assert.Equal("HTTPS · Тайм-аут", Assert.Single(vm.Profiles).ProbeText);
+
+            var requests = new List<string>();
+            Task<IReadOnlyList<ImportedProfile>> Download(string url, CancellationToken _)
+            {
+                requests.Add(url);
+                var profile = requests.Count == 1 ? new ImportedProfile("New", "VLESS", "new") : new("Old", "VLESS", "old");
+                return Task.FromResult<IReadOnlyList<ImportedProfile>>([profile]);
+            }
+
+            await vm.RefreshSelectedSubscriptionAsync(Download);
+            await vm.RefreshSelectedSubscriptionAsync(Download);
+
+            Assert.Equal(["https://example.com/sub", "https://example.com/sub"], requests);
+            Assert.Contains(store.Items, profile => profile.Content == "second");
+            Assert.Equal("Не проверен", Assert.Single(vm.Profiles).ProbeText);
+            Assert.False(vm.CanRemoveUnavailable);
+            Assert.Equal("Подписка успешно обновлена", vm.RefreshToast);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class TimeoutProbe : IServerProbe
+    {
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default,
+            ServerProbeMode mode = ServerProbeMode.Fast)
+            => Task.FromResult(ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 100));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RemovingLastServerKeepsSubscriptionAcrossRestart(bool filter)
+    {
+        var store = new Store();
+        var vm = new MainViewModel(null, store, new TimeoutProbe());
+        try
+        {
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "sub");
+            if (filter)
+            {
+                await vm.ProbeAllCommand.ExecuteAsync(null);
+                vm.RemoveUnavailableCommand.Execute(null);
+            }
+            else vm.RemoveProfileCommand.Execute(null);
+
+            Assert.Empty(vm.Profiles);
+            Assert.Equal("sub", vm.SelectedGroup?.Id);
+            Assert.True(vm.IsSelectedSubscriptionEmpty);
+            Assert.True(vm.CanRefreshSelectedSubscription);
+            Assert.True(vm.CanShareSubscription);
+            Assert.False(vm.CanShareServer);
+            Assert.False(vm.CanProbeAll);
+        }
+        finally { await vm.ShutdownAsync(); }
+
+        var reopened = new MainViewModel(null, store);
+        try
+        {
+            reopened.SelectedGroup = reopened.Groups.Single(group => group.Id == "sub");
+            Assert.Equal("https://example.com/sub", reopened.SelectedSubscriptionUrl);
+            Assert.True(reopened.IsSelectedSubscriptionEmpty);
+            var backgroundRequests = 0;
+            await reopened.RefreshSubscriptionsOnStartupAsync((_, _) =>
+            {
+                backgroundRequests++;
+                throw new InvalidOperationException();
+            });
+            Assert.Equal(0, backgroundRequests);
+            Assert.True(reopened.IsSelectedSubscriptionEmpty);
+            if (filter)
+            {
+                await reopened.RefreshSelectedSubscriptionAsync((url, _) =>
+                {
+                    Assert.Equal("https://example.com/sub", url);
+                    return Task.FromResult<IReadOnlyList<ImportedProfile>>([new("Fresh", "VLESS", "fresh")]);
+                });
+                Assert.Equal("Не проверен", Assert.Single(reopened.Profiles).ProbeText);
+                Assert.Empty(store.EmptySubscriptions);
+                Assert.False(reopened.IsSelectedSubscriptionEmpty);
+            }
+            else
+            {
+                reopened.RemoveGroupCommand.Execute(null);
+                Assert.DoesNotContain(reopened.Groups, group => group.Id == "sub");
+                Assert.Empty(store.EmptySubscriptions);
+            }
+        }
+        finally { await reopened.ShutdownAsync(); }
     }
     [Fact] public async Task FailedDownloadOrSaveNeverDestroysSnapshot()
     {
@@ -60,11 +168,40 @@ public sealed class SettingsAndRefreshTests
     {
         var store = new Store(); var vm = new MainViewModel(null, store);
 
-        await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException(), showToast: false);
+        await vm.RefreshSubscriptionsOnStartupAsync((_, _) => throw new HttpRequestException());
 
         Assert.False(vm.IsRefreshToastVisible);
         Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
         Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
+    }
+
+    [Fact]
+    public async Task StartupDownloadLeavesConnectAvailable()
+    {
+        var vm = new MainViewModel(new RefreshTestEngine(), new Store());
+        var download = new TaskCompletionSource<IReadOnlyList<ImportedProfile>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var refresh = vm.RefreshSubscriptionsOnStartupAsync((_, _) => download.Task);
+            Assert.True(vm.CanConnect);
+            Assert.False(vm.CanRefreshSubscriptions);
+            Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
+            download.SetResult([new("New", "VLESS", "new")]);
+            await refresh;
+            Assert.True(vm.CanConnect);
+            Assert.True(vm.CanRefreshSubscriptions);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class RefreshTestEngine : IProfileVpnEngine
+    {
+        public VpnStatus Status => VpnStatus.Disconnected;
+        public bool RequiresAdministrator => false;
+        public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
+        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DisconnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     [Fact] public async Task RefreshDistinguishesInvalidSubscriptionsFromDownloadFailures()
@@ -116,6 +253,7 @@ public sealed class SettingsAndRefreshTests
             Assert.Contains(store.Items, item => item.Content == "old-2");
             Assert.Equal(5, store.Items.Count(item => item.Content.StartsWith("new-")));
             Assert.True(vm.IsRefreshToastVisible);
+            Assert.Equal("Обновлено: 5. Не удалось обновить: 1", vm.RefreshToast);
         }
         finally { release.TrySetResult(); await vm.ShutdownAsync(); }
     }

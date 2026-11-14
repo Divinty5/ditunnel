@@ -46,6 +46,20 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     public bool RequiresAdministrator => !new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     public bool IsNetworkProtectionActive => killSwitch.Status.State == NetworkProtectionState.Active;
 
+    internal async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken)
+    {
+        Task<ServerProbeResult> probe;
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (Status.State != VpnConnectionState.Connected || host is not { HasExited: false })
+                return ProbePolicy.ActiveTunnelDeferred("Windows");
+            probe = host.ProbeActiveAsync(cancellationToken);
+        }
+        finally { gate.Release(); }
+        return await probe;
+    }
+
     internal async Task<ActiveAmneziaProbe?> AcquireActiveAmneziaProbeAsync(ImportedProfile profile, CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
@@ -197,7 +211,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             host = new WindowsTunnelHost(new(runtime, configPath, address, tunnelName, policy.Mode, splitAddresses,
                 splitDomains, connection.KillSwitchEnabled ? killSwitchReadyPath : null,
                 awg is null ? null : WindowsAmneziaWgRuntime.Find(), dnsServers,
-                configuration.SupportsIpv4, configuration.SupportsIpv6, policy.Processes.Count > 0));
+                configuration.SupportsIpv4, configuration.SupportsIpv6, policy.Processes));
             var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var directAddresses = policy.Mode == SplitTunnelMode.BypassSelected ? splitAddresses : [];
             var protection = connection.KillSwitchEnabled ? KillSwitchConfiguration.Create([address], configuration.ServerPort, configuration.ServerTransport, connection.AllowLocalNetwork, directAddresses) : null;
@@ -352,7 +366,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                         // A TCP acknowledgement through a local TUN stack is not
                         // authenticated application traffic through the profile.
                         connectionWatch.Elapsed.TotalMilliseconds, false, ProbePolicy.VersionFor("Windows"), Platform: "Windows");
-                    Publish(VpnConnectionState.Connected, (probeWarning ? "Туннель запущен. Проверка не пройдена." : "VPN подключён.")
+                    Publish(VpnConnectionState.Connected, (probeWarning ? "Туннель запущен. Проверка не пройдена." : "Туннель запущен.")
                         + "\n" + connectionReport.ToDisplayString());
                     ready.TrySetResult();
                     break;

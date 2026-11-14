@@ -10,7 +10,7 @@ namespace DiTunnel.App.Views;
 
 public partial class MainWindow : Window
 {
-    private bool canClose, closing, ready;
+    private bool canClose, closing, exitStarted, ready;
     private TrayIcon? tray;
     private readonly IDisposable? connectionIcon;
     private readonly ContentControl pageHost;
@@ -53,7 +53,7 @@ public partial class MainWindow : Window
             ready = true; SetupTray();
             if (App.ShouldStartMinimized && tray is not null) Hide();
             if (DataContext is MainViewModel settingsModel) await settingsModel.InitializeSplitDefaultsAsync();
-            if (DataContext is MainViewModel vm) await vm.RefreshSubscriptionsAsync(showToast: false);
+            if (DataContext is MainViewModel vm) await vm.RefreshSubscriptionsOnStartupAsync();
             await CheckForUpdatesAsync(false);
         };
         PositionChanged += (_, _) => RememberNormal();
@@ -76,6 +76,7 @@ public partial class MainWindow : Window
             var action = UserSettings.Current.CloseAction;
             if (action == "hide" && !App.Platform.SupportsHideToTray) action = "ask";
             if (action == "ask") action = await Dialogs.AskClose(this);
+            if (exitStarted) return;
             if (action == "hide" && App.Platform.SupportsHideToTray && tray is not null)
             {
                 SavePlacement();
@@ -165,8 +166,11 @@ public partial class MainWindow : Window
         connectItem.IsEnabled = vm.CanConnect;
         exitItem!.Header = L.T("Выйти");
     }
-    private async Task ExitAsync()
+    public async Task ExitAsync()
     {
+        if (exitStarted) return;
+        exitStarted = true;
+        closing = true;
         SavePlacement(); IsEnabled = false;
         if (DataContext is MainViewModel vm) await vm.PrepareToCloseAsync(TimeSpan.FromSeconds(8));
         canClose = true; Close();

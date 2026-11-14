@@ -13,6 +13,7 @@
   "Stop checking": { "es": "Detener comprobación", "zh-Hans": "停止检查" },
   "Subscription exhausted. Contact your VPN subscription provider.": { "es": "Suscripción agotada. Contacta con tu proveedor de VPN.", "zh-Hans": "订阅已耗尽。请联系 VPN 订阅服务商。" },
   "Tunnel started.": { "es": "Túnel iniciado.", "zh-Hans": "隧道已启动。" },
+  "Tunnel check unavailable": { "es": "Comprobación del túnel no disponible", "zh-Hans": "无法检查隧道" },
   "Profile checked.": { "es": "Perfil comprobado.", "zh-Hans": "配置已检查。" },
   "Check failed.": { "es": "Comprobación fallida.", "zh-Hans": "检查未通过。" },
   "HTTPS not verified": { "es": "HTTPS sin verificar", "zh-Hans": "HTTPS 未验证" },
@@ -401,6 +402,34 @@
     "es": "Código QR",
     "zh-Hans": "二维码"
   },
+  "Tunnel started · Checking connectivity": {
+    "es": "Túnel iniciado · Comprobando la conexión",
+    "zh-Hans": "隧道已启动 · 正在检查连接"
+  },
+  "Refresh all subscriptions": {
+    "es": "Actualizar todas las suscripciones",
+    "zh-Hans": "更新所有订阅"
+  },
+  "Refresh selected subscription": {
+    "es": "Actualizar la suscripción seleccionada",
+    "zh-Hans": "更新所选订阅"
+  },
+  "Refresh the subscription to get profiles": {
+    "es": "Actualiza la suscripción para obtener perfiles",
+    "zh-Hans": "更新订阅以获取配置"
+  },
+  "Refreshing subscription…": {
+    "es": "Actualizando la suscripción…",
+    "zh-Hans": "正在更新订阅…"
+  },
+  "Subscription refreshed successfully": {
+    "es": "Suscripción actualizada correctamente",
+    "zh-Hans": "订阅已成功更新"
+  },
+  "Could not refresh subscription": {
+    "es": "No se pudo actualizar la suscripción",
+    "zh-Hans": "无法更新订阅"
+  },
   "Refresh subscriptions": {
     "es": "Actualizar suscripciones",
     "zh-Hans": "刷新订阅"
@@ -460,6 +489,18 @@
   "Strict ad blocking": {
     "es": "Bloqueo estricto de anuncios",
     "zh-Hans": "严格屏蔽广告"
+  },
+  "All subscriptions": {
+    "es": "Todas las suscripciones",
+    "zh-Hans": "所有订阅"
+  },
+  "Server": {
+    "es": "Servidor",
+    "zh-Hans": "服务器"
+  },
+  "Delete selected server": {
+    "es": "Eliminar el servidor seleccionado",
+    "zh-Hans": "删除所选服务器"
   },
   "Subscription": {
     "es": "Suscripción",
@@ -1273,9 +1314,21 @@
     "es": "No se proporcionó ningún perfil.",
     "zh-Hans": "未提供配置。"
   },
-  "Obfs, port hopping and plugins are not supported yet.": {
-    "es": "Obfs, el cambio de puertos y los complementos aún no están disponibles.",
-    "zh-Hans": "尚不支持 Obfs、端口跳变和插件。"
+  "Only Salamander obfuscation for Hysteria 2 is supported.": {
+    "es": "Solo se admite la ofuscación Salamander para Hysteria 2.",
+    "zh-Hans": "仅支持 Hysteria 2 的 Salamander 混淆。"
+  },
+  "Select Salamander to use an obfuscation password.": {
+    "es": "Selecciona Salamander para usar una contraseña de ofuscación.",
+    "zh-Hans": "使用混淆密码时请选择 Salamander。"
+  },
+  "Salamander requires an obfuscation password (obfs-password).": {
+    "es": "Salamander requiere una contraseña de ofuscación (obfs-password).",
+    "zh-Hans": "Salamander 需要混淆密码（obfs-password）。"
+  },
+  "Port hopping and plugins are not supported yet.": {
+    "es": "El cambio de puertos y los complementos aún no están disponibles.",
+    "zh-Hans": "尚不支持端口跳变和插件。"
   },
   "Operation cancelled.": {
     "es": "Operación cancelada.",

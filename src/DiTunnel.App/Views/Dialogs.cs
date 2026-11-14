@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -576,7 +577,7 @@ public static class Dialogs
                 summary.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.Protocol)) { Converter = new TranslationConverter() });
                 var latency = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis };
                 latency.Bind(TextBlock.TextProperty, new Binding(nameof(ServerItemViewModel.ProbeDisplayText)) { Converter = new TranslationConverter() });
-                latency.Bind(ToolTip.TipProperty, new Binding(nameof(ServerItemViewModel.ProbeText)) { Converter = new TranslationConverter() });
+                latency.Bind(ToolTip.TipProperty, new Binding(nameof(ServerItemViewModel.ProbeStatusText)) { Converter = new TranslationConverter() });
                 latency.Bind(TextBlock.ForegroundProperty, new MultiBinding
                 {
                     Converter = LatencyThemeConverter.Instance,
@@ -609,6 +610,7 @@ public static class Dialogs
             }
         });
         list.Bind(ItemsControl.ItemsSourceProperty, new Binding("Profiles"));
+        list.Bind(Visual.IsVisibleProperty, new Binding("!" + nameof(MainViewModel.IsSelectedSubscriptionEmpty)));
         // Keep the ListBox and its ScrollViewer enabled while probes run. Only
         // selecting a row is blocked; mouse wheel and touch scrolling stay active.
         list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.OneWay });
@@ -623,6 +625,10 @@ public static class Dialogs
         ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
         ScrollViewer.SetIsScrollChainingEnabled(list, true);
         panel.Children.Add(list);
+        var emptySubscription = Label("Обновите подписку для получения профилей");
+        emptySubscription.HorizontalAlignment = HorizontalAlignment.Center;
+        emptySubscription.Bind(Visual.IsVisibleProperty, new Binding(nameof(MainViewModel.IsSelectedSubscriptionEmpty)));
+        panel.Children.Add(emptySubscription);
         var testActions = new WrapPanel { Margin = new Thickness(0, 0, 0, 2), VerticalAlignment = VerticalAlignment.Top };
         var testOne = Button("Проверить сервер", () => vm.ProbeSelectedCommand.Execute(null));
         testOne.Margin = new Thickness(0, 0, 8, 4); testOne.Bind(Control.IsEnabledProperty, new Binding("CanProbe")); testActions.Children.Add(testOne);
@@ -673,9 +679,11 @@ public static class Dialogs
         probeMode.HorizontalAlignment = HorizontalAlignment.Left;
         panel.Children.Add(probeMode);
         var lowest = new CheckBox { Content = L.T("Lowest: выбирать сервер с минимальной задержкой"), IsChecked = vm.IsLowestMode };
+        var lowestHint = Label("Проверки: через 5, затем 10, затем каждые 15 минут. При смене сервера VPN переподключится.");
+        lowestHint.Bind(Visual.IsVisibleProperty, new Binding(nameof(ToggleButton.IsChecked)) { Source = lowest });
         lowest.IsCheckedChanged += (_, _) => vm.SetLowestMode(lowest.IsChecked == true);
         panel.Children.Add(lowest);
-        panel.Children.Add(Label("Проверки: через 5, затем 10, затем каждые 15 минут. При смене сервера VPN переподключится."));
+        panel.Children.Add(lowestHint);
         var confirmationText = Label("Удалить выбранную подписку и все её серверы?");
         Action confirmedAction = () => vm.RemoveGroupCommand.Execute(null);
         var confirmationActions = new WrapPanel();
@@ -776,30 +784,54 @@ public static class Dialogs
         });
         AddShareOption(qrShare, 2);
         AddShareOption(Button("Отмена", CloseShare), 4);
-        static Control ShareButtonContent(string text)
+        const string refreshIcon = "M19,9 A7,7 0 1 0 18,16 M19,4 L19,9 L14,9";
+        const string shareIcon = "M8,12 L16,7 M8,12 L16,17 M8,12 A2,2 0 1 1 4,12 A2,2 0 1 1 8,12 M20,6 A2,2 0 1 1 16,6 A2,2 0 1 1 20,6 M20,18 A2,2 0 1 1 16,18 A2,2 0 1 1 20,18";
+        const string deleteIcon = "M4,6 L20,6 M9,6 L9,3 L15,3 L15,6 M6,6 L7,20 L17,20 L18,6 M10,10 L10,16 M14,10 L14,16";
+        static Button ManagementButton(string label, string description, string geometry, Action action)
         {
+            var button = Button(description, action);
+            button.Margin = new Thickness(0, 0, 8, 6);
+            button.Padding = new Thickness(12, 10);
             var icon = new Avalonia.Controls.Shapes.Path
             {
                 Width = 18, Height = 18, Stretch = Stretch.Uniform,
-                Data = Geometry.Parse("M5,19 L19,5 M11,5 L19,5 L19,13 M5,9 L5,19 L15,19"),
-                StrokeThickness = 2, StrokeLineCap = PenLineCap.Round
+                VerticalAlignment = VerticalAlignment.Center, Data = Geometry.Parse(geometry),
+                StrokeThickness = 1.7, StrokeLineCap = PenLineCap.Round, StrokeJoin = PenLineJoin.Round
             };
-            icon.Bind(Avalonia.Controls.Shapes.Shape.StrokeProperty, icon.GetResourceObservable("AccentTextBrush"));
-            return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { icon, Label(text) } };
+            icon.Bind(Avalonia.Controls.Shapes.Shape.StrokeProperty, new Binding(nameof(TemplatedControl.Foreground)) { Source = button });
+            button.Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 7,
+                Children = { icon, new TextBlock { Text = L.T(label), VerticalAlignment = VerticalAlignment.Center } }
+            };
+            ToolTip.SetTip(button, L.T(description));
+            AutomationProperties.SetName(button, L.T(description));
+            return button;
         }
         var management = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
-        var refresh = Button("Обновить подписки", async () => await vm.RefreshSubscriptionsAsync());
-        refresh.Margin = new Thickness(0, 0, 8, 6); refresh.Bind(Control.IsEnabledProperty, new Binding("CanRefreshSubscriptions")); management.Children.Add(refresh);
-        var shareSubscription = Button("Поделиться подпиской", () => { if (vm.SelectedSubscriptionUrl is { } value) OpenShare("Поделиться подпиской", value); });
-        shareSubscription.Content = ShareButtonContent("Поделиться подпиской");
-        shareSubscription.Margin = new Thickness(0, 0, 8, 6); shareSubscription.Bind(Control.IsEnabledProperty, new Binding("CanShareSubscription")); management.Children.Add(shareSubscription);
-        var shareServer = Button("Поделиться сервером", () => { if (vm.SelectedServerUri is { } value) OpenShare("Поделиться сервером", value); });
-        shareServer.Content = ShareButtonContent("Поделиться сервером");
-        shareServer.Margin = new Thickness(0, 0, 8, 6); shareServer.Bind(Control.IsEnabledProperty, new Binding("CanShareServer")); management.Children.Add(shareServer);
-        var remove = Button("Удалить всю подписку", () => ShowConfirmation("Удалить выбранную подписку и все её серверы?", () => vm.RemoveGroupCommand.Execute(null)));
-        remove.Margin = new Thickness(0, 0, 8, 6); remove.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(remove);
-        var removeOne = Button("Удалить выбранный", () => vm.RemoveProfileCommand.Execute(null));
-        removeOne.Margin = new Thickness(0, 0, 8, 6); removeOne.Bind(Control.IsEnabledProperty, new Binding("CanManageProfiles")); management.Children.Add(removeOne);
+        var refreshSelected = ManagementButton("Подписка", "Обновить выбранную подписку", refreshIcon, async () => await vm.RefreshSelectedSubscriptionAsync());
+        refreshSelected.Bind(Control.IsEnabledProperty, new Binding(nameof(MainViewModel.CanRefreshSelectedSubscription)));
+        management.Children.Add(refreshSelected);
+        var refresh = ManagementButton("Все подписки", "Обновить все подписки", refreshIcon, async () => await vm.RefreshSubscriptionsAsync());
+        refresh.Bind(Control.IsEnabledProperty, new Binding(nameof(MainViewModel.CanRefreshSubscriptions))); management.Children.Add(refresh);
+        var shareSubscription = ManagementButton("Подписка", "Поделиться подпиской", shareIcon, () => { if (vm.SelectedSubscriptionUrl is { } value) OpenShare("Поделиться подпиской", value); });
+        shareSubscription.Bind(Control.IsEnabledProperty, new Binding(nameof(MainViewModel.CanShareSubscription))); management.Children.Add(shareSubscription);
+        var shareServer = ManagementButton("Сервер", "Поделиться сервером", shareIcon, () => { if (vm.SelectedServerUri is { } value) OpenShare("Поделиться сервером", value); });
+        shareServer.Bind(Control.IsEnabledProperty, new Binding(nameof(MainViewModel.CanShareServer))); management.Children.Add(shareServer);
+        var remove = ManagementButton("Подписка", "Удалить всю подписку", deleteIcon, () => ShowConfirmation("Удалить выбранную подписку и все её серверы?", () => vm.RemoveGroupCommand.Execute(null)));
+        remove.Bind(Control.IsEnabledProperty, new MultiBinding
+        {
+            Converter = BoolConverters.And,
+            Bindings = { new Binding(nameof(MainViewModel.CanManageProfiles)), new Binding(nameof(MainViewModel.SelectedGroup)) { Converter = ObjectConverters.IsNotNull } }
+        });
+        management.Children.Add(remove);
+        var removeOne = ManagementButton("Сервер", "Удалить выбранный сервер", deleteIcon, () => vm.RemoveProfileCommand.Execute(null));
+        removeOne.Bind(Control.IsEnabledProperty, new MultiBinding
+        {
+            Converter = BoolConverters.And,
+            Bindings = { new Binding(nameof(MainViewModel.CanManageProfiles)), new Binding(nameof(MainViewModel.SelectedProfile)) { Converter = ObjectConverters.IsNotNull } }
+        });
+        management.Children.Add(removeOne);
         panel.Children.Add(management);
         var status = Label(""); status.Bind(TextBlock.TextProperty, new Binding("SubscriptionStatus") { Converter = new TranslationConverter() }); panel.Children.Add(status);
         var operationNotice = Label(""); operationNotice.Bind(TextBlock.TextProperty, new Binding("DisplayNotice") { Converter = new TranslationConverter() }); panel.Children.Add(operationNotice);

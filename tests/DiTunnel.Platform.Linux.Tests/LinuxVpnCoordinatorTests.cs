@@ -10,6 +10,24 @@ public sealed class LinuxVpnCoordinatorTests
     private static Task<bool> Allow(CancellationToken _) => Task.FromResult(true);
 
     [Fact]
+    public async Task Active_probe_is_scoped_to_owner_and_cancelled_on_disconnect()
+    {
+        var session = new Session();
+        await using var host = new LinuxVpnCoordinator(() => session);
+        var id = Guid.NewGuid();
+        await host.ConnectAsync(":1.1", id, Profile, Allow);
+        Assert.True((await host.ProbeActiveTunnelAsync(":1.2", id, default)).IsDeferred);
+        Assert.True((await host.ProbeActiveTunnelAsync(":1.1", Guid.NewGuid(), default)).IsDeferred);
+        Assert.False(session.Probing.Task.IsCompleted);
+        var pending = host.ProbeActiveTunnelAsync(":1.1", id, default);
+        await session.Probing.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True((await host.ProbeActiveTunnelAsync(":1.1", id, default)).IsDeferred);
+        await host.DisconnectAsync(":1.1", id);
+        Assert.True((await pending.WaitAsync(TimeSpan.FromSeconds(2))).IsDeferred);
+        Assert.True((await host.ProbeActiveTunnelAsync(":1.1", id, default)).IsDeferred);
+    }
+
+    [Fact]
     public async Task Protected_switch_prepares_before_teardown_and_never_releases_old_firewall()
     {
         var old = new Session { Protected = true };
@@ -136,6 +154,13 @@ public sealed class LinuxVpnCoordinatorTests
         public int Cleanups;
         public TaskCompletionSource Cleaning = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource AllowCleanup = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Probing = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken token)
+        {
+            Probing.TrySetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            return ProbePolicy.ActiveTunnelDeferred("Linux");
+        }
         public Task StartAsync(ImportedProfile profile, CancellationToken token) => FailStart
             ? Task.FromException(new IOException("synthetic private endpoint")) : Task.CompletedTask;
         public Task WaitForExitAsync(CancellationToken token) => Task.Delay(Timeout.Infinite, token);

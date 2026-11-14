@@ -6,7 +6,7 @@ using Tmds.DBus.Protocol;
 
 namespace DiTunnel.Platform.Linux.Network;
 
-public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, INetworkRecoveryEngine, IDisposable
+public sealed class LinuxNetworkClient : IServerBatchProbe, IActiveTunnelProbe, IProfileVpnEngine, INetworkRecoveryEngine, IDisposable
 {
     private readonly CancellationTokenSource monitoring = new();
     private Task? monitor;
@@ -277,6 +277,29 @@ public sealed class LinuxNetworkClient : IServerBatchProbe, IProfileVpnEngine, I
         if (id is not null) writer.WriteString(id.Value.ToString("D"));
         if (content is not null) { writer.WriteString(content); writer.WriteString(policy().Serialize()); }
         return writer.CreateMessage();
+    }
+
+    public async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default)
+    {
+        if (sessionId is not { } id || Status.State != VpnConnectionState.Connected)
+            return ProbePolicy.ActiveTunnelDeferred("Linux");
+        var call = connection.CallMethodAsync(CreateControl("ProbeActive", id), static (message, _) =>
+        {
+            var json = message.GetBodyReader().ReadString();
+            return json.Length <= 4096 ? JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResult) : null;
+        });
+        try
+        {
+            var result = await call.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+            return sessionId == id && Status.State == VpnConnectionState.Connected && result is not null
+                ? result : ProbePolicy.ActiveTunnelDeferred("Linux");
+        }
+        catch
+        {
+            _ = call.ContinueWith(task => _ = task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            cancellationToken.ThrowIfCancellationRequested();
+            return ProbePolicy.ActiveTunnelDeferred("Linux");
+        }
     }
 
     public async ValueTask DisposeAsync()

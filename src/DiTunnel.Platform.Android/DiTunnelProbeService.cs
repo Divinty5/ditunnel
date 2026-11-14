@@ -50,7 +50,11 @@ public sealed class DiTunnelProbeService : Service
         {
             result = legacy && profiles.Count == 1
                 ? [await AndroidXrayProbeRunner.MeasureViaProxyAsync(this, profiles[0], mode, cancellationToken)]
-                : await AndroidXrayProbeRunner.MeasureBatchAsync(this, profiles, mode, cancellationToken);
+                : await AndroidXrayProbeRunner.MeasureBatchAsync(this, profiles, mode, cancellationToken, (index, item) =>
+                    SendBroadcast(new Intent(AndroidProbeServiceBridge.ActionProgress).SetPackage(PackageName)
+                        .PutExtra(AndroidProbeServiceBridge.ExtraRequestId, requestId)
+                        .PutExtra(AndroidProbeServiceBridge.ExtraIndex, index)
+                        .PutExtra(AndroidProbeServiceBridge.ExtraResult, JsonSerializer.Serialize(item, DiTunnelJsonContext.Default.ServerProbeResult))));
         }
         catch (Exception error) { result = profiles.Select(_ => AndroidProbePolicy.Failure(error, "Проверка", "HTTPS", 0)).ToArray(); }
         SendBroadcast(new Intent(AndroidProbeServiceBridge.ActionResult).SetPackage(PackageName)

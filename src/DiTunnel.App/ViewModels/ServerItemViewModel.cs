@@ -32,6 +32,7 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
+    [NotifyPropertyChangedFor(nameof(ProbeStatusText))]
     private string probeText = "Не проверен";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
@@ -44,8 +45,14 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private bool isProbeUnconfirmed;
-    public string ProbeDisplayText => ProbeText == "Проверяем…" || ProbeMilliseconds is not { } delay
-        ? ProbeText : $"{delay:0} мс{ProbeMethod}";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ProbeStatusText))]
+    [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
+    [NotifyPropertyChangedFor(nameof(ProbeBrush))]
+    private bool isProbePending;
+    public string ProbeStatusText => IsProbePending ? "Проверяем…" : ProbeText;
+    public string ProbeDisplayText => IsProbePending || ProbeMilliseconds is not { } delay
+        ? ProbeStatusText : $"{delay:0} мс{ProbeMethod}";
     private string ProbeMethod
     {
         get
@@ -54,7 +61,7 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
             return method is "TCP" or "TLS" or "HTTP" or "HTTPS" ? $" · {method}" : "";
         }
     }
-    public IBrush ProbeBrush => ProbeText == "Проверяем…"
+    public IBrush ProbeBrush => IsProbePending
         ? LatencyPalette.For(null)
         : LatencyPalette.For(ProbeMilliseconds, ProbeTimedOut);
     [ObservableProperty]

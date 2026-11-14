@@ -26,10 +26,15 @@ internal interface ITunnelNetwork
     IReadOnlyList<string> CachedNames();
     Task<IPAddress[]> ResolveAsync(string name, CancellationToken token);
     Task ProbeAsync(uint tunnelIndex, bool ipv6, CancellationToken token);
+    bool UsesTunnel(uint tunnelIndex, IPAddress address) => false;
+    void BindTunnelSocket(Socket socket, uint tunnelIndex) => throw new NotSupportedException();
 }
 
 internal sealed class TunnelNetwork : ITunnelNetwork
 {
+    internal const string Ipv4Address = "172.31.255.1";
+    internal const string Ipv6Address = "fd52:d17::1";
+
     public string? InterfaceName(uint index) => NetworkInterface.GetAllNetworkInterfaces()
         .FirstOrDefault(item => item.Supports(NetworkInterfaceComponent.IPv4)
             && item.GetIPProperties().GetIPv4Properties()?.Index == index)?.Name;
@@ -63,6 +68,21 @@ internal sealed class TunnelNetwork : ITunnelNetwork
     public IReadOnlyList<string> CachedNames() => WindowsDnsPolicy.CachedNames();
     public Task<IPAddress[]> ResolveAsync(string name, CancellationToken token) =>
         Dns.GetHostAddressesAsync(name, token).WaitAsync(TimeSpan.FromSeconds(2), token);
+    public bool UsesTunnel(uint tunnelIndex, IPAddress address)
+    {
+        try { return tunnelIndex != 0 && WindowsNetworkApi.BestInterface(address) == tunnelIndex; }
+        catch (System.ComponentModel.Win32Exception) { return false; }
+    }
+
+    public void BindTunnelSocket(Socket socket, uint tunnelIndex)
+    {
+        const SocketOptionName unicastInterface = (SocketOptionName)31;
+        var ipv4 = socket.AddressFamily == AddressFamily.InterNetwork;
+        var index = (int)tunnelIndex;
+        socket.SetSocketOption(ipv4 ? SocketOptionLevel.IP : SocketOptionLevel.IPv6, unicastInterface,
+            ipv4 ? IPAddress.HostToNetworkOrder(index) : index);
+        socket.Bind(new IPEndPoint(IPAddress.Parse(ipv4 ? Ipv4Address : Ipv6Address), 0));
+    }
     public async Task ProbeAsync(uint tunnelIndex, bool ipv6, CancellationToken token)
     {
         var address = IPAddress.Parse(ipv6 ? "2606:4700:4700::1111" : "1.1.1.1");

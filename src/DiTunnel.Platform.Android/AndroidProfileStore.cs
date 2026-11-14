@@ -1,9 +1,7 @@
 using System.Buffers.Binary;
-using System.Text.Json;
 using Android.Content;
 using Android.Security.Keystore;
 using DiTunnel.Core.Profiles;
-using DiTunnel.Core;
 using Java.Security;
 using Javax.Crypto;
 using Javax.Crypto.Spec;
@@ -23,18 +21,22 @@ public sealed class AndroidProfileStore(Context context) : IProfileStore
             ?? throw new InvalidOperationException("Android не предоставил внутреннее хранилище без резервного копирования."),
         "profiles.dat");
 
-    public IReadOnlyList<ImportedProfile> Load()
+    public IReadOnlyList<ImportedProfile> Load() => LoadLibrary().Profiles;
+
+    public ProfileLibrary LoadLibrary()
     {
-        if (!File.Exists(filePath)) return [];
+        if (!File.Exists(filePath)) return new([], []);
 
         var encrypted = File.ReadAllBytes(filePath);
         var json = Decrypt(encrypted);
-        return JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ImportedProfileArray) ?? [];
+        return ProfileLibrary.Read(json);
     }
 
-    public void Save(IEnumerable<ImportedProfile> profiles)
+    public void Save(IEnumerable<ImportedProfile> profiles) => SaveLibrary(new(profiles.ToArray(), []));
+
+    public void SaveLibrary(ProfileLibrary library)
     {
-        var encrypted = Encrypt(JsonSerializer.SerializeToUtf8Bytes(profiles.ToArray(), DiTunnelJsonContext.Default.ImportedProfileArray));
+        var encrypted = Encrypt(library.Write());
         var temporary = filePath + ".tmp";
         File.WriteAllBytes(temporary, encrypted);
         File.Move(temporary, filePath, true);

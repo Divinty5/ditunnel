@@ -44,7 +44,7 @@ def main():
                     allowed = {entry.get("send_member") for group in policy.findall("policy") if group.get("context") == "default"
                                for entry in group.findall("allow") if entry.get("send_interface") == "org.divinty5.DiTunnel.Network1"
                                and entry.get("send_destination") == "org.divinty5.DiTunnel.Network1"}
-                    expected = {"GetCapabilities", "Probe", "CancelProbe", "Connect", "Switch", "Disconnect", "GetStatus", "RestoreNetwork"}
+                    expected = {"GetCapabilities", "Probe", "ProbeActive", "CancelProbe", "Connect", "Switch", "Disconnect", "GetStatus", "RestoreNetwork"}
                     if allowed != expected:
                         raise RuntimeError("D-Bus method whitelist does not match the shipped network client")
                     bus_policy_found = True

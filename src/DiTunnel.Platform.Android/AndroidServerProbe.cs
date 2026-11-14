@@ -7,7 +7,7 @@ using System.Diagnostics;
 
 namespace DiTunnel.Platform.Android;
 
-public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IActiveTunnelProbe
+public sealed class AndroidServerProbe(Context context) : IProgressiveServerProbe, IActiveTunnelProbe
 {
     private static readonly SemaphoreSlim XrayProbeGate = new(1, 1);
     private readonly Context context = context.ApplicationContext ?? context;
@@ -15,9 +15,23 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
     public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
         => (await ProbeManyAsync([profile], cancellationToken, mode))[0];
 
-    public async Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+    public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        => ProbeManyCoreAsync(profiles, null, cancellationToken, mode);
+
+    public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+        IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode)
+        => ProbeManyCoreAsync(profiles, progress, cancellationToken, mode);
+
+    private async Task<IReadOnlyList<ServerProbeResult>> ProbeManyCoreAsync(IReadOnlyList<ImportedProfile> profiles,
+        IProgress<(int Index, ServerProbeResult Result)>? progress, CancellationToken cancellationToken, ServerProbeMode mode)
     {
         var results = new ServerProbeResult?[profiles.Count];
+        void Complete(int index, ServerProbeResult result)
+        {
+            if (cancellationToken.IsCancellationRequested || results[index] is not null) return;
+            results[index] = result;
+            progress?.Report((index, result));
+        }
         try
         {
             await XrayProbeGate.WaitAsync(cancellationToken);
@@ -29,48 +43,44 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
                     // AWG list probes use a separate helper with no system TUN.
                     // Only missing VPN permission defers an offline check.
                     if (AmneziaWgProfileConverter.IsAmneziaWg(profiles[index]))
-                        results[index] = await AndroidProbeFailureIsolation.RunAsync(
+                        Complete(index, await AndroidProbeFailureIsolation.RunAsync(
                             () => ProbeAmneziaWgAsync(profiles[index], mode, cancellationToken),
-                            error => ProbeFailure(error, "AmneziaWG"), cancellationToken);
+                            error => ProbeFailure(error, "AmneziaWG"), cancellationToken));
                     else
                     {
                         try { configurations[index] = XrayProfileConverter.Convert(profiles[index]); }
                         catch (Exception) when (!cancellationToken.IsCancellationRequested)
-                        { results[index] = ProbeFailure(new AndroidProbeException("Профиль", "Configuration"), "Профиль"); }
+                        { Complete(index, ProbeFailure(new AndroidProbeException("Профиль", "Configuration"), "Профиль")); }
                     }
                 }
-                var tcpIndexes = Enumerable.Range(0, profiles.Count)
-                    .Where(index => configurations[index] is not null &&
-                        (mode == ServerProbeMode.Https || configurations[index]!.ServerTransport != KillSwitchTransportProtocol.Udp)).ToArray();
-                foreach (var chunk in tcpIndexes.Chunk(5))
+                var indexes = Enumerable.Range(0, profiles.Count).Where(index => configurations[index] is not null).ToArray();
+                var runtimeIndexes = indexes;
+                if (mode == ServerProbeMode.Fast)
+                {
+                    await Parallel.ForEachAsync(indexes.Where(index => configurations[index]!.ServerTransport != KillSwitchTransportProtocol.Udp),
+                        new ParallelOptions { MaxDegreeOfParallelism = 5, CancellationToken = cancellationToken },
+                        async (index, token) =>
+                        {
+                            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                            timeout.CancelAfter(TimeSpan.FromSeconds(12));
+                            Complete(index, await MeasureTcpProfileAsync(configurations[index]!, timeout.Token, token));
+                        });
+                    runtimeIndexes = indexes.Where(index => configurations[index]!.ServerTransport == KillSwitchTransportProtocol.Udp).ToArray();
+                }
+                foreach (var chunk in runtimeIndexes.Chunk(5))
                 {
                     var chunkWatch = Stopwatch.StartNew();
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(mode == ServerProbeMode.Fast ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(25));
-                    if (mode == ServerProbeMode.Fast)
-                    {
-                        var measured = await Task.WhenAll(chunk.Select(index => MeasureTcpProfileAsync(
-                            configurations[index]!, timeout.Token, cancellationToken)));
-                        for (var offset = 0; offset < chunk.Length; offset++)
-                            results[chunk[offset]] = measured[offset];
-                    }
-                    else
-                    {
-                        var measured = await AndroidProbeFailureIsolation.RunAsync(
-                            () => AndroidProbeServiceBridge.ProbeAsync(context,
-                                chunk.Select(index => profiles[index]).ToArray(), mode, timeout.Token),
-                            error => (IReadOnlyList<ServerProbeResult>)Enumerable.Repeat(
-                                ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested, duration: chunkWatch.Elapsed.TotalMilliseconds), chunk.Length).ToArray(), cancellationToken);
-                        for (var offset = 0; offset < chunk.Length; offset++)
-                            results[chunk[offset]] = offset < measured.Count ? measured[offset]
-                                : ProbeFailure(new InvalidOperationException(), "Служба проверки");
-                    }
-                }
-                foreach (var index in Enumerable.Range(0, profiles.Count).Where(index => mode == ServerProbeMode.Fast && configurations[index]?.ServerTransport == KillSwitchTransportProtocol.Udp))
-                {
-                    results[index] = await AndroidProbeFailureIsolation.RunAsync(
-                        () => ProbeUdpProfileAsync(profiles[index], mode, cancellationToken),
-                        error => ProbeFailure(error, "Профиль"), cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(25));
+                    var measured = await AndroidProbeFailureIsolation.RunAsync(
+                        () => AndroidProbeServiceBridge.ProbeAsync(context,
+                            chunk.Select(index => profiles[index]).ToArray(), mode, timeout.Token,
+                            report: (offset, result) => Complete(chunk[offset], result)),
+                        error => (IReadOnlyList<ServerProbeResult>)Enumerable.Repeat(
+                            ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested, duration: chunkWatch.Elapsed.TotalMilliseconds), chunk.Length).ToArray(), cancellationToken);
+                    for (var offset = 0; offset < chunk.Length; offset++)
+                        Complete(chunk[offset], offset < measured.Count ? measured[offset]
+                            : ProbeFailure(new InvalidOperationException(), "Служба проверки"));
                 }
             }
             finally { XrayProbeGate.Release(); }
@@ -160,8 +170,8 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
             using var connection = network.OpenConnection(url) as Javax.Net.Ssl.HttpsURLConnection
                 ?? throw new AndroidProbeException("HTTPS", "ControlService");
             using var registration = token.Register(connection.Disconnect);
-            connection.ConnectTimeout = 2500;
-            connection.ReadTimeout = 2500;
+            connection.ConnectTimeout = (int)ProbePolicy.ActiveHttpsAttemptBudget.TotalMilliseconds;
+            connection.ReadTimeout = (int)ProbePolicy.ActiveHttpsAttemptBudget.TotalMilliseconds;
             connection.UseCaches = false;
             connection.InstanceFollowRedirects = false;
             try
@@ -171,19 +181,12 @@ public sealed class AndroidServerProbe(Context context) : IServerBatchProbe, IAc
             }
             catch (Exception) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
             finally { connection.Disconnect(); }
-        }, token), cancellationToken);
+        }, token), cancellationToken, ProbePolicy.ActiveHttpsAttemptBudget);
     }
 
     private static void FillMissing(ServerProbeResult?[] results, ServerProbeResult failure)
     {
         for (var index = 0; index < results.Length; index++) results[index] ??= failure;
-    }
-
-    private async Task<ServerProbeResult> ProbeUdpProfileAsync(ImportedProfile profile, ServerProbeMode mode, CancellationToken cancellationToken)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        return (await AndroidProbeServiceBridge.ProbeAsync(context, [profile], mode, timeout.Token))[0];
     }
 
     private async Task<ServerProbeResult> MeasureTcpProfileAsync(XrayProfileConfiguration configuration,
