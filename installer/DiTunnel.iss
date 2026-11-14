@@ -133,6 +133,10 @@ function SignalUpdateEvent(Event: LongWord): Longint;
   external 'SetEvent@kernel32.dll stdcall';
 function CloseUpdateEvent(Event: LongWord): Longint;
   external 'CloseHandle@kernel32.dll stdcall';
+function SetupProcessId: LongWord;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+function ProcessSessionId(ProcessId: LongWord; var SessionId: LongWord): Longint;
+  external 'ProcessIdToSessionId@kernel32.dll stdcall';
 
 function UpdateId: String;
 var
@@ -157,27 +161,25 @@ begin
   Result := WizardSilent and (UpdateId <> '');
 end;
 
-function WaitForAppExit: Boolean;
+function SignalAppExit(EventName: String): Boolean;
 var
   Event: LongWord;
-  Attempt: Integer;
 begin
   Result := False;
-  Event := OpenUpdateEvent(2, 0, 'Local\DiTunnel.Update.' + UpdateId);
-  if Event = 0 then
-  begin
-    Log('Update handoff: the application event could not be opened.');
-    Exit;
-  end;
+  Event := OpenUpdateEvent(2, 0, EventName);
+  if Event = 0 then Exit;
   try
-    if SignalUpdateEvent(Event) = 0 then
-    begin
-      Log('Update handoff: the application event could not be signaled.');
-      Exit;
-    end;
+    Result := SignalUpdateEvent(Event) <> 0;
   finally
     CloseUpdateEvent(Event);
   end;
+end;
+
+function WaitForAppExit: Boolean;
+var
+  Attempt: Integer;
+begin
+  Result := False;
   for Attempt := 1 to 150 do
   begin
     if not CheckForMutexes('DiTunnel.Desktop') then
@@ -190,6 +192,36 @@ begin
   Log('Update handoff: timed out waiting for the application to exit.');
 end;
 
+function CloseInstalledLegacyClient: Boolean;
+var
+  Locator, Wmi, Processes, Process: Variant;
+  Index: Integer;
+  Session: LongWord;
+  Path, InstalledClient: String;
+begin
+  Result := False;
+  InstalledClient := ExpandConstant('{app}\Di-Tunnel.exe');
+  if not FileExists(InstalledClient) then Exit;
+  if ProcessSessionId(SetupProcessId, Session) = 0 then Exit;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Wmi := Locator.ConnectServer('', 'root\CIMV2');
+    Processes := Wmi.ExecQuery('SELECT * FROM Win32_Process WHERE Name = ''Di-Tunnel.exe'' AND SessionId = ' + IntToStr(Session));
+    for Index := 0 to Processes.Count - 1 do
+    begin
+      Process := Processes.ItemIndex(Index);
+      if VarIsNull(Process.ExecutablePath) then Continue;
+      Path := Process.ExecutablePath;
+      if CompareText(Path, InstalledClient) = 0 then
+      begin
+        if Process.Terminate(0) = 0 then Result := True;
+      end;
+    end;
+  except
+    Log('Unable to close the installed legacy Di-Tunnel client.');
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
@@ -199,7 +231,7 @@ begin
   Result := '';
   if IsAppUpdate then
   begin
-    if not WaitForAppExit then
+    if not SignalAppExit('Local\DiTunnel.Update.' + UpdateId) or not WaitForAppExit then
     begin
       Result := CustomMessage('UpdateHandoffFailed');
       Exit;
@@ -207,11 +239,20 @@ begin
   end
   else
   begin
-    { Leave the running client and its network host in control of shutdown. }
     if CheckForMutexes('DiTunnel.Desktop') then
     begin
-      Result := CustomMessage('ExitBeforeInstall');
-      Exit;
+      { Older clients lack the shutdown event. Limit fallback to this installation
+        in the current session. The independent host handles rollback on UI exit. }
+      if not SignalAppExit('Local\DiTunnel.CloseForSetup') and not CloseInstalledLegacyClient then
+      begin
+        Result := CustomMessage('ExitBeforeInstall');
+        Exit;
+      end;
+      if not WaitForAppExit then
+      begin
+        Result := CustomMessage('ExitBeforeInstall');
+        Exit;
+      end;
     end;
   end;
   { Wait for the independent host's rollback before replacing its files. }

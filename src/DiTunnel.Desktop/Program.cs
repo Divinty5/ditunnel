@@ -1,4 +1,6 @@
 using Avalonia;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace DiTunnel.Desktop;
 
@@ -44,12 +46,21 @@ internal static class Program
             if (!args.Contains("--autostart", StringComparer.OrdinalIgnoreCase)) show.Set();
             return;
         }
+        using var identity = WindowsIdentity.GetCurrent();
+        var security = new EventWaitHandleSecurity();
+        security.AddAccessRule(new(identity.User!, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            EventWaitHandleRights.Modify, AccessControlType.Allow));
+        using var closeForSetup = EventWaitHandleAcl.Create(false, EventResetMode.AutoReset,
+            @"Local\DiTunnel.CloseForSetup", out _, security);
         var timer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        timer.Tick += (_, _) =>
+        timer.Tick += async (_, _) =>
         {
-            if (show.WaitOne(0) && Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop && desktop.MainWindow is { } window)
+            if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime
+                { MainWindow: App.Views.MainWindow mainWindow })
             {
-                if (window is App.Views.MainWindow mainWindow) mainWindow.Restore();
+                if (closeForSetup.WaitOne(0)) await mainWindow.ExitAsync();
+                else if (show.WaitOne(0)) mainWindow.Restore();
             }
         };
         timer.Start();
