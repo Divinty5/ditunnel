@@ -4,6 +4,9 @@ namespace DiTunnel.App;
 
 public static class ApplicationSelectionPresets
 {
+    internal static string DisplayId(string id, ReleaseTarget target) =>
+        target == ReleaseTarget.AndroidArm64 ? string.Join('.', id.Split('.').Reverse()) : id;
+
     private static readonly string[] ProxyPackageFragments =
     [
         "telegram", "discord", "whatsapp", "openai", "chatgpt", "codex", "anthropic", "claude", "youtube", "vivaldi"
@@ -25,7 +28,7 @@ public static class ApplicationSelectionPresets
         "сбер", "sber", "тинькофф", "t-bank", "т-банк", "втб", "альфа", "alfa", "mir pay", "мир pay",
         "рсхб", "rshb", "ozon", "wildberries", "самокат", "яндекс", "yandex", "max",
         "вконтакте", "vk видео", "vk video", "одноклассники", "rutube", "рутуб", "тамтам", "дзен", "dzen", "rustore",
-        "mobifitness", "мобифитнес", "vk workspace", "vkworkspace", "vk teams", "vkteams",
+        "mobifitness", "мобифитнес", "ханбуз", "khanbuz", "vk workspace", "vkworkspace", "vk teams", "vkteams",
         "saby", "сбис", "sbis", "2гис", "2gis", "doublegis", "outlook", "opencode",
         "госуслуги", "gosuslugi", "mos.ru", "мтс", "mts link", "mts-link", "mtslink",
         "мегафон", "megafon", "билайн", "beeline", "ростелеком", "rostelecom",
@@ -39,6 +42,7 @@ public static class ApplicationSelectionPresets
                 SplitTunnelMode.ProxySelected => ContainsAny(application.Id, ProxyPackageFragments)
                     || ContainsAny(application.Name, ProxyNameFragments),
                 SplitTunnelMode.BypassSelected => application.Id.Equals("com.mobifitness", StringComparison.OrdinalIgnoreCase)
+                    || application.Id.Equals("app.monobox.mobile.khanbuz", StringComparison.OrdinalIgnoreCase)
                     || BypassPackagePrefixes.Any(prefix => application.Id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                     || ContainsAny(application.Name, BypassNameFragments)
                     // Windows paths may identify the vendor even when the Start menu title is generic.

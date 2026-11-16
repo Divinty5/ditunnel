@@ -329,11 +329,13 @@ public static class Dialogs
                     }
                     var query = search.Text?.Trim() ?? "";
                     foreach (var application in installedApplications
-                        .Where(item => query.Length == 0 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || item.Id.Contains(query, StringComparison.OrdinalIgnoreCase))
+                        .Select(item => (item.Id, item.Name, DisplayId: ApplicationSelectionPresets.DisplayId(item.Id, vm.Platform.ReleaseTarget)))
+                        .Where(item => query.Length == 0 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                            || item.Id.Contains(query, StringComparison.OrdinalIgnoreCase) || item.DisplayId.Contains(query, StringComparison.OrdinalIgnoreCase))
                         .OrderByDescending(item => selectedApplications.Contains(item.Id))
                         .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
                     {
-                        var check = new CheckBox { Content = new TextBlock { Text = $"{application.Name}\n{application.Id}", TextWrapping = TextWrapping.Wrap },
+                        var check = new CheckBox { Content = new TextBlock { Text = $"{application.Name}\n{application.DisplayId}", TextWrapping = TextWrapping.Wrap },
                             HorizontalContentAlignment = HorizontalAlignment.Stretch, IsChecked = selectedApplications.Contains(application.Id), Padding = new Thickness(8, 6) };
                         check.IsCheckedChanged += (_, _) =>
                         {

@@ -99,6 +99,14 @@ public sealed class SettingsAndRefreshTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    [Fact]
+    public void AndroidPackageDisplayReversesLabelsWithoutChangingIdsUsedForRouting()
+    {
+        const string package = "ru.cian.main";
+        Assert.Equal("main.cian.ru", ApplicationSelectionPresets.DisplayId(package, ReleaseTarget.AndroidArm64));
+        Assert.Equal(package, ApplicationSelectionPresets.DisplayId(package, ReleaseTarget.LinuxX64));
+        Assert.Equal([package], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, [new(package, "Cian")]));
+    }
     private sealed class Store : IProfileStore
     {
         public List<ImportedProfile> Items = [new("Old", "VLESS", "old", "sub", "Subscription", "https://example.com/sub"), new("Manual", "SS", "manual", "manual", "Manual")];
@@ -520,13 +528,14 @@ public sealed class SettingsAndRefreshTests
             new("com.vivaldi.browser", "Vivaldi Browser"),
             new("com.vivaldi.browser.snapshot", "Vivaldi Snapshot"),
             new("com.mobifitness", "Fitness"),
+            new("app.monobox.mobile.khanbuz", "Ханбуз"),
             new("ru.sberbankmobile", "СберБанк"),
             new("com.yandex.browser", "Яндекс Браузер"),
             new("com.example.notes", "Notes")
         ];
 
         Assert.Equal(["com.google.android.youtube", "com.openai.chatgpt", "com.vivaldi.browser", "com.vivaldi.browser.snapshot"], ApplicationSelectionPresets.Select(SplitTunnelMode.ProxySelected, installed));
-        Assert.Equal(["com.mobifitness", "ru.sberbankmobile", "com.yandex.browser"], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
+        Assert.Equal(["com.mobifitness", "app.monobox.mobile.khanbuz", "ru.sberbankmobile", "com.yandex.browser"], ApplicationSelectionPresets.Select(SplitTunnelMode.BypassSelected, installed));
     }
     [Fact] public void BypassAutoSelectionAddsRussianSocialAppsAndRuStore()
     {
