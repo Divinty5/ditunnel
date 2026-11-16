@@ -17,16 +17,88 @@ public sealed class SettingsAndRefreshTests
         {
             File.WriteAllText(path, "{\"Theme\":\"dark\"}");
             var settings = UserSettings.Load(path);
+            Assert.False(settings.RefreshSubscriptionsDirectly);
             Assert.True(settings.Ipv4Only);
             Assert.True(settings.GetConnectionPolicy().Ipv4Only);
             var fingerprint = settings.NetworkSettingsFingerprint();
             settings.Ipv4Only = false;
             Assert.NotEqual(fingerprint, settings.NetworkSettingsFingerprint());
+            settings.RefreshSubscriptionsDirectly = true;
             settings.Save(path);
             Assert.False(UserSettings.Load(path).Ipv4Only);
+            Assert.True(UserSettings.Load(path).RefreshSubscriptionsDirectly);
         }
         finally { File.Delete(path); Directory.Delete(Path.GetDirectoryName(path)!); }
     }
+
+    [Fact]
+    public async Task DirectRefreshUsesItsOwnHttpClientAndKeepsOldServersOnFailure()
+    {
+        var store = new Store();
+        var handler = new SubscriptionHandler();
+        var settings = new UserSettings { RefreshSubscriptionsDirectly = true };
+        var vm = new MainViewModel(null, store, selectionSettings: settings, persistSelection: () => { },
+            directSubscriptionClient: () => new HttpClient(handler, disposeHandler: false));
+        try
+        {
+            await vm.RefreshSubscriptionsOnStartupAsync();
+            Assert.Equal([new Uri("https://example.com/sub")], handler.Requests);
+            Assert.Contains(store.Items, profile => profile.Name == "Fresh");
+            handler.Fail = true;
+            await vm.RefreshSelectedSubscriptionAsync();
+            Assert.Equal(2, handler.Requests.Count);
+            Assert.Contains("Прямое обновление подписок недоступно.", vm.SubscriptionStatus);
+            Assert.Contains(store.Items, profile => profile.Name == "Fresh");
+        }
+        finally { await vm.ShutdownAsync(); handler.Dispose(); }
+    }
+
+    private sealed class SubscriptionHandler : HttpMessageHandler
+    {
+        public List<Uri> Requests { get; } = [];
+        public bool Fail { get; set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request.RequestUri!);
+            if (Fail) throw new HttpRequestException();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("vless://00000000-0000-0000-0000-000000000001@example.com:443#Fresh")
+            });
+        }
+    }
+
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64)]
+    [InlineData(ReleaseTarget.LinuxX64)]
+    public async Task ProtectedDesktopDoesNotOpenADirectSubscriptionClient(ReleaseTarget target)
+    {
+        var store = new Store();
+        var platform = target == ReleaseTarget.WindowsX64 ? AppPlatform.Windows : AppPlatform.Linux;
+        var vm = new MainViewModel(new ProtectedEngine(), store, platform: platform,
+            selectionSettings: new UserSettings { RefreshSubscriptionsDirectly = true }, persistSelection: () => { },
+            directSubscriptionClient: () => throw new InvalidOperationException());
+        try
+        {
+            await vm.RefreshSubscriptionsAsync();
+            Assert.Equal("Прямое обновление подписок заблокировано защитой VPN.", vm.SubscriptionStatus);
+            Assert.Contains(store.Items, profile => profile.Name == "Old");
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class ProtectedEngine : IProfileVpnEngine
+    {
+        public VpnStatus Status => VpnStatus.Disconnected;
+        public bool RequiresAdministrator => false;
+        public bool IsNetworkProtectionActive => true;
+        public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
+        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DisconnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class Store : IProfileStore
     {
         public List<ImportedProfile> Items = [new("Old", "VLESS", "old", "sub", "Subscription", "https://example.com/sub"), new("Manual", "SS", "manual", "manual", "Manual")];

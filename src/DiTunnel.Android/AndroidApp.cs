@@ -45,7 +45,8 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
             var model = new MainViewModel(engine, store: store,
             probe: new AndroidServerProbe(this),
             countryResolver: new AndroidServerCountryResolver(this),
-            installedApplicationProvider: new AndroidInstalledApplicationProvider(this));
+            installedApplicationProvider: new AndroidInstalledApplicationProvider(this),
+            directSubscriptionClient: () => AndroidSubscriptionNetwork.CreateClient(this));
             var restoring = VpnQuickControls.Selected;
             if (restoring is not null)
             {

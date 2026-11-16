@@ -83,7 +83,23 @@ public static class ProfileParser
     internal static ImportedProfile ParseAmneziaWg(string input)
     {
         var configuration = AmneziaWgConfiguration.Parse(input);
-        return new(NormalizeProfileName($"AmneziaWG · {configuration.EndpointHost}"), AmneziaWgConfiguration.ProfileKind, input);
+        var name = ReadAmneziaWgRemark(input);
+        return new(name ?? NormalizeProfileName($"AmneziaWG · {configuration.EndpointHost}"), AmneziaWgConfiguration.ProfileKind, input);
+    }
+
+    private static string? ReadAmneziaWgRemark(string input)
+    {
+        // 3x-ui puts the share remark in a standalone comment immediately before [Peer].
+        string? previous = null;
+        foreach (var line in input.Split(['\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var comment = line.IndexOf('#');
+            var section = comment < 0 ? line.AsSpan() : line.AsSpan(0, comment);
+            if (section.TrimEnd().Equals("[Peer]", StringComparison.OrdinalIgnoreCase))
+                return previous is { Length: > 0 } ? previous : null;
+            previous = line.StartsWith("# ", StringComparison.Ordinal) ? NormalizeProfileName(line[2..]) : null;
+        }
+        return null;
     }
 
     private static IEnumerable<string> SplitServerEntries(string input)
@@ -203,7 +219,7 @@ public sealed class ProfileImporter
     private readonly TimeSpan requestBudget;
     public int SkippedEntries { get; private set; }
 
-    public async Task<IReadOnlyList<ImportedProfile>> ImportAsync(string input, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ImportedProfile>> ImportAsync(string input, CancellationToken cancellationToken = default, string? subscriptionName = null)
     {
         SkippedEntries = 0;
         input = input.Trim();
@@ -240,7 +256,41 @@ public sealed class ProfileImporter
         var usage = response.Headers.TryGetValues("Subscription-Userinfo", out var headers) ? SubscriptionUsage.Parse(string.Join(";", headers)) : null;
         var profiles = ProfileParser.Parse(Encoding.UTF8.GetString(buffer.ToArray()), out var skippedEntries);
         SkippedEntries = skippedEntries;
-        return profiles.Select(p => p with { Usage = usage }).ToArray();
+        var identity = ReadSubscriptionIdentity(response, string.IsNullOrWhiteSpace(subscriptionName) && uri.Fragment.Length > 1
+            ? Uri.UnescapeDataString(uri.Fragment[1..]) : subscriptionName);
+        return profiles.Select(p => p with { Usage = usage, Name = RemoveClientSuffix(p, identity) }).ToArray();
+    }
+
+    private static string? ReadSubscriptionIdentity(HttpResponseMessage response, string? subscriptionName)
+    {
+        var title = response.Headers.TryGetValues("Profile-Title", out var titles) ? titles.FirstOrDefault() : null;
+        if (title?.StartsWith("base64:", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            try { title = Encoding.UTF8.GetString(Convert.FromBase64String(title[7..])); }
+            catch (FormatException) { title = null; }
+        }
+
+        return IdentityFromTitle(title) ?? IdentityFromTitle(subscriptionName);
+
+        static string? IdentityFromTitle(string? value)
+        {
+            const string separator = "-for-";
+            var index = value?.IndexOf(separator, StringComparison.OrdinalIgnoreCase) ?? -1;
+            if (index <= 0) return null;
+            var identity = value![(index + separator.Length)..].Trim();
+            return identity.Length is > 0 and <= 120 && !identity.Any(char.IsControl) ? identity : null;
+        }
+    }
+
+    private static string RemoveClientSuffix(ImportedProfile profile, string? identity)
+    {
+        if (identity is null || profile.Kind is not ("Hysteria 2" or AmneziaWgConfiguration.ProfileKind))
+            return profile.Name;
+        var suffix = "-" + identity;
+        var decoration = profile.Name.IndexOfAny(['|', '｜']);
+        var title = (decoration < 0 ? profile.Name.AsSpan() : profile.Name.AsSpan(0, decoration)).TrimEnd();
+        return title.Length > suffix.Length && title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? string.Concat(title[..^suffix.Length], profile.Name.AsSpan(title.Length)) : profile.Name;
     }
 
     private async Task<HttpResponseMessage> GetFollowingRedirectsAsync(Uri initial, CancellationToken cancellationToken)

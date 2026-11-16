@@ -35,6 +35,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly IServerProbe? probe;
     private readonly IServerCountryResolver? countryResolver;
     private readonly IInstalledApplicationProvider? installedApplicationProvider;
+    private readonly Func<HttpClient>? directSubscriptionClient;
     private readonly Dictionary<string, ProbeSnapshot> probeSnapshots = new(StringComparer.Ordinal);
     private readonly HashSet<string> pendingProbes = new(StringComparer.Ordinal);
     private ServerItemViewModel? activeProfile;
@@ -91,7 +92,8 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         if (sources.Length == 0) return;
         var selectedOnly = sourceId is not null;
-        download ??= (url, token) => new ProfileImporter(timeout: TimeSpan.FromSeconds(10)).ImportAsync(url, token);
+        var useDirectRoute = download is null && selectionSettings.RefreshSubscriptionsDirectly;
+        var directBlocked = useDirectRoute && Platform.SupportsKillSwitch && engine?.IsNetworkProtectionActive == true;
         refreshingSubscriptions = true;
         OnPropertyChanged(nameof(CanRefreshSubscriptions));
         OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
@@ -101,6 +103,7 @@ public sealed partial class MainViewModel : ViewModelBase
         var selectedContent = SelectedProfile?.Profile.Content;
         try
         {
+            using var directClient = useDirectRoute && !directBlocked ? directSubscriptionClient?.Invoke() : null;
             using var concurrency = new SemaphoreSlim(4);
             var downloads = await Task.WhenAll(sources.Select(async source =>
             {
@@ -109,7 +112,11 @@ public sealed partial class MainViewModel : ViewModelBase
                 {
                     using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
                     deadline.CancelAfter(TimeSpan.FromSeconds(10));
-                    var fresh = await download(source.SourceUrl!, deadline.Token).WaitAsync(deadline.Token);
+                    if (useDirectRoute && directClient is null) throw new HttpRequestException();
+                    var request = download is not null ? download(source.SourceUrl!, deadline.Token)
+                        : (directClient is null ? new ProfileImporter() : new ProfileImporter(directClient))
+                            .ImportAsync(source.SourceUrl!, deadline.Token, source.Name);
+                    var fresh = await request.WaitAsync(deadline.Token);
                     return (Source: source, Fresh: fresh, Error: (Exception?)null);
                 }
                 catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { throw; }
@@ -157,12 +164,17 @@ public sealed partial class MainViewModel : ViewModelBase
             var status = failed == 0 ? $"{summary} · {DateTime.Now:HH:mm}" : $"{summary}. Сохранены прежние серверы.";
             var invalidFormats = downloads.Count(item => item.Error is FormatException);
             var downloadErrors = downloads.Count(item => item.Error is HttpRequestException or OperationCanceledException);
+            var directFailed = useDirectRoute && updated == 0 && downloads.All(item =>
+                item.Error is HttpRequestException { StatusCode: null } or OperationCanceledException);
             if (invalidFormats > 0) status += $" Ошибки формата: {invalidFormats}.";
             if (downloadErrors > 0) status += $" Ошибки загрузки: {downloadErrors}.";
+            if (directFailed)
+                status = directBlocked ? "Прямое обновление подписок заблокировано защитой VPN."
+                    : "Прямое обновление подписок недоступно. Проверьте физическое подключение к сети.";
             SubscriptionStatus = status;
             if (showToast)
             {
-                RefreshToast = summary;
+                RefreshToast = directFailed ? status : summary;
                 RefreshToastBackground = new SolidColorBrush(Color.Parse(failed == 0 ? "#D92EBE39" : "#D9C8324A"));
                 IsRefreshToastVisible = true;
                 _ = HideRefreshToastAsync(++refreshToastGeneration);
@@ -410,7 +422,8 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public MainViewModel() : this(null) { }
     public MainViewModel(IProfileVpnEngine? engine, IProfileStore? store = null, IServerProbe? probe = null, IServerCountryResolver? countryResolver = null,
-        IInstalledApplicationProvider? installedApplicationProvider = null, AppPlatform? platform = null, UserSettings? selectionSettings = null, Action? persistSelection = null)
+        IInstalledApplicationProvider? installedApplicationProvider = null, AppPlatform? platform = null, UserSettings? selectionSettings = null,
+        Action? persistSelection = null, Func<HttpClient>? directSubscriptionClient = null)
     {
         this.engine = engine;
         this.selectionSettings = selectionSettings ?? UserSettings.Current;
@@ -419,6 +432,7 @@ public sealed partial class MainViewModel : ViewModelBase
         this.probe = probe;
         this.countryResolver = countryResolver;
         this.installedApplicationProvider = installedApplicationProvider;
+        this.directSubscriptionClient = directSubscriptionClient;
         profileStore = store ?? new UnavailableProfileStore("Защищённое хранилище профилей не настроено.");
         if (engine is not null) engine.StatusChanged += EngineStatusChanged;
         mapLightsTimer.Tick += (_, _) => AdvanceMapLights();

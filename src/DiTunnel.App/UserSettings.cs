@@ -74,6 +74,7 @@ public sealed class UserSettings
         }
     }
     public bool KillSwitchEnabled { get; set; }
+    public bool RefreshSubscriptionsDirectly { get; set; }
     public bool BlockAdsEnabled { get; set; }
     public bool StrictAdBlockingEnabled { get; set; }
     public bool AllowLocalNetwork { get; set; }

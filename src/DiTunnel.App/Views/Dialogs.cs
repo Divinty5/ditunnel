@@ -271,6 +271,17 @@ public static class Dialogs
                 if (vm.Platform.ReleaseTarget == ReleaseTarget.LinuxX64 && vm.Platform.SupportsKillSwitch)
                     panel.Children.Add(Label("Прямой трафик правил РТ разрешён при работающем VPN. После аварии он блокируется; настройка локальной сети остаётся в силе."));
             }
+            var directSubscriptions = new CheckBox
+            {
+                Content = L.T("Обновлять подписки напрямую"),
+                IsChecked = UserSettings.Current.RefreshSubscriptionsDirectly
+            };
+            directSubscriptions.IsCheckedChanged += (_, _) =>
+            {
+                UserSettings.Current.RefreshSubscriptionsDirectly = directSubscriptions.IsChecked == true;
+                Save();
+            };
+            panel.Children.Add(directSubscriptions);
             BeginSection("Раздельное туннелирование");
             var splitMode = new ComboBox { ItemsSource = new[] { L.T("Всё через VPN"), L.T("Обход выбранных"), L.T("Только выбранные через VPN") }, SelectedIndex = vm.Platform.SupportsAdvancedNetworkSettings ? (int)UserSettings.Current.SplitTunnelMode : 0, IsEnabled = vm.Platform.SupportsAdvancedNetworkSettings };
             var activeMode = UserSettings.Current.SplitTunnelMode == SplitTunnelMode.ProxySelected ? SplitTunnelMode.ProxySelected : SplitTunnelMode.BypassSelected;

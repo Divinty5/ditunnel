@@ -78,7 +78,8 @@ internal static class Program
             return new App.ViewModels.MainViewModel(engine,
                 store: new Platform.Windows.WindowsProfileStore(),
                 probe: engine, countryResolver: new Platform.Windows.WindowsServerCountryResolver(),
-                installedApplicationProvider: new Platform.Windows.WindowsInstalledApplicationProvider());
+                installedApplicationProvider: new Platform.Windows.WindowsInstalledApplicationProvider(),
+                directSubscriptionClient: Platform.Windows.WindowsSubscriptionNetwork.CreateClient);
         };
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         timer.Stop();

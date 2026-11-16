@@ -20,7 +20,7 @@ public sealed class LinuxNetworkCommands : ILinuxNetworkCommands, ILinuxFirewall
     public async Task ApplyAsync(string batch, CancellationToken token) =>
         _ = await RunAsync("/usr/sbin/nft", ["-f", "-"], token, batch).ConfigureAwait(false);
 
-    private static async Task<string> RunAsync(string executable, string[] arguments, CancellationToken token, string? input = null)
+    internal static async Task<string> RunAsync(string executable, string[] arguments, CancellationToken token, string? input = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(5));

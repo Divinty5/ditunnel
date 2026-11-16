@@ -1,4 +1,7 @@
 {
+  "Refresh subscriptions directly": { "es": "Actualizar las suscripciones directamente", "zh-Hans": "直连更新订阅" },
+  "VPN protection blocked direct subscription refresh.": { "es": "La protección de la VPN bloqueó la actualización directa de las suscripciones.", "zh-Hans": "VPN 防护已阻止直连更新订阅。" },
+  "Direct subscription refresh is unavailable. Check the physical network connection.": { "es": "No se pueden actualizar las suscripciones directamente. Comprueba la conexión física a la red.", "zh-Hans": "无法直连更新订阅。请检查底层网络连接。" },
   "An update check or installation is already running.": { "es": "Ya se está buscando o instalando una actualización.", "zh-Hans": "正在检查或安装更新。" },
   "GitHub returned an invalid SHA-256 file.": { "es": "GitHub devolvió un archivo SHA-256 no válido.", "zh-Hans": "GitHub 返回的 SHA-256 文件无效。" },
   "The update files are no longer available on GitHub. Check for updates again.": { "es": "Los archivos de actualización ya no están disponibles en GitHub. Vuelve a buscar actualizaciones.", "zh-Hans": "更新文件已无法从 GitHub 获取。请重新检查更新。" },

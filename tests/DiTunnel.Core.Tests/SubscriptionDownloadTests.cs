@@ -119,6 +119,31 @@ public sealed class SubscriptionDownloadTests
         Assert.Equal(1, importer.SkippedEntries);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UsesAwgRemarkAndRemovesOnlyTheKnownClientIdentity(bool identityFromHeader)
+    {
+        var awg = NativeAwgLink("RandomTrailers = on\n\n# AWG3-Test-8388-Office-Client");
+        const string hysteria = "hy2://synthetic@example.com:443?obfs=salamander#HY2-Salamander-443-Office-Client";
+        const string retained = "hy2://synthetic@example.org:443#HY2-Salamander-443-Europe";
+        const string title = "Test-subscription-for-Office-Client";
+        using var client = new HttpClient(new Responses(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent($"{awg}\n{hysteria}\n{retained}") };
+            if (identityFromHeader)
+                response.Headers.TryAddWithoutValidation("Profile-Title", "base64:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(title)));
+            return response;
+        }));
+
+        var profiles = await new ProfileImporter(client).ImportAsync("https://example.com/sub",
+            subscriptionName: identityFromHeader ? null : title);
+
+        Assert.Equal(["AWG3-Test-8388", "HY2-Salamander-443", "HY2-Salamander-443-Europe"], profiles.Select(profile => profile.Name));
+        Assert.Equal("AmneziaWG 3.1", profiles[0].ProtocolName);
+        Assert.Equal(hysteria, profiles[1].Content);
+    }
+
     [Fact]
     public async Task MalformedAwgResponseReportsAConfigurationError()
     {
