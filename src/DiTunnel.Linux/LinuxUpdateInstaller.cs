@@ -30,28 +30,31 @@ internal sealed class LinuxUpdateInstaller : IUpdateInstaller
             return path;
         }
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".download";
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMinutes(10));
+        var token = deadline.Token;
         try
         {
-            using var response = await Client.GetAsync(release.InstallerUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await Client.GetAsync(release.InstallerUrl, HttpCompletionOption.ResponseHeadersRead, token);
             response.EnsureSuccessStatusCode();
             var length = response.Content.Headers.ContentLength;
             if (length > MaximumBytes) throw new InvalidDataException();
-            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
+            await using (var source = await response.Content.ReadAsStreamAsync(token))
             await using (var target = new FileStream(temporary, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write,
                 Options = FileOptions.Asynchronous, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite }))
             {
                 var buffer = new byte[81920];
                 long total = 0;
                 int count;
-                while ((count = await source.ReadAsync(buffer, cancellationToken)) != 0)
+                while ((count = await source.ReadAsync(buffer, token)) != 0)
                 {
                     total += count;
                     if (total > MaximumBytes) throw new InvalidDataException();
-                    await target.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                    await target.WriteAsync(buffer.AsMemory(0, count), token);
                     if (length > 0) progress?.Report((int)Math.Clamp(total * 100 / length.Value, 0, 100));
                 }
             }
-            if (!await MatchesChecksumAsync(temporary, hash, cancellationToken))
+            if (!await MatchesChecksumAsync(temporary, hash, token))
                 throw new InvalidDataException("Контрольная сумма пакета не совпала.");
             File.Move(temporary, path, overwrite: true);
             progress?.Report(100);
@@ -78,19 +81,35 @@ internal sealed class LinuxUpdateInstaller : IUpdateInstaller
 
     public async Task LaunchAsync(string installerPath)
     {
-        if (!Path.IsPathFullyQualified(installerPath) || !File.Exists(installerPath) || !installerPath.EndsWith("-linux-amd64.deb", StringComparison.Ordinal)) throw new ArgumentException();
+        const string prefix = "Di-Tunnel-";
+        const string suffix = "-linux-amd64.deb";
+        var name = Path.GetFileName(installerPath);
+        if (!Path.IsPathFullyQualified(installerPath) || !File.Exists(installerPath) ||
+            name.Length <= prefix.Length + suffix.Length ||
+            !name.StartsWith(prefix, StringComparison.Ordinal) || !name.EndsWith(suffix, StringComparison.Ordinal) ||
+            !Version.TryParse(name[prefix.Length..^suffix.Length], out var expected))
+            throw new ArgumentException("Некорректное имя пакета Linux.", nameof(installerPath));
         // Keep the UI alive until apt finishes. Starting pkexec does not mean dpkg installed the package.
         using var process = Process.Start(new ProcessStartInfo("/usr/bin/pkexec")
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
             ArgumentList = { "--disable-internal-agent", "/usr/bin/apt-get", "-o", "Dpkg::Use-Pty=0",
-                "-o", "DPkg::Lock::Timeout=30", "install", "--yes", "--", installerPath }
+                "-o", "DPkg::Lock::Timeout=120", "install", "--yes", "--", installerPath }
         }) ?? throw new IOException();
         await Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(Stream.Null),
             process.StandardError.BaseStream.CopyToAsync(Stream.Null), process.WaitForExitAsync()).ConfigureAwait(false);
         if (process.ExitCode == 126) throw new UpdateInstallException("Установка обновления отменена.");
         if (process.ExitCode == 127) throw new UpdateInstallException("Linux не подтвердил права для установки. Проверьте системный запрос пароля.");
         if (process.ExitCode != 0) throw new UpdateInstallException($"Установка пакета Linux завершилась ошибкой apt (код {process.ExitCode}).");
+        using var query = Process.Start(new ProcessStartInfo("/usr/bin/dpkg-query")
+        {
+            UseShellExecute = false, RedirectStandardOutput = true,
+            ArgumentList = { "-W", "-f=${db:Status-Status} ${Version}", "ditunnel:amd64" }
+        }) ?? throw new IOException();
+        var installed = await query.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+        await query.WaitForExitAsync().ConfigureAwait(false);
+        if (query.ExitCode != 0 || installed != $"installed {ReleaseChecker.FormatVersion(expected)}")
+            throw new UpdateInstallException("Linux не подтвердил установку новой версии Di-Tunnel.");
         try
         {
             using var restart = Process.Start(new ProcessStartInfo("/usr/bin/di-tunnel")

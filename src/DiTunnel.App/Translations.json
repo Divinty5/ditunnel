@@ -9,6 +9,7 @@
   "Проверка через туннель недоступна": "Tunnel check unavailable",
   "Туннель запущен · Проверяем связь": "Tunnel started · Checking connectivity",
   "Проверка не завершена": "Check incomplete",
+  "Linux не подтвердил установку новой версии Di-Tunnel.": "Linux did not confirm installation of the new Di-Tunnel version.",
   "Профиль проверен.": "Profile checked.",
   "Проверка не пройдена.": "Check failed.",
   "HTTPS не проверен": "HTTPS not verified",

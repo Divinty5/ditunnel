@@ -50,6 +50,8 @@ jobs:
           path: |
             artifacts/linux/release/Di-Tunnel-*-linux-amd64.deb
             artifacts/linux/release/Di-Tunnel-*-linux-amd64.deb.sha256
+            artifacts/linux/release/Di-Tunnel-*-linux-amd64.run
+            artifacts/linux/release/Di-Tunnel-*-linux-amd64.run.sha256
             artifacts/linux/release/source-commit.txt
           if-no-files-found: error
           compression-level: 0

@@ -23,6 +23,21 @@ def run(*args, **kwargs):
     subprocess.run(list(map(str, args)), check=True, **kwargs)
 
 
+def build_installer(root, artifact, version, checksum):
+    installer = artifact.with_name(f"Di-Tunnel-{version}-linux-amd64.run")
+    stub = (root / "packaging/linux/installer.sh").read_text(encoding="utf-8")
+    if not stub.endswith("__DITUNNEL_DEB__\n"):
+        raise RuntimeError("Missing installer payload marker")
+    stub = stub.replace("@VERSION@", version).replace("@PACKAGE@", artifact.name).replace("@SHA256@", checksum)
+    with installer.open("wb") as output, artifact.open("rb") as payload:
+        output.write(stub.encode("utf-8"))
+        shutil.copyfileobj(payload, output)
+    installer.chmod(0o755)
+    run("/bin/sh", installer, "--verify")
+    installer.with_suffix(".run.sha256").write_text(digest(installer) + "  " + installer.name + "\n")
+    return installer
+
+
 def verify_runtime(directory):
     for name in ("xray", "ditunnel-awg", "geoip.dat", "geosite.dat"):
         if digest(directory / name) != (directory / (name + ".sha256")).read_text().strip():
@@ -132,9 +147,12 @@ def main():
         stage.chmod(0o755)
         artifact = output / f"Di-Tunnel-{version}-linux-amd64.deb"
         run("dpkg-deb", "--root-owner-group", "-Zxz", "-z6", "--build", stage, artifact)
-    (output / (artifact.name + ".sha256")).write_text(digest(artifact) + "  " + artifact.name + "\n")
+    checksum = digest(artifact)
+    (output / (artifact.name + ".sha256")).write_text(checksum + "  " + artifact.name + "\n")
     run(sys.executable, root / "scripts/Test-LinuxPackage.py", artifact)
+    installer = build_installer(root, artifact, version, checksum)
     print("Linux package:", artifact, flush=True)
+    print("Graphical installer:", installer, flush=True)
 
 
 if __name__ == "__main__":
