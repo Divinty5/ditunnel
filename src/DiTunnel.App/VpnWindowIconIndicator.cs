@@ -55,7 +55,7 @@ internal sealed class VpnWindowIconIndicator : IDisposable
 
     private void ModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(MainViewModel.ConnectionState))
+        if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(MainViewModel.DisplayConnectionState))
             Update();
     }
 
@@ -63,9 +63,9 @@ internal sealed class VpnWindowIconIndicator : IDisposable
     {
         try
         {
-            var state = model?.ConnectionState ?? VpnConnectionState.Disconnected;
+            var state = model?.DisplayConnectionState ?? VpnConnectionState.Disconnected;
             var icon = originalIcon;
-            if (state is VpnConnectionState.Connected or VpnConnectionState.Error)
+            if (state != VpnConnectionState.Disconnected)
             {
                 var accent = ConnectionPalette.AccentFor(state);
                 if (!icons.TryGetValue(accent, out icon))

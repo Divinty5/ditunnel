@@ -128,7 +128,7 @@ internal static class Program
         Require(!section.IsExpanded, "Settings sections start collapsed");
         section.IsExpanded = true; draft.Text = "example.ru"; section.IsExpanded = false;
         Require(ReferenceEquals(section.Content, draft) && draft.Text == "example.ru", "Collapsing keeps settings drafts");
-        var model = new MainViewModel(null, new EmptyStore());
+        var model = new MainViewModel(null, new EmptyStore(), platform: AppPlatform.Windows);
         window.DataContext = model;
         using var indicator = new VpnWindowIconIndicator(window, enableShellHook: false);
         original = window.Icon!;
@@ -162,11 +162,20 @@ internal static class Program
             Require(greenPixels.Skip(2).Count(pixel => Channel(pixel, 8) > Channel(pixel, 16) + 20 && Channel(pixel, 8) > Channel(pixel, 0) + 20) > 100, "Green tunnel");
             Require(redPixels.Skip(2).Count(pixel => Channel(pixel, 16) > Channel(pixel, 8) + 20 && Channel(pixel, 16) > Channel(pixel, 0) + 20) > 100, "Red tunnel");
         }
-        foreach (var state in new[] { VpnConnectionState.Connecting, VpnConnectionState.Reconnecting, VpnConnectionState.Disconnecting, VpnConnectionState.Disconnected })
+        model.ConnectionState = VpnConnectionState.Connecting;
+        var yellow = window.Icon;
+        Require(!ReferenceEquals(yellow, original) && !ReferenceEquals(yellow, green) && !ReferenceEquals(yellow, red), "Pending connection has its own icon");
+        bool IsYellow(ulong pixel) => Channel(pixel, 16) > 128 && Channel(pixel, 8) > 96 &&
+            Channel(pixel, 16) > Channel(pixel, 8) && Channel(pixel, 8) > Channel(pixel, 0) + 20;
+        if (OperatingSystem.IsWindows()) Require(ReadWindowsIcon(window).Count(IsYellow) > 10, "Windows yellow tunnel");
+        if (OperatingSystem.IsLinux()) Require(ReadX11Icon(window).Skip(2).Count(IsYellow) > 100, "X11 yellow tunnel");
+        foreach (var state in new[] { VpnConnectionState.Reconnecting, VpnConnectionState.Disconnecting })
         {
             model.ConnectionState = state;
-            Require(ReferenceEquals(window.Icon, original), "Purple icon for " + state);
+            Require(ReferenceEquals(window.Icon, yellow), "Yellow icon for " + state);
         }
+        model.ConnectionState = VpnConnectionState.Disconnected;
+        Require(ReferenceEquals(window.Icon, original), "Disconnected icon restored");
         model.ConnectionState = VpnConnectionState.Connected;
         Require(ReferenceEquals(window.Icon, green), "Icon cache");
         var replacement = new MainViewModel(null, new EmptyStore()) { ConnectionState = VpnConnectionState.Error };
@@ -563,13 +572,14 @@ internal static class Program
             CreateShortcut(ours, target, (cached, 0));
             CreateShortcut(foreign, Path.Combine(directory, "other.exe"), (cached, 0));
             CreateShortcut(custom, target, (Path.Combine(directory, "custom.ico"), 3));
-            Require(WindowsShellShortcut.RepairLegacyIcon(ours, directory, target), "Legacy launcher migrated");
+            Require(WindowsShellShortcut.Repair(ours, directory, target), "Legacy launcher migrated");
             Require(ReadShortcutIcon(ours) == (target, 0), "Idle launcher uses original application icon");
-            Require(!WindowsShellShortcut.RepairLegacyIcon(ours, directory, target), "Migration is idempotent");
-            Require(!WindowsShellShortcut.RepairLegacyIcon(foreign, directory, target), "Foreign launcher remains unchanged");
+            Require(!WindowsShellShortcut.Repair(ours, directory, target), "Migration is idempotent");
+            Require(!WindowsShellShortcut.Repair(foreign, directory, target), "Foreign launcher remains unchanged");
             Require(ReadShortcutIcon(foreign) == (cached, 0), "Foreign icon preserved");
-            Require(!WindowsShellShortcut.RepairLegacyIcon(custom, directory, target), "Custom icon remains unchanged");
+            Require(WindowsShellShortcut.Repair(custom, directory, target), "Launcher with a custom icon receives the missing application ID");
             Require(ReadShortcutIcon(custom) == (Path.Combine(directory, "custom.ico"), 3), "Custom resource index preserved");
+            Require(!WindowsShellShortcut.Repair(custom, directory, target), "Custom launcher migration is idempotent");
         }
         finally
         {

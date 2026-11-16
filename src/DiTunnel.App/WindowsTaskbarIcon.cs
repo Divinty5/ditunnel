@@ -20,6 +20,7 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     private nint handle;
     private uint attachedProcess;
     private bool resolving, disposed, repaired;
+    private bool windowHasApplicationId;
     private DateTime nextAttempt;
     private int failures;
 
@@ -46,12 +47,17 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     {
         if (disposed || !enableShellHook) return;
         handle = window.TryGetPlatformHandle()?.Handle ?? 0;
-        if (!repaired) { repaired = true; RepairLegacyShortcuts(); }
+        if (!repaired && handle != 0)
+        {
+            repaired = true;
+            windowHasApplicationId = SetWindowApplicationId(ApplicationId);
+            RepairShortcuts();
+        }
         timer.Start(); EnsureAttached();
     }
     private void Closed(object? sender, EventArgs args) => Dispose();
 
-    private static void RepairLegacyShortcuts()
+    private static void RepairShortcuts()
     {
         // One-time recovery of launchers coloured by the previous implementation.
         // State changes never rewrite shortcuts. Custom/foreign icons are preserved.
@@ -65,7 +71,7 @@ internal sealed class WindowsTaskbarIcon : IDisposable
         {
             try
             {
-                if (WindowsShellShortcut.RepairLegacyIcon(path, Path.Combine(UserSettings.DataDirectory, "Icons"), Environment.ProcessPath!))
+                if (WindowsShellShortcut.Repair(path, Path.Combine(UserSettings.DataDirectory, "Icons"), Environment.ProcessPath!))
                     SHChangeNotify(0x2000, 0x0005 | 0x1000, path, 0);
             }
             catch (Exception error) { Trace.TraceWarning("Unable to restore legacy Di-Tunnel launcher: {0}", error.Message); }
@@ -74,8 +80,37 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     private void Tick(object? sender, EventArgs args) => EnsureAttached();
     private nint WindowMessage(nint hwnd, uint message, nint wParam, nint lParam, ref bool handled)
     {
-        if (message == buttonCreated) Dispatcher.UIThread.Post(() => { nextAttempt = DateTime.MinValue; EnsureAttached(); });
+        const uint destroy = 0x0002;
+        if (message == destroy && hwnd == handle && windowHasApplicationId)
+        {
+            _ = SetWindowApplicationId(null);
+            windowHasApplicationId = false;
+        }
+        if (message == buttonCreated) Dispatcher.UIThread.Post(() =>
+        {
+            if (disposed) return;
+            nextAttempt = DateTime.MinValue;
+            if (attachedProcess != 0) RefreshCurrentIcon();
+            EnsureAttached();
+        });
         return 0;
+    }
+
+    private bool SetWindowApplicationId(string? applicationId)
+    {
+        try
+        {
+            var iid = typeof(IPropertyStore).GUID;
+            Marshal.ThrowExceptionForHR(SHGetPropertyStoreForWindow(handle, ref iid, out var store));
+            try { SetString(store, 5, applicationId); }
+            finally { Marshal.ReleaseComObject(store); }
+            return true;
+        }
+        catch (Exception error)
+        {
+            Trace.TraceWarning("Unable to update Di-Tunnel window AppUserModelID: {0}", error.Message);
+            return false;
+        }
     }
 
     private async void EnsureAttached()
@@ -95,7 +130,7 @@ internal sealed class WindowsTaskbarIcon : IDisposable
             if (attachedProcess != 0) DiTunnelShellDetach(handle);
             var symbols = resolved.Value;
             var status = DiTunnelShellAttach(handle, mode, ref symbols);
-            if (status != 0) throw new InvalidOperationException($"Taskbar icon component returned {status}.");
+            if (status != 0) throw new System.ComponentModel.Win32Exception(unchecked((int)status));
             attachedProcess = currentProcess;
             failures = 0;
             // The state may have changed while the first PDB was downloading.
@@ -108,7 +143,8 @@ internal sealed class WindowsTaskbarIcon : IDisposable
         catch (Exception error)
         {
             nextAttempt = DateTime.UtcNow.AddSeconds(RetryDelay(++failures));
-            WriteStatus("ERROR_SHELL_ICON_" + error.GetType().Name);
+            WriteStatus("ERROR_SHELL_ICON_" + error.GetType().Name +
+                (error is System.ComponentModel.Win32Exception native ? $" {native.NativeErrorCode}" : ""));
             Trace.TraceWarning("Unable to enable VPN taskbar icon: {0}", error.Message);
         }
         finally { resolving = false; }
@@ -138,6 +174,11 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     {
         if (disposed) return;
         disposed = true; lifetime.Cancel(); timer.Stop();
+        if (windowHasApplicationId)
+        {
+            _ = SetWindowApplicationId(null);
+            windowHasApplicationId = false;
+        }
         window.Opened -= Opened; window.Closed -= Closed; timer.Tick -= Tick;
         Win32Properties.RemoveWndProcHookCallback(window, WindowMessage);
         if (attachedProcess != 0)
@@ -158,6 +199,18 @@ internal sealed class WindowsTaskbarIcon : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string message);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string name, string? title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint GetProp(nint window, string name);
+    [DllImport("shell32.dll")] private static extern int SHGetPropertyStoreForWindow(nint window, ref Guid iid, out IPropertyStore store);
+    [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PropertyVariant value);
+    private static readonly Guid AppUserModelFormat = new("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+
+    internal static string? GetShortcutApplicationId(object shortcut)
+    {
+        var store = (IPropertyStore)shortcut;
+        var key = new PropertyKey { Format = AppUserModelFormat, Id = 5 };
+        Marshal.ThrowExceptionForHR(store.GetValue(ref key, out var value));
+        try { return value.Type == 31 ? Marshal.PtrToStringUni(value.Pointer) : null; }
+        finally { _ = PropVariantClear(ref value); }
+    }
     internal static void SetShortcutApplicationId(object shortcut, string applicationId = ApplicationId)
     {
         var store = (IPropertyStore)shortcut;
@@ -165,10 +218,10 @@ internal sealed class WindowsTaskbarIcon : IDisposable
         Marshal.ThrowExceptionForHR(store.Commit());
     }
 
-    private static void SetString(IPropertyStore store, uint id, string text)
+    private static void SetString(IPropertyStore store, uint id, string? text)
     {
-        var key = new PropertyKey { Format = new("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), Id = id };
-        var value = new PropertyVariant { Type = 31, Pointer = Marshal.StringToCoTaskMemUni(text) };
+        var key = new PropertyKey { Format = AppUserModelFormat, Id = id };
+        var value = text is null ? default : new PropertyVariant { Type = 31, Pointer = Marshal.StringToCoTaskMemUni(text) };
         try { Marshal.ThrowExceptionForHR(store.SetValue(ref key, ref value)); }
         finally { Marshal.FreeCoTaskMem(value.Pointer); }
     }

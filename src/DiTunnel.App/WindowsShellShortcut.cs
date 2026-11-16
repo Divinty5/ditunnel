@@ -36,20 +36,25 @@ internal sealed class WindowsShellShortcut : IDisposable
     }
     internal void SetApplicationId(string applicationId = WindowsTaskbarIcon.ApplicationId) => WindowsTaskbarIcon.SetShortcutApplicationId(instance, applicationId);
 
-    internal static bool RepairLegacyIcon(string path, string cacheDirectory, string target)
+    internal static bool Repair(string path, string cacheDirectory, string target)
     {
         using var shortcut = new WindowsShellShortcut();
         shortcut.Load(path);
-        if (!string.Equals(Path.GetFullPath(shortcut.Target), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return false;
+        var shortcutTarget = shortcut.Target;
+        if (!Path.IsPathFullyQualified(shortcutTarget) ||
+            !string.Equals(Path.GetFullPath(shortcutTarget), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)) return false;
+        var id = WindowsTaskbarIcon.GetShortcutApplicationId(shortcut.instance);
+        if (!string.IsNullOrEmpty(id) && !id.Equals(WindowsTaskbarIcon.ApplicationId, StringComparison.OrdinalIgnoreCase)) return false;
         var icon = Environment.ExpandEnvironmentVariables(shortcut.Icon.Path);
-        if (!Path.IsPathFullyQualified(icon) ||
-            !string.Equals(Path.GetDirectoryName(Path.GetFullPath(icon)), Path.GetFullPath(cacheDirectory), StringComparison.OrdinalIgnoreCase)) return false;
         var name = Path.GetFileName(icon);
-        if (!string.Equals(name, "taskbar.ico", StringComparison.OrdinalIgnoreCase) &&
-            !(name.StartsWith("taskbar-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))) return false;
+        var legacyIcon = Path.IsPathFullyQualified(icon) &&
+            string.Equals(Path.GetDirectoryName(Path.GetFullPath(icon)), Path.GetFullPath(cacheDirectory), StringComparison.OrdinalIgnoreCase) &&
+            (name.Equals("taskbar.ico", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("taskbar-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".ico", StringComparison.OrdinalIgnoreCase));
+        if (!legacyIcon && !string.IsNullOrEmpty(id)) return false;
         shortcut.Load(path, writable: true);
-        shortcut.Icon = (target, 0);
-        shortcut.SetApplicationId();
+        if (legacyIcon) shortcut.Icon = (target, 0);
+        if (string.IsNullOrEmpty(id)) shortcut.SetApplicationId();
         shortcut.Save(path);
         return true;
     }

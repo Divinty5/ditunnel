@@ -236,9 +236,14 @@ __declspec(dllexport) DWORD WINAPI DiTunnelShellAttach(HWND client,int requested
     if(!SetPropW(client,SHELL_MODE_PROPERTY,(HANDLE)(INT_PTR)requested_mode))return GetLastError();
     RemovePropW(client,SHELL_STATUS_PROPERTY);
     client_hook=SetWindowsHookExW(WH_CALLWNDPROC,DiTunnelShellHook,self,thread);client_window=client;
-    if(!client_hook){RemovePropW(client,SHELL_MODE_PROPERTY);return GetLastError();}
+    if(!client_hook){error=GetLastError();RemovePropW(client,SHELL_MODE_PROPERTY);return error?error:ERROR_NOT_READY;}
     SHELL_SYMBOLS copy=*symbols;COPYDATASTRUCT data={SHELL_COPYDATA,sizeof(copy),&copy};DWORD_PTR ignored;
-    if(!SendMessageTimeoutW(shell,WM_COPYDATA,(WPARAM)client,(LPARAM)&data,SMTO_ABORTIFHUNG|SMTO_BLOCK,3000,&ignored))error=ERROR_TIMEOUT;
+    SetLastError(ERROR_SUCCESS);
+    if(!SendMessageTimeoutW(shell,WM_COPYDATA,(WPARAM)client,(LPARAM)&data,SMTO_ABORTIFHUNG|SMTO_BLOCK,3000,&ignored))
+    {
+        error=GetLastError();
+        if(!error)error=ERROR_TIMEOUT;
+    }
     else {INT_PTR status=(INT_PTR)GetPropW(client,SHELL_STATUS_PROPERTY);error=status?((DWORD)status-1):ERROR_NOT_READY;}
     if(error){UnhookWindowsHookEx(client_hook);client_hook=NULL;client_window=NULL;RemovePropW(client,SHELL_MODE_PROPERTY);RemovePropW(client,SHELL_STATUS_PROPERTY);}
     return error;
