@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
+using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using Avalonia.Media;
 
@@ -12,6 +13,7 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     public string Name { get; } = DisplayName(profile);
     public string Summary => Profile.Summary;
     public string Protocol => Profile.Kind.Equals("SS", StringComparison.OrdinalIgnoreCase) ? "Shadowsocks" : Profile.ProtocolName;
+    [ObservableProperty] private IBrush? activeConnectionBrush;
 
     private static string DisplayName(ImportedProfile profile)
     {
@@ -50,20 +52,28 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private bool isProbePending;
-    public string ProbeStatusText => IsProbePending ? "Проверяем…" : ProbeText;
-    public string ProbeDisplayText => IsProbePending || ProbeMilliseconds is not { } delay
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ProbeStatusText))]
+    [NotifyPropertyChangedFor(nameof(ProbeDisplayText))]
+    [NotifyPropertyChangedFor(nameof(ProbeBrush))]
+    private ServerProbeResult? activeProbeResult;
+
+    internal bool IsUnavailable => ProbeTimedOut && !IsProbePending && ActiveProbeResult?.Milliseconds is null;
+    private double? DisplayedProbeMilliseconds => ActiveProbeResult is { } active ? active.Milliseconds : ProbeMilliseconds;
+    public string ProbeStatusText => IsProbePending ? "Проверяем…" : ActiveProbeResult?.Message ?? ProbeText;
+    public string ProbeDisplayText => IsProbePending || DisplayedProbeMilliseconds is not { } delay
         ? ProbeStatusText : $"{delay:0} мс{ProbeMethod}";
     private string ProbeMethod
     {
         get
         {
-            var method = ProbeText.Split('·', 2)[0].Trim();
+            var method = ActiveProbeResult?.Diagnostics?.Method ?? ProbeStatusText.Split('·', 2)[0].Trim();
             return method is "TCP" or "TLS" or "HTTP" or "HTTPS" ? $" · {method}" : "";
         }
     }
     public IBrush ProbeBrush => IsProbePending
         ? LatencyPalette.For(null)
-        : LatencyPalette.For(ProbeMilliseconds, ProbeTimedOut);
+        : LatencyPalette.For(DisplayedProbeMilliseconds, ActiveProbeResult is { } active ? active.Milliseconds is null : ProbeTimedOut);
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FlagImage))]
     [NotifyPropertyChangedFor(nameof(HasFlag))]

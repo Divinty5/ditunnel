@@ -9,6 +9,7 @@ internal static class ConnectionPalette
     {
         VpnConnectionState.Connected => Color.FromRgb(0x55, 0xD7, 0x84),
         VpnConnectionState.Error => Color.FromRgb(0xF0, 0x64, 0x70),
+        VpnConnectionState.Connecting or VpnConnectionState.Reconnecting or VpnConnectionState.Disconnecting => Color.FromRgb(0xF1, 0xC4, 0x53),
         _ => Color.FromRgb(0xA5, 0x8A, 0xFF)
     };
 

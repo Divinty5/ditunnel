@@ -1,3 +1,5 @@
+using Avalonia;
+using DiTunnel.App.Controls;
 using DiTunnel.App.ViewModels;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
@@ -348,20 +350,73 @@ public sealed class ConnectionInteractionTests
         }
         finally { await vm.ShutdownAsync(); }
     }
-    [Fact] public async Task SelectingAnotherProfileReconnectsActiveVpn()
+    [Fact] public async Task BrowsingPreservesActiveVpnAndExplicitActivationSwitchesIt()
     {
         var engine = new SwitchingEngine();
         var vm = new MainViewModel(engine, new TwoProfileStore(), selectionSettings: new(), persistSelection: () => { });
         try
         {
             await vm.ConnectCommand.ExecuteAsync(null);
-            vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
+            var active = vm.Profiles.Single(profile => profile.Name == "A");
+            var selected = vm.Profiles.Single(profile => profile.Name == "B");
+            vm.SelectedProfile = selected;
+            Assert.Equal("A", vm.SelectedName);
+            Assert.Equal(["A"], engine.ConnectedProfiles);
+            Assert.NotNull(active.ActiveConnectionBrush);
+            Assert.Null(selected.ActiveConnectionBrush);
+            await vm.ActivateProfileFromUserAsync(selected);
             await WaitForAsync(() => engine.ConnectedProfiles.Count == 2 && !vm.IsConnecting).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(["A", "B"], engine.ConnectedProfiles.ToArray());
             Assert.Equal(1, engine.Disconnects);
             Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+            Assert.Null(active.ActiveConnectionBrush);
+            Assert.NotNull(selected.ActiveConnectionBrush);
         }
         finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task AndroidDoubleTapConnectsTheChosenProfileFromDisconnectedState()
+    {
+        var engine = new SwitchingEngine();
+        var vm = new MainViewModel(engine, new TwoProfileStore(), platform: AppPlatform.Android,
+            selectionSettings: new(), persistSelection: () => { });
+        try
+        {
+            var taps = new ProfileTouchTaps();
+            var first = vm.Profiles.Single(profile => profile.Name == "A");
+            var target = vm.Profiles.Single(profile => profile.Name == "B");
+            ServerItemViewModel? Tap(ServerItemViewModel row, int pointer, Point position, ulong timestamp)
+            {
+                taps.Press(row, pointer, position, timestamp);
+                return taps.Release(row, pointer, position, timestamp + 20, new Size(8, 8),
+                    new Size(24, 24), TimeSpan.FromMilliseconds(300));
+            }
+            Assert.Null(Tap(first, 1, new Point(10, 10), 100));
+            Assert.Null(Tap(target, 2, new Point(10, 10), 200));
+            Assert.Empty(engine.ConnectedProfiles);
+            var activated = Tap(target, 3, new Point(22, 12), 340);
+            Assert.Same(target, activated);
+            await vm.ActivateProfileFromUserAsync(activated!);
+            Assert.Equal(["B"], engine.ConnectedProfiles.ToArray());
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public void AndroidScrollCancelsTheDoubleTapSequence()
+    {
+        var taps = new ProfileTouchTaps();
+        var row = new ServerItemViewModel(new("A", "VLESS", "vless://synthetic-a"));
+        var point = new Point(10, 10);
+        var tolerance = new Size(8, 8);
+        var interval = TimeSpan.FromMilliseconds(300);
+        taps.Press(row, 1, point, 100);
+        Assert.Null(taps.Release(row, 1, point, 130, tolerance, new Size(24, 24), interval));
+        taps.Press(row, 2, point, 200);
+        taps.Move(2, new Point(10, 40), tolerance);
+        Assert.Null(taps.Release(row, 2, point, 260, tolerance, new Size(24, 24), interval));
     }
 
     [Fact] public async Task ApplyingNetworkSettingsReconnectsActiveVpn()
@@ -389,13 +444,13 @@ public sealed class ConnectionInteractionTests
         Assert.True(vm.IsImportOpen);
     }
 
-    [Fact] public async Task SelectingProfileAfterFailedConnectionStartsItImmediately()
+    [Fact] public async Task ActivatingProfileAfterFailedConnectionStartsItImmediately()
     {
         var engine = new SwitchingEngine();
         var vm = new MainViewModel(engine, new TwoProfileStore(), selectionSettings: new(), persistSelection: () => { }) { ConnectionState = VpnConnectionState.Error };
         try
         {
-            vm.SelectProfileFromUser(vm.Profiles.Single(profile => profile.Name == "B"));
+            await vm.ActivateProfileFromUserAsync(vm.Profiles.Single(profile => profile.Name == "B"));
             await WaitForAsync(() => engine.ConnectedProfiles.Count == 1 && !vm.IsConnecting).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(["B"], engine.ConnectedProfiles.ToArray());
             Assert.Equal(0, engine.Disconnects);

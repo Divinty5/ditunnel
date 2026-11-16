@@ -157,12 +157,12 @@ public partial class MainWindow : Window
         var disconnected = vm.ConnectionState == DiTunnel.Core.Connection.VpnConnectionState.Disconnected;
         var status = disconnected
             ? L.T("Нажмите для подключения")
-            : L.T(vm.StatusText) + "\n" + vm.SelectedName + "\n" + L.T("Последняя проверка:") + " " + L.T(vm.SelectedProfile?.ProbeText ?? "Не проверен");
+            : L.T(vm.StatusText) + "\n" + vm.SelectedName + "\n" + L.T("Последняя проверка:") + " " + L.T(vm.DisplayProfileProbeText);
         var tooltip = "Di-Tunnel — " + status;
         tray.ToolTipText = tooltip[..Math.Min(127, tooltip.Length)];
         trayStatus!.Header = status.Replace('\n', ' ');
         showItem!.Header = L.T("Открыть Di-Tunnel");
-        connectItem!.Header = L.T(disconnected ? "Подключить" : "Отключить");
+        connectItem!.Header = L.T(vm.PowerText);
         connectItem.IsEnabled = vm.CanConnect;
         exitItem!.Header = L.T("Выйти");
     }

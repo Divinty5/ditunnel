@@ -222,7 +222,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             // Control-site failure is inconclusive, never a reason to tear down a working TUN.
             var check = await new AndroidServerProbe(context).ProbeActiveTunnelAsync(cancellationToken);
             SetStatus(new(VpnConnectionState.Connected,
-                AndroidProbePolicy.TunnelMessage(check), status.ConnectedAt, check.Milliseconds));
+                AndroidProbePolicy.TunnelMessage(check), status.ConnectedAt, check.Milliseconds, check));
             StartHealthMonitor();
         }
         catch (Exception error)

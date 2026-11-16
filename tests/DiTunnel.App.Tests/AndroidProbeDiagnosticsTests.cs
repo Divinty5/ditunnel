@@ -152,7 +152,7 @@ public sealed class AndroidProbeDiagnosticsTests
         try
         {
             vm.ApplyEngineStatus(new(VpnConnectionState.Connected, "TUN запущен"), vm.SelectedProfile!.Profile);
-            Assert.Equal("Туннель VPN запущен", vm.StatusText);
+            Assert.Equal("Идёт подключение…", vm.StatusText);
             Assert.False(vm.HasDisplayDelay);
             vm.SelectedProfile!.IsProbeUnconfirmed = true;
             vm.ApplyEngineStatus(new(VpnConnectionState.Connected, "HTTPS подтверждён", DelayMilliseconds: 42), vm.SelectedProfile!.Profile);
@@ -165,24 +165,43 @@ public sealed class AndroidProbeDiagnosticsTests
             Assert.Contains(nameof(vm.DelayBrush), changed);
             Assert.Equal(LatencyPalette.For(3400), vm.DelayBrush);
             vm.ApplyEngineStatus(new(VpnConnectionState.Connected, "HTTPS не подтверждён"), vm.SelectedProfile!.Profile);
-            Assert.Equal("Туннель VPN запущен", vm.StatusText);
+            Assert.Equal("Идёт подключение…", vm.StatusText);
             Assert.False(vm.HasDisplayDelay);
         }
         finally { await vm.ShutdownAsync(); }
     }
 
     [Theory]
-    [InlineData(ReleaseTarget.WindowsX64)] [InlineData(ReleaseTarget.AndroidArm64)] [InlineData(ReleaseTarget.LinuxX64)]
-    public async Task ConnectionFailureDoesNotAppendPreviousSuccessfulProfileCheck(ReleaseTarget target)
+    [InlineData(ReleaseTarget.WindowsX64, "Windows", VpnConnectionState.Error)]
+    [InlineData(ReleaseTarget.AndroidArm64, "Android", VpnConnectionState.Connected)]
+    [InlineData(ReleaseTarget.LinuxX64, "Linux", VpnConnectionState.Reconnecting)]
+    public async Task ConnectionFailureReplacesThePreviousSuccessfulCheck(ReleaseTarget target, string platform, VpnConnectionState state)
     {
         var vm = new MainViewModel(null, new Store(), new Probe(), platform: PlatformFor(target));
         try
         {
             await vm.ProbeAllCommand.ExecuteAsync(null);
-            vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "C");
+            var active = vm.SelectedProfile = vm.Profiles.Single(row => row.Name == "C");
+            var other = vm.Profiles.Single(row => row.Name == "A");
+            var otherCheck = other.ProbeDisplayText;
+            Assert.Equal("80 мс · HTTPS", active.ProbeDisplayText);
             Assert.Contains("Тип ошибки: None", vm.DiagnosticText);
-            vm.ApplyEngineStatus(new(VpnConnectionState.Error, "HTTPS · Тайм-аут"), vm.SelectedProfile.Profile);
-            Assert.Equal("HTTPS · Тайм-аут", vm.DiagnosticText);
+            var failure = ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 75, platform);
+            vm.ApplyEngineStatus(new(state, failure.Message, Probe: failure), active.Profile);
+            Assert.Equal("HTTPS · Тайм-аут", active.ProbeDisplayText);
+            Assert.Equal("HTTPS · Тайм-аут", vm.DisplayNotice);
+            Assert.StartsWith(vm.DisplayNotice, vm.DiagnosticText);
+            Assert.Contains($"Di-Tunnel {platform} ", vm.DiagnosticText);
+            Assert.Contains("Метод: HTTPS\nЭтап: HTTPS\nДлительность: 75 мс\nТип ошибки: Timeout", vm.DiagnosticText);
+            Assert.Contains("Работа профиля подтверждена: нет", vm.DiagnosticText);
+            Assert.DoesNotContain("Тип ошибки: None", vm.DiagnosticText);
+            Assert.Equal(otherCheck, other.ProbeDisplayText);
+            vm.ApplyEngineStatus(VpnStatus.Disconnected, null);
+            var group = vm.SelectedGroup;
+            vm.SelectedGroup = null;
+            vm.SelectedGroup = group;
+            Assert.Equal("HTTPS · Тайм-аут", vm.Profiles.Single(row => row.Name == "C").ProbeDisplayText);
+            Assert.Equal(otherCheck, vm.Profiles.Single(row => row.Name == "A").ProbeDisplayText);
         }
         finally { await vm.ShutdownAsync(); }
     }

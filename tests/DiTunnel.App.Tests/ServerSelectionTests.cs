@@ -23,7 +23,7 @@ public sealed class ServerSelectionTests
         {
             var first = new MainViewModel(null, store, selectionSettings: settings, persistSelection: () => settings.Save(path));
             first.SelectedGroup = first.Groups.Single(g => g.Id == "sub");
-            first.SelectProfileFromUser(first.Profiles.Single(p => p.Name == "HY2"));
+            first.SelectedProfile = first.Profiles.Single(p => p.Name == "HY2");
             first.SelectedGroup = first.Groups.Single(g => g.Id == "other");
             first.SelectedGroup = first.Groups.Single(g => g.Id == "sub");
             Assert.Equal("HY2", first.SelectedProfile!.Name);

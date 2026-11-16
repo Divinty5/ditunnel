@@ -97,6 +97,7 @@ public sealed class OperationCancellationTests
     private class HealthProbe : IServerProbe
     {
         public bool Available { get; set; }
+        public double Delay { get; set; } = 15;
         public string FailureKind { get; set; } = "Timeout";
         public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
         {
@@ -105,7 +106,7 @@ public sealed class OperationCancellationTests
 
         protected Task<ServerProbeResult> CheckAsync()
         {
-            return Task.FromResult(Available ? ProbePolicy.Success(15, "HTTPS", "HTTPS", true)
+            return Task.FromResult(Available ? ProbePolicy.Success(Delay, "HTTPS", "HTTPS", true)
                 : ProbePolicy.Failure(new ProbeFailureException("HTTPS", FailureKind), "HTTPS", "HTTPS", 100));
         }
     }
@@ -165,7 +166,7 @@ public sealed class OperationCancellationTests
         try
         {
             await vm.CheckActiveConnectionAsync(default);
-            Assert.Equal("Туннель запущен · Проверяем связь", vm.StatusText);
+            Assert.Equal("Идёт проверка…", vm.StatusText);
             Assert.Equal(ConnectionPalette.AccentFor(VpnConnectionState.Connecting).ToString(), vm.PowerBorderBrush.ToString());
             Assert.Equal("Отключить", vm.PowerText);
             Assert.Equal(0, engine.Restarts);
@@ -180,32 +181,45 @@ public sealed class OperationCancellationTests
         finally { await vm.ShutdownAsync(); }
     }
 
-    [Fact]
-    public async Task TransientTunnelTimeoutDoesNotReplaceProfileResultOrCountAcrossDeferredCheck()
+    [Theory]
+    [InlineData(ReleaseTarget.WindowsX64)]
+    [InlineData(ReleaseTarget.AndroidArm64)]
+    [InlineData(ReleaseTarget.LinuxX64)]
+    public async Task ActiveRowDisplaysLatestTunnelResultAndKeepsManualProbeHistory(ReleaseTarget target)
     {
         var engine = new RecoveryEngine();
         var probe = new TunnelHealthProbe { Available = true };
-        var vm = new MainViewModel(engine, new Store(), probe, platform: AppPlatform.Windows);
+        var platform = target == ReleaseTarget.LinuxX64 ? AppPlatform.Linux
+            : target == ReleaseTarget.AndroidArm64 ? AppPlatform.Android : AppPlatform.Windows;
+        var vm = new MainViewModel(engine, new Store(), probe, platform: platform);
         try
         {
-            Assert.Equal("Туннель VPN запущен", vm.StatusText);
+            Assert.Equal("Идёт подключение…", vm.StatusText);
             await vm.ProbeSelectedCommand.ExecuteAsync(null);
+            probe.Delay = 42;
             await vm.CheckActiveConnectionAsync(default);
             Assert.Equal("VPN подключён", vm.StatusText);
+            Assert.Equal("42 мс · HTTPS", vm.SelectedProfile!.ProbeDisplayText);
             probe.Available = false;
             await vm.CheckActiveConnectionAsync(default);
-            Assert.Equal("Туннель запущен · Проверяем связь", vm.StatusText);
+            Assert.Equal("Идёт проверка…", vm.StatusText);
             Assert.Contains("Тип ошибки: Timeout", vm.DiagnosticText);
             Assert.DoesNotContain("Тип ошибки: None", vm.DiagnosticText);
             Assert.Equal(15, vm.SelectedProfile!.ProbeMilliseconds);
+            Assert.Equal("HTTPS · Тайм-аут", vm.SelectedProfile.ProbeDisplayText);
+            Assert.False(vm.CanRemoveUnavailable);
             probe.Deferred = true;
             await vm.CheckActiveConnectionAsync(default);
+            Assert.Equal("HTTPS · Тайм-аут", vm.SelectedProfile.ProbeDisplayText);
+            Assert.Contains("Тип ошибки: Timeout", vm.DiagnosticText);
+            Assert.DoesNotContain("Тип ошибки: Unconfirmed", vm.DiagnosticText);
             probe.Deferred = false;
             await vm.CheckActiveConnectionAsync(default);
             Assert.Equal(0, engine.Restarts);
             probe.Available = true;
             await vm.CheckActiveConnectionAsync(default);
             Assert.Equal("VPN подключён", vm.StatusText);
+            Assert.Equal("42 мс · HTTPS", vm.SelectedProfile.ProbeDisplayText);
             Assert.Contains("Тип ошибки: None", vm.DiagnosticText);
             Assert.DoesNotContain("Тайм-аут", vm.DiagnosticText);
         }

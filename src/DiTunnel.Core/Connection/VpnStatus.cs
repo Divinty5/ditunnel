@@ -4,7 +4,8 @@ public sealed record VpnStatus(
     VpnConnectionState State,
     string? Message = null,
     DateTimeOffset? ConnectedAt = null,
-    double? DelayMilliseconds = null)
+    double? DelayMilliseconds = null,
+    ServerProbeResult? Probe = null)
 {
     public static VpnStatus Disconnected { get; } = new(VpnConnectionState.Disconnected);
 }

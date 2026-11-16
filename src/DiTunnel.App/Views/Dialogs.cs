@@ -5,11 +5,14 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
+using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 using DiTunnel.Core.Connection;
 using DiTunnel.App.Controls;
 using DiTunnel.App.ViewModels;
@@ -609,7 +612,12 @@ public static class Dialogs
                 var rowPanel = new Grid { MinHeight = 76, Margin = new Thickness(8, 4), ColumnDefinitions = new ColumnDefinitions("Auto,*") };
                 rowPanel.Children.Add(flag); rowPanel.Children.Add(globe); rowPanel.Children.Add(details);
                 Grid.SetColumn(details, 1);
-                return rowPanel;
+                var tile = new Border { Background = Brushes.Transparent, Child = rowPanel };
+                tile.Bind(Border.BackgroundProperty, new Binding(nameof(ServerItemViewModel.ActiveConnectionBrush))
+                {
+                    TargetNullValue = Brushes.Transparent
+                });
+                return tile;
             })
         };
         list.Styles.Add(new Avalonia.Styling.Style(selector => selector.OfType<ListBoxItem>())
@@ -617,6 +625,7 @@ public static class Dialogs
             Setters =
             {
                 new Avalonia.Styling.Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
+                new Avalonia.Styling.Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
                 new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
                 new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d),
                 new Avalonia.Styling.Setter(Control.IsEnabledProperty, new Binding("CanSelectProfile") { Source = vm })
@@ -631,8 +640,58 @@ public static class Dialogs
         // reliable. SelectionChanged is raised after the gesture has selected the row.
         list.SelectionChanged += (_, _) =>
         {
-            if (vm.CanSelectProfile && list.SelectedItem is ServerItemViewModel selected) vm.SelectProfileFromUser(selected);
+            if (vm.CanSelectProfile && list.SelectedItem is ServerItemViewModel selected) vm.SelectedProfile = selected;
             else if (!ReferenceEquals(list.SelectedItem, vm.SelectedProfile)) list.SelectedItem = vm.SelectedProfile;
+        };
+        ServerItemViewModel? ProfileAt(object? source) => source is Visual visual
+            ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext as ServerItemViewModel : null;
+        var touchTaps = OperatingSystem.IsAndroid() ? new ProfileTouchTaps() : null;
+        if (touchTaps is not null)
+        {
+            // Match the row across taps. A flag, title and latency badge can each be
+            // a different pointer target within the same row.
+            list.AddHandler(InputElement.PointerPressedEvent, (_, e) =>
+            {
+                if (e.Pointer.Type == PointerType.Touch)
+                    touchTaps.Press(e.Pointer.IsPrimary ? ProfileAt(e.Source) : null,
+                        e.Pointer.Id, e.GetPosition(list), e.Timestamp);
+            }, RoutingStrategies.Tunnel, handledEventsToo: true);
+            list.AddHandler(InputElement.PointerMovedEvent, (_, e) =>
+            {
+                if (e.Pointer.Type == PointerType.Touch)
+                    touchTaps.Move(e.Pointer.Id, e.GetPosition(list),
+                        list.GetPlatformSettings()?.GetTapSize(PointerType.Touch) ?? new Size(8, 8));
+            }, RoutingStrategies.Tunnel, handledEventsToo: true);
+            list.AddHandler(InputElement.PointerReleasedEvent, async (_, e) =>
+            {
+                if (e.Pointer.Type != PointerType.Touch) return;
+                var settings = list.GetPlatformSettings();
+                var selected = touchTaps.Release(ProfileAt(e.Source), e.Pointer.Id, e.GetPosition(list), e.Timestamp,
+                    settings?.GetTapSize(PointerType.Touch) ?? new Size(8, 8),
+                    settings?.GetDoubleTapSize(PointerType.Touch) ?? new Size(24, 24),
+                    settings?.GetDoubleTapTime(PointerType.Touch) ?? TimeSpan.FromMilliseconds(300));
+                if (selected is not null) await vm.ActivateProfileFromUserAsync(selected);
+            }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        }
+        list.DoubleTapped += async (_, e) =>
+        {
+            if (touchTaps is not null && e.Pointer.Type == PointerType.Touch) return;
+            if (ProfileAt(e.Source) is not { } selected) return;
+            e.Handled = true;
+            await vm.ActivateProfileFromUserAsync(selected);
+        };
+        list.Holding += async (_, e) =>
+        {
+            if (e.HoldingState != HoldingState.Started || ProfileAt(e.Source) is not { } selected) return;
+            touchTaps?.Reset();
+            e.Handled = true;
+            await vm.ActivateProfileFromUserAsync(selected);
+        };
+        list.KeyDown += async (_, e) =>
+        {
+            if (e.Key != Key.Enter || list.SelectedItem is not ServerItemViewModel selected) return;
+            e.Handled = true;
+            await vm.ActivateProfileFromUserAsync(selected);
         };
         ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Hidden);
         ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
@@ -647,7 +706,7 @@ public static class Dialogs
         testOne.Margin = new Thickness(0, 0, 8, 4); testOne.Bind(Control.IsEnabledProperty, new Binding("CanProbe")); testActions.Children.Add(testOne);
         var testAll = Button("Проверить все", () => vm.ProbeAllCommand.Execute(null));
         testAll.Margin = new Thickness(0, 0, 8, 4); testAll.Bind(Control.IsEnabledProperty, new Binding("CanProbeAll")); testActions.Children.Add(testAll);
-        var cancelTests = Button("Остановить проверку", () => vm.CancelProbesCommand.Execute(null));
+        var cancelTests = Button("Отменить проверку", () => vm.CancelProbesCommand.Execute(null));
         cancelTests.Classes.Add("danger");
         cancelTests.HorizontalAlignment = HorizontalAlignment.Left;
         cancelTests.VerticalAlignment = VerticalAlignment.Top;
@@ -678,11 +737,6 @@ public static class Dialogs
         testSlot.Children.Add(cancelTests);
         testSlot.Children.Add(cancelConnection);
         panel.Children.Add(testSlot);
-        var removeUnavailable = Button("Отфильтровать недоступные", () => vm.RemoveUnavailableCommand.Execute(null));
-        removeUnavailable.Margin = new Thickness(0, 0, 8, 2);
-        removeUnavailable.HorizontalAlignment = HorizontalAlignment.Left;
-        removeUnavailable.Bind(Control.IsEnabledProperty, new Binding("CanRemoveUnavailable"));
-        panel.Children.Add(removeUnavailable);
         var probeMode = Button("", () => { });
         void UpdateProbeMode() => probeMode.Content = L.T(UserSettings.Current.ServerProbeMode == ServerProbeMode.Fast
             ? "Проверка: Быстрая" : "Проверка: Точная (HTTPS)");
@@ -845,10 +899,13 @@ public static class Dialogs
             Bindings = { new Binding(nameof(MainViewModel.CanManageProfiles)), new Binding(nameof(MainViewModel.SelectedProfile)) { Converter = ObjectConverters.IsNotNull } }
         });
         management.Children.Add(removeOne);
+        var removeUnavailable = ManagementButton("Недоступные", "Удалить недоступные серверы", deleteIcon,
+            () => vm.RemoveUnavailableCommand.Execute(null));
+        removeUnavailable.Bind(Control.IsEnabledProperty, new Binding(nameof(MainViewModel.CanRemoveUnavailable)));
+        management.Children.Add(removeUnavailable);
         panel.Children.Add(management);
         var status = Label(""); status.Bind(TextBlock.TextProperty, new Binding("SubscriptionStatus") { Converter = new TranslationConverter() }); panel.Children.Add(status);
         var operationNotice = Label(""); operationNotice.Bind(TextBlock.TextProperty, new Binding("DisplayNotice") { Converter = new TranslationConverter() }); panel.Children.Add(operationNotice);
-        panel.Children.Add(Label("При выборе другого сервера активный VPN переподключится автоматически."));
         var page = Page("Подписки и профили", back, panel);
         var root = new Grid { DataContext = vm };
         root.Children.Add(page);

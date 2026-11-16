@@ -155,6 +155,7 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
     private async Task ConnectCoreAsync(ImportedProfile profile, CancellationToken cancellationToken, bool preserveKillSwitch, IPAddress? knownServerAddress = null, bool recoveryAttempt = false)
     {
         await gate.WaitAsync(cancellationToken);
+        Stopwatch? probeWatch = null;
         try
         {
             if (host is { HasExited: true }) await StopCoreAsync();
@@ -187,7 +188,9 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 Publish(VpnConnectionState.Connecting, awg is null ? "Проверяем сервер через Xray (до 12 секунд)…" : "Проверяем сервер через AmneziaWG (до 12 секунд)…");
                 await using var bypass = awg is null ? null : await WindowsProbeRouteBypass.CreateAsync(address, sessionDirectory, timeout.Token);
                 await using var awgProbe = awg is null ? null : await WindowsAmneziaWgRuntime.StartAsync(awg, address.ToString(), sessionDirectory, bypass?.SourceAddress, timeout.Token);
+                probeWatch = Stopwatch.StartNew();
                 delayMilliseconds = await XrayServerProbe.MeasureAsync(awgProbe?.Proxy ?? configuration, address, runtime, timeout.Token, outboundSourceAddress: bypass?.SourceAddress);
+                probeWatch = null;
             }
             else delayMilliseconds = null;
             Publish(VpnConnectionState.Connecting, "Запускаем сетевой модуль Windows…");
@@ -222,6 +225,10 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
         }
         catch (Exception error)
         {
+            var result = error is ProbeFailureException check && probeWatch is not null
+                ? ProbePolicy.Failure(check, check.Stage, "HTTPS",
+                    check.Diagnostics?.DurationMilliseconds ?? probeWatch.Elapsed.TotalMilliseconds, "Windows")
+                : null;
             await StopCoreAsync();
             var cancelled = error is OperationCanceledException && cancellationToken.IsCancellationRequested;
             var recovering = recoveryAttempt && !cancelled;
@@ -230,8 +237,8 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
                 : recovering ? (IsNetworkProtectionActive
                     ? "Попытка восстановления не удалась. Kill switch сохраняет блокировку…"
                     : "Сеть ещё недоступна. Ожидаем следующую попытку восстановления…")
-                : error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException ? error.Message
-                : "Подключение не установлено. Проверьте профиль и доступность сервера.");
+                : result?.Message ?? (error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException ? error.Message
+                : "Подключение не установлено. Проверьте профиль и доступность сервера."), result);
             throw;
         }
         finally { gate.Release(); }
@@ -590,10 +597,10 @@ public sealed class WindowsVpnEngine : IProfileVpnEngine
             sessionDirectory = null;
         }
     }
-    private void Publish(VpnConnectionState state, string message)
+    private void Publish(VpnConnectionState state, string message, ServerProbeResult? result = null)
     {
         Status = new(state, message, state == VpnConnectionState.Connected ? DateTimeOffset.UtcNow : null,
-            state == VpnConnectionState.Connected ? delayMilliseconds : null);
+            state == VpnConnectionState.Connected ? delayMilliseconds : null, result);
         StatusChanged?.Invoke(this, Status);
     }
     private static async Task AppendDiagnosticAsync(string path, string message)

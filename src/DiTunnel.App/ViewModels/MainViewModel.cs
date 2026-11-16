@@ -39,6 +39,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly Dictionary<string, ProbeSnapshot> probeSnapshots = new(StringComparer.Ordinal);
     private readonly HashSet<string> pendingProbes = new(StringComparer.Ordinal);
     private ServerItemViewModel? activeProfile;
+    private ServerItemViewModel? connectingProfile;
     private CancellationTokenSource? connectionCancellation;
     private CancellationTokenSource? probeCancellation;
     private CancellationTokenSource? lowestCancellation;
@@ -49,7 +50,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private bool mapLightsFading;
     private int mapLightsFadeCursor;
     private int mapLightsChangeTick;
-    private bool suppressProfileReconnect;
+    private bool restoringProfileSelection;
     private double? activeDelayMilliseconds;
     private readonly DispatcherTimer subscriptionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private bool activeTunnelConfirmed;
@@ -234,19 +235,20 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         VpnConnectionState.Connecting => "Подключаем VPN…",
         VpnConnectionState.Reconnecting => "Восстанавливаем VPN…",
-        VpnConnectionState.Connected when activeProbeFailures > 0 => "Туннель запущен · Проверяем связь",
-        VpnConnectionState.Connected when TunnelUnconfirmed => "Туннель VPN запущен",
+        VpnConnectionState.Connected when activeProbeFailures > 0 || TunnelUnconfirmed && activeTunnelProbeRunning => "Идёт проверка…",
+        VpnConnectionState.Connected when TunnelUnconfirmed => "Идёт подключение…",
         VpnConnectionState.Connected => "VPN подключён",
         VpnConnectionState.Disconnecting => "Отключаем VPN…",
         VpnConnectionState.Error => "Не удалось подключиться",
-        _ => "VPN отключён"
+        _ => IsConnecting ? "Подключаем VPN…" : "VPN отключён"
     };
     public string PowerText => IsCancellingConnection ? "Отменяем" : CanCancelConnection ? "Отменить" : ConnectionState == VpnConnectionState.Connected ? "Отключить" : "Подключить";
     public string CopyErrorText => "⧉";
     public bool HasConnectionError => ConnectionState == VpnConnectionState.Error && !string.IsNullOrWhiteSpace(Notice)
         || IsSubscriptionExhausted || noticeDiagnostics is not null || SelectedProbeDiagnostics is not null || Notice.Contains("Метод:", StringComparison.Ordinal);
     private ProbeDiagnostics? SelectedProbeDiagnostics => SelectedProfile is { } server
-        && probeSnapshots.TryGetValue(ProfileKey(server.Profile), out var snapshot) ? snapshot.Diagnostics : null;
+        && probeSnapshots.TryGetValue(ProfileKey(server.Profile), out var snapshot)
+            ? snapshot.ConnectionResult?.Diagnostics ?? snapshot.Diagnostics : null;
     private string DiagnosticNotice => IsSubscriptionExhausted ? SubscriptionAccess.ExhaustedMessage + "\n" + Notice : Notice;
     public string DiagnosticText => noticeDiagnostics is { } current
         ? $"{DiagnosticNotice}\n\n{current.ToDisplayString()}"
@@ -277,7 +279,7 @@ public sealed partial class MainViewModel : ViewModelBase
         : engine?.RequiresAdministrator == true
             ? "Для TUN запустите приложение от администратора"
             : Platform.ReleaseTarget == ReleaseTarget.AndroidArm64
-                ? SelectedProfile?.Profile.Kind.Equals("AmneziaWG", StringComparison.OrdinalIgnoreCase) == true ? "Android VPN · AmneziaWG" : "Android VPN · Xray-core"
+                ? DisplayProfile?.Profile.Kind.Equals("AmneziaWG", StringComparison.OrdinalIgnoreCase) == true ? "Android VPN · AmneziaWG" : "Android VPN · Xray-core"
                 : Platform.RuntimeDescription;
     public bool IsKillSwitchEnabled => Platform.SupportsKillSwitch && UserSettings.Current.KillSwitchEnabled;
     public bool ShowKillSwitchStatus => Platform.SupportsKillSwitch && (IsKillSwitchEnabled || engine?.IsNetworkProtectionActive == true);
@@ -334,7 +336,7 @@ public sealed partial class MainViewModel : ViewModelBase
             activeProfile = target;
         }
         catch (OperationCanceledException) { Notice = "Применение сетевых настроек отменено."; }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { Notice = e.Message; }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { SetConnectionExceptionNotice(e); }
         catch { Notice = "Не удалось применить сетевые настройки. VPN отключён; подключитесь снова."; }
         finally
         {
@@ -344,10 +346,11 @@ public sealed partial class MainViewModel : ViewModelBase
             if (ReferenceEquals(connectionCancellation, cancellation)) connectionCancellation = null;
         }
     }
-    private ServerItemViewModel? DisplayProfile => ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Reconnecting
-        ? activeProfile ?? SelectedProfile
-        : SelectedProfile;
+    private ServerItemViewModel? DisplayProfile => connectingProfile ?? (ConnectionState is VpnConnectionState.Connected or
+        VpnConnectionState.Reconnecting or VpnConnectionState.Disconnecting or VpnConnectionState.Error ? activeProfile : null) ?? SelectedProfile;
     public string SelectedName => DisplayProfile?.Name ?? L.T("Сервер не выбран");
+    internal string DisplayProfileProbeText => DisplayProfile is { } server
+        ? GetSnapshot(server.Profile).ConnectionResult?.Message ?? server.ProbeStatusText : "Не проверен";
     public string SelectedSummary => DisplayProfile?.Summary.Replace(" · конфигурация сервера", "", StringComparison.OrdinalIgnoreCase) ?? "Импортируйте свою первую подписку";
     public string Tagline => "Твой VPN. Твой выбор.";
     public string ImportStorageDescription => Platform.ProfileStorageDescription;
@@ -378,20 +381,58 @@ public sealed partial class MainViewModel : ViewModelBase
     public void RefreshSubscriptionPresentation()
     {
         foreach (var name in new[] { nameof(SubscriptionLimits), nameof(SubscriptionTraffic), nameof(SubscriptionDays), nameof(HasBothSubscriptionLimits),
-            nameof(SubscriptionTrafficBrush), nameof(SubscriptionDaysBrush), nameof(IsSubscriptionExhausted), nameof(StatusText), nameof(DisplayNotice),
-            nameof(HasConnectionError), nameof(PowerBorderBrush), nameof(PowerGlowBrush), nameof(ConnectionStateBrush) }) OnPropertyChanged(name);
+            nameof(SubscriptionTrafficBrush), nameof(SubscriptionDaysBrush), nameof(IsSubscriptionExhausted), nameof(DisplayNotice),
+            nameof(HasConnectionError) }) OnPropertyChanged(name);
+        NotifyConnectionPresentation();
     }
     public string ProfileCount => $"Серверов: {Profiles.Count}";
     public string AppVersion => UserSettings.Version;
     private static bool IsLightTheme => Avalonia.Application.Current?.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light;
     public IBrush PowerBrush => new SolidColorBrush(Color.Parse(IsLightTheme ? "#E9DFFA" : "#292039"));
-    private VpnConnectionState DisplayConnectionState => IsSubscriptionExhausted ? VpnConnectionState.Error
-        : ConnectionState == VpnConnectionState.Connected &&
-            (activeProbeFailures > 0 || TunnelUnconfirmed)
+    internal VpnConnectionState DisplayConnectionState => IsSubscriptionExhausted ? VpnConnectionState.Error
+        : (ConnectionState == VpnConnectionState.Connected && (activeProbeFailures > 0 || TunnelUnconfirmed)
+            || ConnectionState == VpnConnectionState.Disconnected && IsConnecting)
             ? VpnConnectionState.Connecting : ConnectionState;
     public IBrush PowerBorderBrush => new SolidColorBrush(ConnectionPalette.AccentFor(DisplayConnectionState));
-    public IBrush PowerGlowBrush => DisplayConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse("#3830C86D")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse("#40D94A58")), _ => new SolidColorBrush(Color.Parse("#18000000")) };
-    public IBrush ConnectionStateBrush => DisplayConnectionState switch { VpnConnectionState.Connected => new SolidColorBrush(Color.Parse(IsLightTheme ? "#16804A" : "#66E491")), VpnConnectionState.Error => new SolidColorBrush(Color.Parse(IsLightTheme ? "#C83243" : "#FF7783")), _ => new SolidColorBrush(Color.Parse(IsLightTheme ? "#684096" : "#C9B9FF")) };
+    public IBrush PowerGlowBrush => DisplayConnectionState == VpnConnectionState.Disconnected
+        ? new SolidColorBrush(Color.Parse("#18000000"))
+        : new SolidColorBrush(ConnectionPalette.AccentFor(DisplayConnectionState), .25);
+    public IBrush ConnectionStateBrush => new SolidColorBrush(Color.Parse(DisplayConnectionState switch
+    {
+        VpnConnectionState.Connected => IsLightTheme ? "#16804A" : "#66E491",
+        VpnConnectionState.Error => IsLightTheme ? "#C83243" : "#FF7783",
+        VpnConnectionState.Disconnected => IsLightTheme ? "#684096" : "#C9B9FF",
+        _ => IsLightTheme ? "#805600" : "#F1C453"
+    }));
+
+    private void NotifyConnectionPresentation()
+    {
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(DisplayConnectionState));
+        OnPropertyChanged(nameof(PowerBorderBrush));
+        OnPropertyChanged(nameof(PowerGlowBrush));
+        OnPropertyChanged(nameof(ConnectionStateBrush));
+        var state = DisplayConnectionState;
+        var active = state == VpnConnectionState.Disconnected ? null : (connectingProfile ?? activeProfile)?.Profile;
+        var accent = ConnectionPalette.AccentFor(state);
+        var background = IsLightTheme ? 255 : 18;
+        byte Blend(byte channel) => (byte)((channel + 2 * background) / 3);
+        IBrush? brush = active is null ? null : new SolidColorBrush(Color.FromRgb(Blend(accent.R), Blend(accent.G), Blend(accent.B)));
+        var unavailableChanged = false;
+        foreach (var row in Profiles)
+        {
+            var isActive = active is not null && SameProfile(row.Profile, active);
+            row.ActiveConnectionBrush = isActive ? brush : null;
+            var wasUnavailable = row.IsUnavailable;
+            row.ActiveProbeResult = probeSnapshots.GetValueOrDefault(ProfileKey(row.Profile))?.ConnectionResult;
+            unavailableChanged |= wasUnavailable != row.IsUnavailable;
+        }
+        if (unavailableChanged)
+        {
+            OnPropertyChanged(nameof(UnavailableProfileCount));
+            OnPropertyChanged(nameof(CanRemoveUnavailable));
+        }
+    }
     public IBrush DelayBrush => LatencyPalette.For(DisplayDelay);
     public bool HasDisplayDelay => DisplayDelay is not null;
     public IBrush ConnectionHintBrush => ConnectionState == VpnConnectionState.Connected && DisplayDelay is not null
@@ -411,7 +452,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public bool CanProbe => CanProbeAll && SelectedProfile is not null;
     public bool CanProbeAll => !IsBusy && !HasPendingOperation && ConnectionState != VpnConnectionState.Disconnecting
         && probe is not null && Profiles.Count != 0;
-    public int UnavailableProfileCount => Profiles.Count(server => server.ProbeTimedOut && !server.IsProbePending);
+    public int UnavailableProfileCount => Profiles.Count(server => server.IsUnavailable);
     public bool CanRemoveUnavailable => !IsBusy && !IsConnecting && UnavailableProfileCount > 0;
     public string? SelectedSubscriptionUrl => SelectedGroup?.SourceUrl;
     public bool IsSelectedSubscriptionEmpty => SelectedSubscriptionUrl is not null && Profiles.Count == 0;
@@ -450,10 +491,10 @@ public sealed partial class MainViewModel : ViewModelBase
                 var running = engine?.ActiveProfile;
                 if (running is not null)
                 {
-                    SelectedGroup = Groups.FirstOrDefault(group => group.Id == running.SourceId) ?? SelectedGroup;
-                    SelectedProfile = Profiles.FirstOrDefault(row => row.Profile.Content == running.Content) ?? SelectedProfile;
+                    ApplyEngineStatus(engine!.Status, running);
                 }
-                activeProfile = SelectedProfile;
+                else activeProfile = SelectedProfile;
+                NotifyConnectionPresentation();
                 Notice = engine?.Status.Message ?? "VPN подключён.";
             }
             else if (SelectedProfile is not null) Notice = "Выберите профиль и сервер для подключения.";
@@ -466,13 +507,15 @@ public sealed partial class MainViewModel : ViewModelBase
     private void EngineStatusChanged(object? sender, VpnStatus status)
     {
         // Capture the profile with its status, before a later switch changes the engine.
-        var running = engine?.ActiveProfile;
+        var running = status.Probe is not null && status.State is (VpnConnectionState.Error or VpnConnectionState.Reconnecting)
+            ? connectingProfile?.Profile ?? engine?.ActiveProfile ?? activeProfile?.Profile
+            : engine?.ActiveProfile;
         Dispatcher.UIThread.Post(() => ApplyEngineStatus(status, running));
     }
 
     internal void ApplyEngineStatus(VpnStatus status, ImportedProfile? running)
     {
-        var profileChanged = running is not null && activeProfile?.Profile.Content != running.Content;
+        var profileChanged = running is not null && (activeProfile is null || !SameProfile(activeProfile.Profile, running));
         var previousStatus = lastEngineStatus;
         var statusChanged = previousStatus != status || profileChanged;
         var newSession = status.State == VpnConnectionState.Connected &&
@@ -489,12 +532,12 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         if (status.State == VpnConnectionState.Connected)
         {
-            var server = running is null || activeProfile?.Profile.Content == running.Content
+            var server = !profileChanged
                 ? activeProfile
-                : Profiles.FirstOrDefault(row => row.Profile.Content == running.Content);
+                : Profiles.FirstOrDefault(row => SameProfile(row.Profile, running!));
             if (server is null && running is not null)
             {
-                var stored = allProfiles.FirstOrDefault(profile => profile.Content == running.Content) ?? running;
+                var stored = allProfiles.FirstOrDefault(profile => SameProfile(profile, running)) ?? running;
                 server = new ServerItemViewModel(stored);
                 if (probeSnapshots.TryGetValue(ProfileKey(stored), out var snapshot))
                 {
@@ -511,7 +554,13 @@ public sealed partial class MainViewModel : ViewModelBase
                 activeTunnelConfirmed = false;
                 activeDelayMilliseconds = null;
             }
-            if (status.DelayMilliseconds is { } delay && (probe is not IActiveTunnelProbe ||
+            if (status.Probe is { IsDeferred: false } check && statusChanged)
+            {
+                activeTunnelConfirmed = check.Diagnostics?.ProfileConfirmed == true;
+                activeDelayMilliseconds = check.Milliseconds;
+                if (server is not null) RememberConnectionProbe(server.Profile, check);
+            }
+            else if (status.Probe is null && status.DelayMilliseconds is { } delay && (probe is not IActiveTunnelProbe ||
                 androidVerificationChanged || newSession && Platform.ReleaseTarget == ReleaseTarget.AndroidArm64))
             {
                 activeTunnelConfirmed = Platform.ReleaseTarget == ReleaseTarget.AndroidArm64;
@@ -522,10 +571,15 @@ public sealed partial class MainViewModel : ViewModelBase
                     server.ProbeTimedOut = false;
                     server.IsProbeUnconfirmed = false;
                 }
+                if (Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 && server is not null)
+                    RememberConnectionProbe(server.Profile, ProbePolicy.Success(delay, "HTTPS", "HTTPS", true));
                 activeDelayMilliseconds = delay;
             }
         }
         else if (status.State == VpnConnectionState.Disconnected) activeProfile = null;
+        else if (statusChanged && status.State is (VpnConnectionState.Error or VpnConnectionState.Reconnecting) &&
+                 status.Probe is { IsDeferred: false } failure && (running ?? connectingProfile?.Profile) is { } target)
+            RememberConnectionProbe(target, failure);
         if (newSession && ConnectionState == status.State) StartActiveLatencyChecks();
         ConnectionState = status.State;
         // Connected -> Connected and external widget switches also need to invalidate
@@ -537,9 +591,24 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(SubscriptionLimits));
         NotifyConnectionDelay();
-        if (statusChanged && status.Message is not null) SetOperationNotice(status.Message);
+        if (statusChanged && status.Message is not null) SetEngineOperationNotice(status);
         RefreshSubscriptionPresentation();
     }
+
+    private void SetEngineOperationNotice(VpnStatus status)
+    {
+        if (status.Message is not { } message) return;
+        if (status.Probe?.Diagnostics is { } diagnostics)
+            SetOperationNotice(message.Split('\n', 2)[0], diagnostics);
+        else SetOperationNotice(message);
+    }
+
+    private void SetConnectionExceptionNotice(Exception error)
+    {
+        if (noticeDiagnostics is null || Notice != error.Message.Split('\n', 2)[0])
+            SetOperationNotice(error.Message);
+    }
+
     partial void OnConnectionStateChanged(VpnConnectionState value)
     {
         if (value != VpnConnectionState.Connected)
@@ -566,7 +635,8 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         if (value != VpnConnectionState.Connected) StopActiveLatencyChecks();
         OnPropertyChanged(nameof(ShowKillSwitchStatus));
-        OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(KillSwitchText)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(PowerBorderBrush)); OnPropertyChanged(nameof(PowerGlowBrush)); OnPropertyChanged(nameof(ConnectionStateBrush)); OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
+        NotifyConnectionPresentation();
+        OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(KillSwitchText)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
     }
     private void AdvanceMapLights()
     {
@@ -629,7 +699,7 @@ public sealed partial class MainViewModel : ViewModelBase
     ];
     partial void OnIsBusyChanged(bool value) { OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); OnPropertyChanged(nameof(CanConnect)); }
     partial void OnIsProbingChanged(bool value) { OnPropertyChanged(nameof(HasPendingOperation)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); }
-    partial void OnIsConnectingChanged(bool value) { NotifyConnectionCancellation(); OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); OnPropertyChanged(nameof(CanConnect)); }
+    partial void OnIsConnectingChanged(bool value) { NotifyConnectionCancellation(); NotifyConnectionPresentation(); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); }
     partial void OnIsCancellingConnectionChanged(bool value) => NotifyConnectionCancellation();
     private void NotifyConnectionCancellation()
     {
@@ -643,6 +713,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanSelectProfile));
         OnPropertyChanged(nameof(PowerText));
     }
+
     [RelayCommand] private async Task CancelConnectionAsync()
     {
         if (!CanCancelConnection || engine is null) return;
@@ -664,8 +735,7 @@ public sealed partial class MainViewModel : ViewModelBase
             selectionSettings.SelectedSourceId = value.Id;
             try { persistSelection(); } catch { }
         }
-        var wasSuppressingReconnect = suppressProfileReconnect;
-        suppressProfileReconnect = true;
+        restoringProfileSelection = true;
         try
         {
             Profiles.Clear();
@@ -684,12 +754,13 @@ public sealed partial class MainViewModel : ViewModelBase
                 Profiles.Add(row);
             }
             selectionSettings.SelectedServers.TryGetValue(value?.Id ?? "", out var saved);
-            SelectedProfile = Profiles.FirstOrDefault(row => activeProfile is not null && row.Profile.Content == activeProfile.Profile.Content)
-                ?? Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).ContentHash == saved.ContentHash)
+            SelectedProfile = Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).ContentHash == saved.ContentHash)
                 ?? Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).IdentityHash == saved.IdentityHash)
+                ?? Profiles.FirstOrDefault(row => activeProfile is not null && SameProfile(row.Profile, activeProfile.Profile))
                 ?? Profiles.FirstOrDefault();
         }
-        finally { suppressProfileReconnect = wasSuppressingReconnect; }
+        finally { restoringProfileSelection = false; }
+        NotifyConnectionPresentation();
         OnPropertyChanged(nameof(ProfileCount)); OnPropertyChanged(nameof(CanProbeAll)); OnPropertyChanged(nameof(UnavailableProfileCount)); OnPropertyChanged(nameof(CanRemoveUnavailable));
         OnPropertyChanged(nameof(SelectedSubscriptionUrl)); OnPropertyChanged(nameof(CanShareSubscription));
         OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
@@ -713,7 +784,13 @@ public sealed partial class MainViewModel : ViewModelBase
                 if (visible is null || !ReferenceEquals(visible.Profile, row.Profile)) return;
                 probeSnapshots[key] = GetSnapshot(visible.Profile) with { CountryCode = code };
                 visible.CountryCode = code;
-                if (SelectedProfile == visible) { OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); }
+                var displayed = DisplayProfile;
+                if (displayed is not null && SameProfile(displayed.Profile, visible.Profile))
+                {
+                    displayed.CountryCode = code;
+                    OnPropertyChanged(nameof(SelectedFlag));
+                    OnPropertyChanged(nameof(HasSelectedFlag));
+                }
             });
         }
     }
@@ -721,7 +798,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(HasConnectionError));
         RefreshSubscriptionPresentation();
-        if (value is not null && !suppressProfileReconnect)
+        if (value is not null && !restoringProfileSelection)
         {
             var selected = ServerSelection.From(value.Profile);
             if (selectionSettings.SelectedServers.GetValueOrDefault(value.Profile.SourceId) != selected)
@@ -735,17 +812,18 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedServerUri)); OnPropertyChanged(nameof(CanShareServer));
     }
 
-    public void SelectProfileFromUser(ServerItemViewModel value)
+    internal async Task ActivateProfileFromUserAsync(ServerItemViewModel value)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        if (!CanSelectProfile || !Profiles.Contains(value)) return;
         SelectedProfile = value;
-        if (!suppressProfileReconnect && value != activeProfile &&
-            ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Reconnecting or VpnConnectionState.Error)
+        if (ConnectionState == VpnConnectionState.Connected)
         {
             healthRecoveryAttempted = false;
             healthFailoverAttempted = false;
-            _ = ReconnectSelectedProfileSafelyAsync(value);
+            await ReconnectSelectedProfileSafelyAsync(value);
         }
+        else if (ConnectionState is VpnConnectionState.Disconnected or VpnConnectionState.Error)
+            await ConnectAsync();
     }
 
     private async Task ReconnectSelectedProfileSafelyAsync(ServerItemViewModel target)
@@ -764,9 +842,10 @@ public sealed partial class MainViewModel : ViewModelBase
     private async Task ReconnectSelectedProfileAsync(ServerItemViewModel target, bool restartCurrent = false)
     {
         if (engine is null || IsConnecting || ConnectionState is not (VpnConnectionState.Connected or VpnConnectionState.Reconnecting or VpnConnectionState.Error)
-            || (!restartCurrent && target == activeProfile)) return;
+            || (!restartCurrent && activeProfile is { } active && SameProfile(target.Profile, active.Profile))) return;
         var wasConnected = ConnectionState == VpnConnectionState.Connected;
         var wasRecovering = ConnectionState == VpnConnectionState.Reconnecting;
+        connectingProfile = target;
         IsConnecting = true;
         ConnectionState = VpnConnectionState.Reconnecting;
         activeDelayMilliseconds = null;
@@ -776,9 +855,8 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             if (wasConnected)
             {
-                await Task.Delay(150, cancellation.Token);
                 SubscriptionAccess.EnsureAvailable(target.Profile);
-            await engine.SwitchAsync(target.Profile, cancellation.Token);
+                await engine.SwitchAsync(target.Profile, cancellation.Token);
                 activeProfile = target;
                 return;
             }
@@ -792,14 +870,16 @@ public sealed partial class MainViewModel : ViewModelBase
                 return;
             }
             SubscriptionAccess.EnsureAvailable(target.Profile);
-                    await engine.ConnectAsync(target.Profile, cancellation.Token);
+            await engine.ConnectAsync(target.Profile, cancellation.Token);
             activeProfile = target;
         }
         catch (OperationCanceledException) { SetOperationNotice("Переключение сервера отменено."); }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { SetOperationNotice(e.Message); }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { SetConnectionExceptionNotice(e); }
         catch { SetOperationNotice("Не удалось переключить сервер. Предыдущее подключение отключено; выберите сервер и подключитесь снова."); }
         finally
         {
+            if (engine.Status.State == VpnConnectionState.Error) activeProfile = target;
+            connectingProfile = null;
             ConnectionState = engine.Status.State;
             IsConnecting = false;
             cancellation.Dispose();
@@ -829,6 +909,7 @@ public sealed partial class MainViewModel : ViewModelBase
         if (CanCancelConnection) { await CancelConnectionAsync(); return; }
         if (!CanConnect) return;
         if (engine is null) { Notice = "Сетевой движок недоступен на этой платформе."; return; }
+        connectingProfile = ConnectionState is VpnConnectionState.Disconnected or VpnConnectionState.Error ? SelectedProfile : activeProfile;
         IsConnecting = true;
         connectionCancellation = new CancellationTokenSource();
         try
@@ -863,25 +944,35 @@ public sealed partial class MainViewModel : ViewModelBase
                 if (engine.Status.State == VpnConnectionState.Connected)
                 {
                     activeProfile = SelectedProfile;
-                    Notice = engine.Status.Message ?? "VPN подключён";
+                    if (engine.Status.Message is null) SetOperationNotice("VPN подключён");
+                    else SetEngineOperationNotice(engine.Status);
                 }
             }
         }
         catch (OperationCanceledException) { SetOperationNotice("Подключение отменено."); }
-        catch (TimeoutException e) { SetOperationNotice(e.Message); }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException) { SetOperationNotice(e.Message); }
+        catch (Exception e) when (e is TimeoutException or InvalidOperationException or NotSupportedException or FormatException) { SetConnectionExceptionNotice(e); }
         catch { SetOperationNotice("Не удалось изменить состояние VPN. Сетевые изменения отменены; проверьте права и доступность сервера."); }
-        finally { ConnectionState = engine.Status.State; IsConnecting = false; connectionCancellation.Dispose(); connectionCancellation = null; }
+        finally
+        {
+            if (engine.Status.State == VpnConnectionState.Error) activeProfile = connectingProfile;
+            else if (engine.Status.State == VpnConnectionState.Disconnected) activeProfile = null;
+            connectingProfile = null;
+            ConnectionState = engine.Status.State;
+            IsConnecting = false;
+            connectionCancellation.Dispose();
+            connectionCancellation = null;
+        }
     }
     [RelayCommand] private void RemoveProfile()
     {
-        if (SelectedProfile is null || !CanManageProfiles) return;
-        if (activeProfile?.Profile == SelectedProfile.Profile && ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Error)
+        if (SelectedProfile is not { } selected || !CanManageProfiles) return;
+        bool Matches(ImportedProfile profile) => SameProfile(profile, selected.Profile);
+        if (activeProfile is { } active && Matches(active.Profile) && ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Error)
         {
-            _ = SwitchOrDisconnectAndRemoveAsync(p => p == SelectedProfile.Profile, "Сервер удалён.");
+            _ = SwitchOrDisconnectAndRemoveAsync(Matches, "Сервер удалён.");
             return;
         }
-        RemoveWhere(p => p == SelectedProfile.Profile, "Сервер удалён.");
+        RemoveWhere(Matches, "Сервер удалён.");
     }
 
     public Task<IReadOnlyList<InstalledApplication>> GetInstalledApplicationsAsync(CancellationToken cancellationToken = default) =>
@@ -911,7 +1002,7 @@ public sealed partial class MainViewModel : ViewModelBase
     [RelayCommand] private void RemoveUnavailable()
     {
         var sourceId = SelectedGroup?.Id;
-        var unavailable = Profiles.Where(server => server.ProbeTimedOut && !server.IsProbePending)
+        var unavailable = Profiles.Where(server => server.IsUnavailable)
             .Select(server => server.Profile.Content).ToHashSet(StringComparer.Ordinal);
         if (sourceId is null || unavailable.Count == 0 || !CanRemoveUnavailable) return;
         bool Predicate(ImportedProfile profile) => profile.SourceId == sourceId && unavailable.Contains(profile.Content);
@@ -948,13 +1039,12 @@ public sealed partial class MainViewModel : ViewModelBase
                 activeProfile = Profiles.FirstOrDefault(row => row.Profile == best) ?? new ServerItemViewModel(best);
             }
             ConnectionState = engine.Status.State;
-            RemoveWhere(predicate, message, deletedGroupId is null ? selectedSourceId : best?.SourceId, best?.Content, deletedGroupId);
+            RemoveWhere(predicate, message, deletedGroupId is null ? selectedSourceId : best?.SourceId, deletedGroupId);
         }
         catch (Exception error) { Notice = error is InvalidOperationException ? error.Message : "Не удалось отключить VPN; профиль не удалён."; }
         finally { IsConnecting = false; }
     }
-    private void RemoveWhere(Func<ImportedProfile, bool> predicate, string message, string? preferredSourceId = null,
-        string? preferredContent = null, string? deletedGroupId = null)
+    private void RemoveWhere(Func<ImportedProfile, bool> predicate, string message, string? preferredSourceId = null, string? deletedGroupId = null)
     {
         var remaining = allProfiles.Where(p => !predicate(p)).ToArray();
         try
@@ -965,23 +1055,12 @@ public sealed partial class MainViewModel : ViewModelBase
                 .Select(group => new EmptySubscription(group.Id, group.Name, group.SourceUrl!)).ToArray();
             profileStore.SaveLibrary(new(remaining, nextEmpty));
             preferredSourceId ??= SelectedGroup?.Id ?? activeProfile?.Profile.SourceId;
-            preferredContent ??= activeProfile?.Profile.Content;
             foreach (var removed in allProfiles.Where(predicate)) probeSnapshots.Remove(ProfileKey(removed));
             allProfiles.Clear(); allProfiles.AddRange(remaining);
             emptySubscriptions.Clear(); emptySubscriptions.AddRange(nextEmpty);
-            suppressProfileReconnect = true;
-            try
-            {
-                RebuildGroups(preferredSourceId);
-                if (preferredContent is not null)
-                    SelectedProfile = Profiles.FirstOrDefault(row => row.Profile.Content == preferredContent) ?? SelectedProfile;
-                if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } running)
-                {
-                    var activeKey = ProfileKey(running.Profile);
-                    activeProfile = Profiles.FirstOrDefault(row => ProfileKey(row.Profile) == activeKey) ?? running;
-                }
-            }
-            finally { suppressProfileReconnect = false; }
+            RebuildGroups(preferredSourceId);
+            if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } running)
+                activeProfile = Profiles.FirstOrDefault(row => SameProfile(row.Profile, running.Profile)) ?? running;
             Notice = message;
         }
         catch { Notice = "Не удалось сохранить изменения. Профили не удалены."; }
@@ -994,7 +1073,6 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             var input = ImportText.Trim();
             var importer = new ProfileImporter();
-            var imported = await importer.ImportAsync(input);
             var isSubscription = Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme == "https";
             var sourceUrl = isSubscription ? new UriBuilder(uri!) { Fragment = "" }.Uri.AbsoluteUri : null;
             var existing = sourceUrl is null ? null : Groups.FirstOrDefault(group => group.SourceUrl == sourceUrl);
@@ -1009,6 +1087,7 @@ public sealed partial class MainViewModel : ViewModelBase
                 ? existing?.Name ?? fragmentName ?? (string.IsNullOrWhiteSpace(pathName) ? null : pathName)
                     ?? (sourceUrl is null ? "Ручной профиль" : "Подписка") + $" {Groups.Count + 1}"
                 : ImportName.Trim();
+            var imported = await importer.ImportAsync(input, subscriptionName: sourceName);
             var added = imported.Where(p => !allProfiles.Any(e => e.SourceId == sourceId && e.Content == p.Content))
                 .Select(p => p with { SourceId = sourceId, SourceName = sourceName, SourceUrl = sourceUrl }).ToArray();
             if (!storageAvailable) { ImportMessage = "Хранилище недоступно. Сохранённый файл защищён от перезаписи."; return; }
@@ -1016,15 +1095,7 @@ public sealed partial class MainViewModel : ViewModelBase
             profileStore.SaveLibrary(new(allProfiles.Concat(added).ToArray(), remainingEmpty));
             allProfiles.AddRange(added);
             emptySubscriptions.Clear(); emptySubscriptions.AddRange(remainingEmpty);
-            var keepActive = ConnectionState == VpnConnectionState.Connected && activeProfile is not null;
-            suppressProfileReconnect = keepActive;
-            try
-            {
-                RebuildGroups(keepActive ? activeProfile!.Profile.SourceId : sourceId);
-                if (keepActive)
-                    SelectedProfile = Profiles.FirstOrDefault(row => row.Profile.Content == activeProfile!.Profile.Content) ?? SelectedProfile;
-            }
-            finally { suppressProfileReconnect = false; }
+            RebuildGroups(ConnectionState == VpnConnectionState.Connected ? SelectedGroup?.Id : sourceId);
             Notice = added.Length == 0 ? "Эти серверы уже есть в подписке."
                 : importer.SkippedEntries > 0 ? $"Добавлено серверов: {added.Length}. Пропущено записей: {importer.SkippedEntries}."
                 : $"Добавлено серверов: {added.Length}.";
@@ -1138,7 +1209,8 @@ public sealed partial class MainViewModel : ViewModelBase
                 Text = result.Message,
                 Milliseconds = result.Milliseconds,
                 TimedOut = timedOut,
-                Diagnostics = result.Diagnostics
+                Diagnostics = result.Diagnostics,
+                ConnectionResult = null
             };
         pendingProbes.Remove(key);
         var visible = Profiles.FirstOrDefault(candidate => ProfileKey(candidate.Profile) == key) ?? server;
@@ -1147,7 +1219,8 @@ public sealed partial class MainViewModel : ViewModelBase
         visible.ProbeTimedOut = timedOut;
         visible.IsProbeUnconfirmed = result.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
         visible.IsProbePending = false;
-        if (ConnectionState == VpnConnectionState.Connected && visible == activeProfile && probe is not IActiveTunnelProbe &&
+        visible.ActiveProbeResult = null;
+        if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } active && SameProfile(visible.Profile, active.Profile) && probe is not IActiveTunnelProbe &&
             Platform.ReleaseTarget != ReleaseTarget.AndroidArm64)
             activeDelayMilliseconds = result.Milliseconds;
         OnPropertyChanged(nameof(UnavailableProfileCount));
@@ -1166,7 +1239,7 @@ public sealed partial class MainViewModel : ViewModelBase
         var running = activeProfile ?? SelectedProfile;
         if (mode != ServerProbeMode.Https || result.IsDeferred || result.Milliseconds is not null ||
             ConnectionState != VpnConnectionState.Connected || running is null ||
-            ProfileKey(running.Profile) != ProfileKey(server.Profile)) return;
+            !SameProfile(running.Profile, server.Profile)) return;
         if (probe is not IActiveTunnelProbe) SetActiveProbeFailures(Math.Max(1, activeProbeFailures));
         StartActiveLatencyChecks();
     }
@@ -1175,10 +1248,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         if (activeProbeFailures == failures) return;
         activeProbeFailures = failures;
-        OnPropertyChanged(nameof(StatusText));
-        OnPropertyChanged(nameof(PowerBorderBrush));
-        OnPropertyChanged(nameof(PowerGlowBrush));
-        OnPropertyChanged(nameof(ConnectionStateBrush));
+        NotifyConnectionPresentation();
         NotifyConnectionDelay();
     }
 
@@ -1191,6 +1261,8 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     private static string ProfileKey(ImportedProfile profile) => $"{profile.SourceId}\n{profile.Content}";
+    private static bool SameProfile(ImportedProfile first, ImportedProfile second) =>
+        first.SourceId == second.SourceId && first.Content == second.Content;
 
     private ProbeSnapshot GetSnapshot(ImportedProfile profile)
     {
@@ -1201,7 +1273,15 @@ public sealed partial class MainViewModel : ViewModelBase
             : new ProbeSnapshot(row.ProbeText, row.ProbeMilliseconds, row.ProbeTimedOut, row.CountryCode);
     }
 
-    private sealed record ProbeSnapshot(string Text, double? Milliseconds, bool TimedOut, string? CountryCode, ProbeDiagnostics? Diagnostics = null);
+    private void RememberConnectionProbe(ImportedProfile profile, ServerProbeResult result)
+    {
+        var key = ProfileKey(profile);
+        if (allProfiles.Any(candidate => SameProfile(candidate, profile)))
+            probeSnapshots[key] = GetSnapshot(profile) with { ConnectionResult = result };
+    }
+
+    private sealed record ProbeSnapshot(string Text, double? Milliseconds, bool TimedOut, string? CountryCode,
+        ProbeDiagnostics? Diagnostics = null, ServerProbeResult? ConnectionResult = null);
 
     private void ClearPendingProbes()
     {
@@ -1340,17 +1420,20 @@ public sealed partial class MainViewModel : ViewModelBase
         var tunnel = probe as IActiveTunnelProbe;
         var connectedAt = engine?.Status.ConnectedAt;
         activeTunnelProbeRunning = true;
+        OnPropertyChanged(nameof(StatusText));
         try
         {
             var result = tunnel is not null ? await tunnel.ProbeActiveTunnelAsync(cancellationToken)
                 : await probe.ProbeAsync(server.Profile, cancellationToken, ServerProbeMode.Https);
             cancellationToken.ThrowIfCancellationRequested();
             if (ConnectionState != VpnConnectionState.Connected || engine?.Status.ConnectedAt != connectedAt ||
-                IsBusy || IsConnecting || IsProbing || (activeProfile ?? SelectedProfile)?.Profile.Content != server.Profile.Content) return;
+                IsConnecting || IsProbing || (activeProfile ?? SelectedProfile) is not { } current
+                || !SameProfile(current.Profile, server.Profile)) return;
             if (result.IsDeferred)
             {
                 activeTransportFailures = 0;
-                if (!activeTunnelConfirmed && result.Diagnostics is not null)
+                if (!IsBusy && !activeTunnelConfirmed && result.Diagnostics is not null &&
+                    GetSnapshot(server.Profile).ConnectionResult is null)
                 {
                     SetActiveProbeFailures(0);
                     SetOperationNotice("Туннель запущен. " + result.Message, result.Diagnostics);
@@ -1358,7 +1441,11 @@ public sealed partial class MainViewModel : ViewModelBase
                 return;
             }
             if (tunnel is null) ApplyProbeResult(server, result);
-            else activeTunnelConfirmed = result.Diagnostics?.ProfileConfirmed == true;
+            else
+            {
+                activeTunnelConfirmed = result.Diagnostics?.ProfileConfirmed == true;
+                RememberConnectionProbe(server.Profile, result);
+            }
             activeDelayMilliseconds = result.Milliseconds;
             var failed = result.Milliseconds is null;
             activeTransportFailures = tunnel is not null && result.Diagnostics?.ErrorType is "Timeout" or "Connection"
@@ -1369,11 +1456,9 @@ public sealed partial class MainViewModel : ViewModelBase
                 healthRecoveryAttempted = false;
                 healthFailoverAttempted = false;
             }
-            OnPropertyChanged(nameof(StatusText));
-            OnPropertyChanged(nameof(PowerBorderBrush));
-            OnPropertyChanged(nameof(PowerGlowBrush));
-            OnPropertyChanged(nameof(ConnectionStateBrush));
+            NotifyConnectionPresentation();
             NotifyConnectionDelay();
+            if (IsBusy) return;
             if (!failed && tunnel is null && engine?.Status is { State: VpnConnectionState.Connected, Message: { } networkMessage })
                 SetOperationNotice(networkMessage);
             else
@@ -1382,7 +1467,11 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
         catch { return; }
-        finally { activeTunnelProbeRunning = false; }
+        finally
+        {
+            activeTunnelProbeRunning = false;
+            OnPropertyChanged(nameof(StatusText));
+        }
         if (activeTransportFailures < 2 || engine is null ||
             IsBusy || IsConnecting || cancellationToken.IsCancellationRequested) return;
         if (!healthRecoveryAttempted)
@@ -1398,7 +1487,6 @@ public sealed partial class MainViewModel : ViewModelBase
             .OrderBy(candidate => candidate.ProbeMilliseconds).ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault() : null;
         if (alternative is null) return;
         healthFailoverAttempted = true;
-        SelectedProfile = alternative;
         await ReconnectSelectedProfileAsync(alternative);
     }
 
@@ -1424,10 +1512,18 @@ public sealed partial class MainViewModel : ViewModelBase
         if (ConnectionState == VpnConnectionState.Connected && (activeProbeFailures > 0 || healthRecoveryAttempted)) return false;
         var best = Profiles.Where(IsUsableProfile)
             .OrderBy(server => server.ProbeMilliseconds).ThenBy(server => server.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
-        if (best is null || best == SelectedProfile) return false;
-        SelectedProfile = best;
+        if (best is null) return false;
+        if (ConnectionState == VpnConnectionState.Connected)
+        {
+            if (activeProfile is { } active && SameProfile(active.Profile, best.Profile)) return false;
+        }
+        else
+        {
+            if (best == SelectedProfile) return false;
+            SelectedProfile = best;
+        }
         Notice = $"Lowest выбрал сервер {best.Name}.";
-        if (ConnectionState == VpnConnectionState.Connected && best != activeProfile)
+        if (ConnectionState == VpnConnectionState.Connected)
             await ReconnectSelectedProfileSafelyAsync(best);
         return true;
     }
