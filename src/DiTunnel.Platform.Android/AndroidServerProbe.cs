@@ -67,41 +67,26 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
                         });
                     runtimeIndexes = indexes.Where(index => configurations[index]!.ServerTransport == KillSwitchTransportProtocol.Udp).ToArray();
                 }
-                foreach (var chunk in runtimeIndexes.Chunk(5))
+                foreach (var index in runtimeIndexes)
                 {
-                    var chunkWatch = Stopwatch.StartNew();
-                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(TimeSpan.FromSeconds(25));
-                    var measured = await AndroidProbeFailureIsolation.RunAsync(
-                        () => AndroidProbeServiceBridge.ProbeAsync(context,
-                            chunk.Select(index => profiles[index]).ToArray(), mode, timeout.Token,
-                            report: (offset, result) => Complete(chunk[offset], result)),
-                        error => (IReadOnlyList<ServerProbeResult>)Enumerable.Repeat(
-                            ProbeFailure(error, "HTTPS", timeout.IsCancellationRequested, duration: chunkWatch.Elapsed.TotalMilliseconds), chunk.Length).ToArray(), cancellationToken);
-                    for (var offset = 0; offset < chunk.Length; offset++)
-                        Complete(chunk[offset], offset < measured.Count ? measured[offset]
-                            : ProbeFailure(new InvalidOperationException(), "Служба проверки"));
+                    var watch = Stopwatch.StartNew();
+                    Complete(index, await AndroidProbeFailureIsolation.RunAsync(
+                        () => AndroidProbeServiceBridge.ProbeAsync(context, profiles[index], cancellationToken),
+                        error => AndroidProbePolicy.ServiceFailure(error, watch.Elapsed.TotalMilliseconds), cancellationToken));
                 }
             }
             finally { XrayProbeGate.Release(); }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { FillMissing(results, ProbeFailure(new TimeoutException(), "Служба проверки")); }
-        catch (OperationCanceledException) { throw; }
-        catch (TimeoutException error) { FillMissing(results, ProbeFailure(error, "Служба проверки")); }
-        catch (Exception error) when (error is InvalidOperationException or NotSupportedException or FormatException)
-        {
-            FillMissing(results, ProbeFailure(error, "Профиль"));
-        }
         catch (Exception error)
         {
-            FillMissing(results, ProbeFailure(error, "Проверка"));
+            cancellationToken.ThrowIfCancellationRequested();
+            FillMissing(results, AndroidProbePolicy.ServiceFailure(error, 0));
         }
-        FillMissing(results, ProbeFailure(new InvalidOperationException(), "Служба проверки"));
+        FillMissing(results, AndroidProbePolicy.ServiceFailure(new InvalidOperationException(), 0));
         return results.Select(result => result!).ToArray();
     }
 
-    private static ServerProbeResult ProbeFailure(Exception error, string stage, bool timedOut = false, string method = "HTTPS", double duration = 0)
-        => AndroidProbePolicy.Failure(timedOut ? new TimeoutException() : error, stage, method, duration);
+    private static ServerProbeResult ProbeFailure(Exception error, string stage) => AndroidProbePolicy.Failure(error, stage, "HTTPS", 0);
 
     private async Task<ServerProbeResult> ProbeAmneziaWgAsync(ImportedProfile profile, ServerProbeMode mode, CancellationToken cancellationToken)
     {
@@ -161,27 +146,35 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception error) { return ProbeFailure(error, "TUN"); }
+        catch (Exception error) { return AndroidProbePolicy.ActiveTunnelResult(ProbeFailure(error, "TUN")); }
         if (network is null) return ProbeFailure(new AndroidProbeException("TUN", "Connection"), "TUN");
-        return await AndroidProbePolicy.CheckHttpsAsync((target, token) => Task.Run(() =>
+        var result = await AndroidProbePolicy.CheckHttpsAsync((target, token) => Task.Run(() =>
         {
             token.ThrowIfCancellationRequested();
             using var url = new Java.Net.URL(target.AbsoluteUri);
-            using var connection = network.OpenConnection(url) as Javax.Net.Ssl.HttpsURLConnection
-                ?? throw new AndroidProbeException("HTTPS", "ControlService");
-            using var registration = token.Register(connection.Disconnect);
+            using var opened = network.OpenConnection(url, Java.Net.Proxy.NoProxy);
+            if (opened is not Java.Net.HttpURLConnection connection) throw new AndroidProbeException("HTTPS", "Internal");
             connection.ConnectTimeout = (int)ProbePolicy.ActiveHttpsAttemptBudget.TotalMilliseconds;
             connection.ReadTimeout = (int)ProbePolicy.ActiveHttpsAttemptBudget.TotalMilliseconds;
             connection.UseCaches = false;
             connection.InstanceFollowRedirects = false;
+            var closed = 0;
+            void Disconnect()
+            {
+                if (Interlocked.Exchange(ref closed, 1) != 0) return;
+                try { connection.Disconnect(); }
+                catch (Java.Lang.Exception) { }
+            }
+            using var registration = token.Register(Disconnect);
             try
             {
                 AndroidProbePolicy.ValidateResponse(target, (int)connection.ResponseCode);
                 token.ThrowIfCancellationRequested();
             }
             catch (Exception) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
-            finally { connection.Disconnect(); }
+            finally { Disconnect(); }
         }, token), cancellationToken, ProbePolicy.ActiveHttpsAttemptBudget);
+        return AndroidProbePolicy.ActiveTunnelResult(result);
     }
 
     private static void FillMissing(ServerProbeResult?[] results, ServerProbeResult failure)

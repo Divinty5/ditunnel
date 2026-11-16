@@ -24,6 +24,8 @@ public static class ProbePolicy
     public static ServerProbeResult ActiveTunnelDeferred(string platform) => new(null,
         "Проверка через туннель недоступна", IsDeferred: true,
         Diagnostics: new("HTTPS", "TUN", "Unconfirmed", 0, false, VersionFor(platform), Platform: platform));
+    public static ServerProbeResult Incomplete(ServerProbeResult result) =>
+        result with { Message = "Проверка не завершена", IsDeferred = true };
     public static string VersionFor(string platform) => typeof(ProbePolicy).Assembly
         .GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(item => item.Key == platform + "Version")?.Value ?? "unknown";
 
@@ -92,7 +94,8 @@ public static class ProbePolicy
             HttpRequestException { StatusCode: not null } => "ControlService",
             SocketException or IOException or HttpRequestException => "Connection",
             FormatException or NotSupportedException => "Configuration",
-            _ when error.GetType().Name is "ConnectException" or "NoRouteToHostException" or "SocketException" => "Connection",
+            _ when error.GetType().Name is "ConnectException" or "NoRouteToHostException" or "SocketException" ||
+                error.GetType().FullName is "Java.IO.IOException" => "Connection",
             _ => "Internal"
         };
     }
@@ -166,7 +169,10 @@ public static class ProbePolicy
         // Both real request implementations honour cancellation and close their sockets.
         var attempts = await Task.WhenAll(primary, fallback);
         cancellationToken.ThrowIfCancellationRequested();
-        winner ??= attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType is not ("Timeout" or "Connection")) ?? attempts[0];
+        winner ??= attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType is "Tls" or "Dns" or "ControlService")
+            ?? attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType == "Timeout")
+            ?? attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType == "Connection")
+            ?? attempts[0];
         return winner with { Diagnostics = winner.Diagnostics! with
         {
             DurationMilliseconds = total.Elapsed.TotalMilliseconds,

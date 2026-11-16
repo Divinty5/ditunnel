@@ -10,6 +10,43 @@ namespace DiTunnel.Core.Tests;
 
 public sealed class AndroidProbePolicyTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void UnfinishedServiceCheckKeepsItsActualCauseInTheReport(bool timeout)
+    {
+        var result = AndroidProbePolicy.ServiceFailure(timeout ? new TimeoutException() : new InvalidOperationException(), 12);
+        Assert.True(result.IsDeferred);
+        Assert.Equal("Проверка не завершена", result.Message);
+        Assert.Equal("Служба проверки", result.Diagnostics!.Stage);
+        Assert.Equal(timeout ? "Timeout" : "Runtime", result.Diagnostics.ErrorType);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConcreteTimeoutWinsOverGenericHttpsFailure(bool primaryTimesOut)
+    {
+        var result = await AndroidProbePolicy.CheckHttpsAsync((uri, _) => Task.FromException(
+            (uri == AndroidProbePolicy.Primary) == primaryTimesOut ? new TimeoutException() : new InvalidOperationException()),
+            CancellationToken.None);
+        Assert.Equal("HTTPS · Тайм-аут", result.Message);
+        Assert.Equal("Timeout", result.Diagnostics!.ErrorType);
+        Assert.Contains("Internal", result.Diagnostics.Attempts);
+        Assert.Contains("Timeout", result.Diagnostics.Attempts);
+        Assert.False(AndroidProbePolicy.ActiveTunnelResult(result).IsDeferred);
+    }
+
+    [Fact]
+    public async Task GenericTunnelErrorIsInconclusive()
+    {
+        var check = await AndroidProbePolicy.CheckHttpsAsync((_, _) => Task.FromException(new InvalidOperationException()), default);
+        var result = AndroidProbePolicy.ActiveTunnelResult(check);
+        Assert.True(result.IsDeferred);
+        Assert.Equal("Проверка не завершена", result.Message);
+        Assert.Equal("Internal", result.Diagnostics!.ErrorType);
+    }
+
     [Fact]
     public async Task FallbackStartsWhilePrimaryIsStillWaitingAndCancelsItsRequest()
     {

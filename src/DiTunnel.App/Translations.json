@@ -8,6 +8,7 @@
   "Туннель запущен.": "Tunnel started.",
   "Проверка через туннель недоступна": "Tunnel check unavailable",
   "Туннель запущен · Проверяем связь": "Tunnel started · Checking connectivity",
+  "Проверка не завершена": "Check incomplete",
   "Профиль проверен.": "Profile checked.",
   "Проверка не пройдена.": "Check failed.",
   "HTTPS не проверен": "HTTPS not verified",
