@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$CompilerPath)
+param([string]$CompilerPath, [switch]$Test)
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $versionNode = ([xml](Get-Content -Raw (Join-Path $repositoryRoot 'Directory.Build.props'))).Project.PropertyGroup.WindowsVersion |
@@ -14,7 +14,8 @@ if (-not $CompilerPath) {
 }
 if (-not $CompilerPath) { throw 'Install Inno Setup (https://jrsoftware.org/isdl.php) or pass -CompilerPath to ISCC.exe.' }
 & (Join-Path $PSScriptRoot 'Install-Xray.ps1')
-& (Join-Path $PSScriptRoot 'Build-AmneziaWG.ps1')
+& (Join-Path $PSScriptRoot 'Build-AmneziaWG.ps1') -Test:$Test
+if ($Test) { & (Join-Path $PSScriptRoot 'Build-ShellIcon.ps1') -Test }
 dotnet publish (Join-Path $repositoryRoot 'src\DiTunnel.Desktop\DiTunnel.Desktop.csproj') -c Release -r win-x64 --self-contained true -p:DebugType=None -p:DebugSymbols=false -o $publishDir
 if ($LASTEXITCODE -ne 0) { throw 'Windows publish failed.' }
 foreach ($required in @('DiTunnel.ShellIcon.dll', 'Licenses\ShellIcon\LICENSE-MINHOOK.txt', 'Di-Tunnel.exe', 'Di-Tunnel.NetworkHost.exe', 'Di-Tunnel.NetworkHost.dll', 'Di-Tunnel.NetworkHost.deps.json', 'Di-Tunnel.NetworkHost.runtimeconfig.json', 'Runtime\xray.exe', 'Runtime\wintun.dll', 'Runtime\geoip.dat', 'Runtime\geosite.dat', 'Runtime\AmneziaWG\ditunnel-awg.exe', 'Runtime\AmneziaWG\ditunnel-awg.exe.sha256', 'Runtime\AmneziaWG\THIRD-PARTY-NOTICES.txt')) {

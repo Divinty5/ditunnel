@@ -17,11 +17,15 @@ $ndkRoot = Join-Path $environmentRoot "android-ndk-$($androidManifest.ndk.versio
 $compilerRoot = Join-Path $ndkRoot 'toolchains/llvm/prebuilt/windows-x86_64/bin'
 if (-not (Test-Path -LiteralPath (Join-Path $compilerRoot 'clang.exe'))) {
     $archive = Join-Path $environmentRoot "downloads/android-ndk-$($androidManifest.ndk.version)-windows.zip"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $archive) -Force | Out-Null
     if (-not (Test-Path -LiteralPath $archive)) {
-        & curl.exe --fail --location --retry 2 --output $archive $androidManifest.ndk.url
+        & curl.exe --fail --location --retry 2 --remove-on-error --output $archive $androidManifest.ndk.url
         if ($LASTEXITCODE -ne 0) { throw 'Не удалось загрузить Android NDK.' }
     }
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA1).Hash.ToLowerInvariant() -ne $androidManifest.ndk.sha1) { throw 'Контрольная сумма NDK не совпала.' }
+    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA1).Hash.ToLowerInvariant() -ne $androidManifest.ndk.sha1) {
+        Remove-Item -LiteralPath $archive -Force
+        throw 'Контрольная сумма NDK не совпала.'
+    }
     [IO.Compression.ZipFile]::ExtractToDirectory($archive, $environmentRoot, $true)
 }
 $outputRoot = Join-Path $environmentRoot 'amneziawg/native'

@@ -1,6 +1,12 @@
 name: Linux release package
 
 on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       ref:
@@ -44,6 +50,9 @@ jobs:
           expected=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("Directory.Build.props").findtext(".//LinuxVersion"))')
           actual=$(artifacts/linux/version-check/usr/lib/ditunnel/ui/Di-Tunnel.Linux --version)
           test "$actual" = "$expected"
+      - name: Check graphical installer SHA-256
+        working-directory: artifacts/linux/release
+        run: sha256sum -c Di-Tunnel-*-linux-amd64.run.sha256
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-release-package

@@ -1,13 +1,16 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
-    [string]$Destination
+    [string]$Destination,
+    [string]$ManifestPath
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$manifestPath = Join-Path $repositoryRoot 'eng\xray-version.json'
-$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+if (-not $ManifestPath) {
+    $ManifestPath = Join-Path $repositoryRoot 'eng\xray-version.json'
+}
+$manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 
 if ([string]::IsNullOrWhiteSpace($Destination)) {
     $Destination = Join-Path $repositoryRoot ".tools\xray\$($manifest.version)\windows-x64"

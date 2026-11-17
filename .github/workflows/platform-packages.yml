@@ -1,0 +1,175 @@
+name: Platform packages
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release version on main (optional when running on a version tag)
+        type: string
+      windows:
+        description: Include Windows installer
+        type: boolean
+        default: true
+      android:
+        description: Build and check Android APK with CI signature
+        type: boolean
+        default: true
+      linux:
+        description: Include Linux DEB and graphical installer
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  AVALONIA_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  source:
+    name: Verify release source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      windows: ${{ steps.version.outputs.windows }}
+      android: ${{ steps.version.outputs.android }}
+      linux: ${{ steps.version.outputs.linux }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check version and platform selection
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          INCLUDE_WINDOWS: ${{ inputs.windows }}
+          INCLUDE_ANDROID: ${{ inputs.android }}
+          INCLUDE_LINUX: ${{ inputs.linux }}
+        run: |
+          $version = $env:RELEASE_VERSION
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -cnotmatch '^v(\d+\.\d+\.\d+)$') { throw 'Expected a version tag such as v0.6.14.' }
+            if ($version -and $version -ne $Matches[1]) { throw 'Requested version differs from the tag.' }
+            $version = $Matches[1]
+          } elseif ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'Start release builds from main or a version tag.'
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Provide a release version such as 0.6.14.' }
+
+          $props = ([xml](Get-Content -Raw Directory.Build.props)).Project.PropertyGroup
+          $versions = @{
+            windows = ([string]$props.WindowsVersion).Trim()
+            android = ([string]$props.AndroidVersion).Trim()
+            linux = ([string]$props.LinuxVersion).Trim()
+          }
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $selected = @{
+              windows = $env:INCLUDE_WINDOWS -eq 'true'
+              android = $env:INCLUDE_ANDROID -eq 'true'
+              linux = $env:INCLUDE_LINUX -eq 'true'
+            }
+            if ($true -notin $selected.Values) { throw 'Select at least one platform.' }
+          } else {
+            $selected = @{}
+            foreach ($platform in $versions.Keys) {
+              $selected[$platform] = $versions[$platform] -eq $version
+            }
+            if ($true -notin $selected.Values) { throw 'The tag must match at least one platform version in Directory.Build.props.' }
+          }
+          foreach ($platform in $selected.Keys) {
+            if ($selected[$platform] -and $versions[$platform] -ne $version) {
+              throw "The $platform version in Directory.Build.props does not match $version."
+            }
+            "$platform=$($selected[$platform].ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          }
+
+  linux:
+    needs: source
+    if: needs.source.outputs.linux == 'true'
+    uses: ./.github/workflows/linux-release-package.yml
+    with:
+      ref: ${{ github.sha }}
+
+  windows:
+    name: Windows x64
+    needs: source
+    if: needs.source.outputs.windows == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Build and verify Windows installer
+        run: |
+          ./scripts/Build-WindowsInstaller.ps1 -Test
+          $version = ([string]([xml](Get-Content -Raw Directory.Build.props)).Project.PropertyGroup.WindowsVersion).Trim()
+          $installer = Get-Item -LiteralPath "artifacts/installer/Di-Tunnel-$version-Setup-x64.exe"
+          if ($installer.VersionInfo.ProductVersion.Trim() -ne $version) { throw 'Unexpected Windows installer version.' }
+          if ((Get-AuthenticodeSignature -LiteralPath $installer.FullName).Status -ne 'NotSigned') {
+            throw 'Unexpected Authenticode status. This workflow builds the unsigned Windows installer.'
+          }
+          $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ((Get-Content -LiteralPath "$($installer.FullName).sha256" -Raw).Trim() -cne "$digest  $($installer.Name)") {
+            throw 'Windows installer SHA-256 mismatch.'
+          }
+          git rev-parse HEAD > artifacts/installer/source-commit.txt
+      - name: Run Windows and shared tests
+        run: |
+          $runtime = Get-Content -Raw eng/xray-version.json | ConvertFrom-Json
+          $env:DITUNNEL_TEST_XRAY = Join-Path $PWD ".tools/xray/$($runtime.version)/windows-x64/xray.exe"
+          $failed = @()
+          foreach ($suite in @('Core', 'Infrastructure.Xray', 'App', 'Platform.Windows')) {
+            $project = "DiTunnel.$suite.Tests"
+            dotnet test "tests/$project/$project.csproj" -c Release
+            if ($LASTEXITCODE -ne 0) { $failed += $project }
+          }
+          if ($failed.Count) { throw "Test suites failed: $($failed -join ', ')" }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-package
+          path: |
+            artifacts/installer/Di-Tunnel-*-Setup-x64.exe
+            artifacts/installer/Di-Tunnel-*-Setup-x64.exe.sha256
+            artifacts/installer/source-commit.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  android:
+    name: Android ARM64
+    needs: source
+    if: needs.source.outputs.android == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Run Android policy tests
+        run: dotnet test tests/DiTunnel.Core.Tests/DiTunnel.Core.Tests.csproj -c Release --filter 'FullyQualifiedName~Android'
+      - name: Install .NET Android workload
+        run: dotnet workload install android
+      - name: Build APK and verify its debug signature and contents
+        run: |
+          ./scripts/Build-AndroidCi.ps1 -RuntimeDirectory (Join-Path $env:RUNNER_TEMP 'ditunnel-android') `
+            -AndroidSdkDirectory $env:ANDROID_HOME -JavaSdkDirectory $env:JAVA_HOME_21_X64
+          git rev-parse HEAD > artifacts/android/ci/source-commit.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-package
+          path: |
+            artifacts/android/ci/Di-Tunnel-*-arm64-ci.apk
+            artifacts/android/ci/Di-Tunnel-*-arm64-ci.apk.sha256
+            artifacts/android/ci/source-commit.txt
+          if-no-files-found: error
+          compression-level: 0
