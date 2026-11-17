@@ -9,7 +9,13 @@ if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio C++ B
 $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $visualStudio) { throw 'Visual Studio x64 C++ build tools were not found.' }
 $vcvars = Join-Path $visualStudio 'VC\Auxiliary\Build\vcvars64.bat'
-$cmake = (Get-Command cmake -ErrorAction Stop).Source
+$cmake = (Get-Command cmake.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+if (-not $cmake) {
+    $cmake = Join-Path $visualStudio 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+    if (-not (Test-Path -LiteralPath $cmake -PathType Leaf)) {
+        throw 'CMake was not found. Install C++ CMake tools for Windows in Visual Studio or add cmake.exe to PATH.'
+    }
+}
 New-Item -ItemType Directory -Force -Path $buildDirectory | Out-Null
 $testOption = if ($Test) { 'ON' } else { 'OFF' }
 $batch = Join-Path $buildDirectory 'build.cmd'
