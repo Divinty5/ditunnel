@@ -383,10 +383,21 @@ public sealed class ConnectionInteractionTests
         }
         finally { await vm.ShutdownAsync(); }
     }
-    [Fact] public async Task BrowsingPreservesActiveVpnAndExplicitActivationSwitchesIt()
+    [Theory]
+    [InlineData(ReleaseTarget.AndroidArm64)]
+    [InlineData(ReleaseTarget.WindowsX64)]
+    [InlineData(ReleaseTarget.LinuxX64)]
+    public async Task BrowsingPreservesActiveVpnAndExplicitActivationSwitchesIt(ReleaseTarget target)
     {
         var engine = new SwitchingEngine();
-        var vm = new MainViewModel(engine, new TwoProfileStore(), selectionSettings: new(), persistSelection: () => { });
+        var platform = target switch
+        {
+            ReleaseTarget.AndroidArm64 => AppPlatform.Android,
+            ReleaseTarget.LinuxX64 => AppPlatform.Linux,
+            _ => AppPlatform.Windows
+        };
+        var vm = new MainViewModel(engine, new TwoProfileStore(), platform: platform,
+            selectionSettings: new(), persistSelection: () => { });
         try
         {
             await vm.ConnectCommand.ExecuteAsync(null);

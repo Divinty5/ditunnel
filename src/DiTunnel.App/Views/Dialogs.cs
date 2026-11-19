@@ -664,8 +664,14 @@ public static class Dialogs
                 new Avalonia.Styling.Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
                 new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
                 new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d),
+                new Avalonia.Styling.Setter(InputElement.IsHoldWithMouseEnabledProperty, true),
                 new Avalonia.Styling.Setter(Control.IsEnabledProperty, new Binding("CanSelectProfile") { Source = vm })
             }
+        });
+        // Avalonia checks the original hit target, which can be text, a flag or a badge.
+        list.Styles.Add(new Style(selector => selector.Is<ListBoxItem>().Descendant().Is<InputElement>())
+        {
+            Setters = { new Setter(InputElement.IsHoldWithMouseEnabledProperty, true) }
         });
         list.Bind(ItemsControl.ItemsSourceProperty, new Binding("Profiles"));
         list.Bind(Visual.IsVisibleProperty, new Binding("!" + nameof(MainViewModel.IsSelectedSubscriptionEmpty)));
@@ -683,6 +689,13 @@ public static class Dialogs
         };
         ServerItemViewModel? ProfileAt(object? source) => source is Visual visual
             ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext as ServerItemViewModel : null;
+        ServerItemViewModel? mouseHoldRow = null;
+        list.AddHandler(InputElement.PointerPressedEvent, (_, e) =>
+        {
+            if (e.Pointer.Type == PointerType.Mouse)
+                mouseHoldRow = e.GetCurrentPoint(list).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed
+                    ? ProfileAt(e.Source) : null;
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
         var touchTaps = OperatingSystem.IsAndroid() ? new ProfileTouchTaps() : null;
         if (touchTaps is not null)
         {
@@ -721,6 +734,7 @@ public static class Dialogs
         list.Holding += async (_, e) =>
         {
             if (e.HoldingState != HoldingState.Started || ProfileAt(e.Source) is not { } selected) return;
+            if (e.PointerType == PointerType.Mouse && !ReferenceEquals(mouseHoldRow, selected)) return;
             touchTaps?.Reset();
             e.Handled = true;
             await vm.ActivateProfileFromUserAsync(selected);
