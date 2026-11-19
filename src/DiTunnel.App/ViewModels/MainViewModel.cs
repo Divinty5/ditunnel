@@ -51,6 +51,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private int mapLightsFadeCursor;
     private int mapLightsChangeTick;
     private bool restoringProfileSelection;
+    private bool profilesRemovedDuringProbe;
     private double? activeDelayMilliseconds;
     private readonly DispatcherTimer subscriptionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private bool activeTunnelConfirmed;
@@ -771,11 +772,19 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         finally { restoringProfileSelection = false; }
         NotifyConnectionPresentation();
-        OnPropertyChanged(nameof(ProfileCount)); OnPropertyChanged(nameof(CanProbeAll)); OnPropertyChanged(nameof(UnavailableProfileCount)); OnPropertyChanged(nameof(CanRemoveUnavailable));
+        NotifyProfileListChanged();
         OnPropertyChanged(nameof(SelectedSubscriptionUrl)); OnPropertyChanged(nameof(CanShareSubscription));
         OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
-        OnPropertyChanged(nameof(IsSelectedSubscriptionEmpty));
         _ = ResolveCountriesAsync(Profiles.ToArray());
+    }
+
+    private void NotifyProfileListChanged()
+    {
+        OnPropertyChanged(nameof(ProfileCount));
+        OnPropertyChanged(nameof(CanProbeAll));
+        OnPropertyChanged(nameof(UnavailableProfileCount));
+        OnPropertyChanged(nameof(CanRemoveUnavailable));
+        OnPropertyChanged(nameof(IsSelectedSubscriptionEmpty));
     }
     private async Task ResolveCountriesAsync(ServerItemViewModel[] rows)
     {
@@ -907,9 +916,14 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         foreach (var subscription in emptySubscriptions)
             Groups.Add(new(subscription.SourceId, subscription.SourceName, subscription.SourceUrl));
-        SelectedGroup = Groups.FirstOrDefault(g => g.Id == preferred) ?? Groups.FirstOrDefault();
+        var groupToSelect = Groups.FirstOrDefault(g => g.Id == preferred) ?? Groups.FirstOrDefault();
         // A record-equal selection does not raise a property change after importing into an existing group.
-        OnSelectedGroupChanged(SelectedGroup);
+        if (SelectedGroup == groupToSelect)
+        {
+            OnSelectedGroupChanged(SelectedGroup);
+            OnPropertyChanged(nameof(SelectedGroup));
+        }
+        else SelectedGroup = groupToSelect;
     }
     [RelayCommand] private void OpenImport() { if (!CanImport) return; ImportMessage = ""; IsManualImportOpen = false; IsImportOpen = true; }
     [RelayCommand] private void OpenManualImport() { if (!CanImport) return; ImportMessage = ""; IsManualImportOpen = true; }
@@ -1068,12 +1082,31 @@ public sealed partial class MainViewModel : ViewModelBase
             foreach (var removed in allProfiles.Where(predicate)) probeSnapshots.Remove(ProfileKey(removed));
             allProfiles.Clear(); allProfiles.AddRange(remaining);
             emptySubscriptions.Clear(); emptySubscriptions.AddRange(nextEmpty);
-            RebuildGroups(preferredSourceId);
+            if (IsProbing) profilesRemovedDuringProbe = true;
+            if (deletedGroupId is null && SelectedGroup is { } selectedGroup && selectedGroup.Id == preferredSourceId &&
+                (selectedGroup.SourceUrl is not null || remainingSources.Contains(selectedGroup.Id)))
+                RemoveDisplayedProfiles(predicate);
+            else RebuildGroups(preferredSourceId);
             if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } running)
                 activeProfile = Profiles.FirstOrDefault(row => SameProfile(row.Profile, running.Profile)) ?? running;
             Notice = message;
         }
         catch { Notice = "Не удалось сохранить изменения. Профили не удалены."; }
+    }
+
+    private void RemoveDisplayedProfiles(Func<ImportedProfile, bool> predicate)
+    {
+        var selected = SelectedProfile;
+        restoringProfileSelection = true;
+        try
+        {
+            foreach (var row in Profiles.Where(row => predicate(row.Profile)).ToArray()) Profiles.Remove(row);
+            SelectedProfile = selected is not null && Profiles.Contains(selected) ? selected
+                : Profiles.FirstOrDefault(row => activeProfile is not null && SameProfile(row.Profile, activeProfile.Profile))
+                    ?? Profiles.FirstOrDefault();
+        }
+        finally { restoringProfileSelection = false; }
+        NotifyProfileListChanged();
     }
     [RelayCommand] private async Task ImportAsync()
     {
@@ -1331,6 +1364,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private async Task<ServerProbeResult[]> ProbeServersAsync(ServerItemViewModel[] servers, CancellationToken cancellationToken)
     {
         if (probe is null) return [];
+        profilesRemovedDuringProbe = false;
         foreach (var server in servers)
         {
             pendingProbes.Add(ProfileKey(server.Profile));
@@ -1538,6 +1572,7 @@ public sealed partial class MainViewModel : ViewModelBase
 
     private void SortProfilesByProbe()
     {
+        if (profilesRemovedDuringProbe) return;
         var selected = SelectedProfile;
         var ordered = Profiles
             .OrderBy(server => server.ProbeMilliseconds is not null ? 0 : server.ProbeTimedOut ? 2 : 1)
@@ -1547,6 +1582,7 @@ public sealed partial class MainViewModel : ViewModelBase
         Profiles.Clear();
         foreach (var server in ordered) Profiles.Add(server);
         SelectedProfile = selected;
+        OnPropertyChanged(nameof(SelectedProfile));
     }
     private async Task<bool> SelectLowestProfileAsync()
     {

@@ -2,16 +2,19 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Input;
+using Avalonia.Input.GestureRecognizers;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using DiTunnel.Core.Connection;
 using DiTunnel.App.Controls;
@@ -59,7 +62,7 @@ public static class Dialogs
         scroll.Bind(ScrollViewer.BackgroundProperty, scroll.GetResourceObservable("PageBrush"));
         return scroll;
     }
-    private static Control Page(string title, Button back, Control content, Control? operations = null)
+    private static Control Page(string title, Button back, Control content, Control? operations = null, bool mobileScroll = false)
     {
         var heading = new TextBlock
         {
@@ -79,7 +82,34 @@ public static class Dialogs
         root.Bind(Grid.BackgroundProperty, root.GetResourceObservable("PageBrush"));
         root.Children.Add(header);
         if (operations is not null) { root.Children.Add(operations); Grid.SetRow(operations, 1); }
-        var scroll = Scroll(content); root.Children.Add(scroll); Grid.SetRow(scroll, operations is null ? 1 : 2);
+        var scroll = Scroll(content);
+        if (mobileScroll)
+        {
+            scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+            // Keep the content viewport independent of the Fluent scrollbar grid.
+            scroll.Template = new FuncControlTemplate<ScrollViewer>((viewer, _) =>
+            {
+                var presenter = new ScrollContentPresenter { HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                presenter.Bind(ContentPresenter.ContentProperty, viewer.GetObservable(ContentControl.ContentProperty));
+                presenter.Bind(ContentPresenter.BackgroundProperty, viewer.GetObservable(TemplatedControl.BackgroundProperty));
+                var gesture = new ScrollGestureRecognizer { CanVerticallyScroll = true };
+                gesture.Bind(ScrollGestureRecognizer.IsScrollInertiaEnabledProperty, viewer.GetObservable(ScrollViewer.IsScrollInertiaEnabledProperty));
+                gesture.Bind(ScrollGestureRecognizer.OffsetProperty, new Binding(nameof(ScrollContentPresenter.Offset)) { Source = presenter });
+                gesture.Bind(ScrollGestureRecognizer.ViewportProperty, new Binding(nameof(ScrollContentPresenter.Viewport)) { Source = presenter });
+                gesture.Bind(ScrollGestureRecognizer.ExtentProperty, new Binding(nameof(ScrollContentPresenter.Extent)) { Source = presenter });
+                presenter.GestureRecognizers.Add(gesture);
+                return presenter;
+            });
+            root.Loaded += (_, _) => Dispatcher.UIThread.Post(() =>
+            {
+                if (!root.IsLoaded || (scroll.Viewport.Height > 0 && content.Bounds.Height > 0)) return;
+                content.InvalidateMeasure();
+                scroll.InvalidateMeasure();
+                root.InvalidateMeasure();
+            }, DispatcherPriority.Background);
+        }
+        root.Children.Add(scroll); Grid.SetRow(scroll, operations is null ? 1 : 2);
         return root;
     }
     private static Window Window(Window owner, string title, double height = 560) => new()
@@ -555,31 +585,36 @@ public static class Dialogs
         return await dialog.ShowDialog<string?>(owner);
     }
 
-    public static async Task Subscriptions(ContentControl owner, MainViewModel vm)
+    public static async Task Subscriptions(ContentControl owner, MainViewModel vm, Action? closePage = null)
     {
         var originalContent = owner.Content;
         if (TopLevel.GetTopLevel(owner) is Window window) window.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
-        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14, MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Center };
-        void GoBack() { owner.Content = originalContent; AppBackNavigation.Clear(); if (TopLevel.GetTopLevel(owner) is Window window) window.Title = "Di-Tunnel"; }
+        var mobile = vm.Platform.ReleaseTarget == ReleaseTarget.AndroidArm64;
+        var panel = new StackPanel { Margin = new Thickness(24), Spacing = 14, MaxWidth = 1100,
+            HorizontalAlignment = mobile ? HorizontalAlignment.Stretch : HorizontalAlignment.Center };
+        void GoBack()
+        {
+            if (closePage is not null) closePage();
+            else { owner.Content = originalContent; AppBackNavigation.Clear(); }
+            if (TopLevel.GetTopLevel(owner) is Window window) window.Title = "Di-Tunnel";
+        }
         var back = Button("← Назад", GoBack);
         AppBackNavigation.Set(GoBack);
-        var groups = new ComboBox { MaxWidth = 360, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var groups = new ComboBox { MaxWidth = mobile ? double.PositiveInfinity : 360, HorizontalAlignment = HorizontalAlignment.Stretch };
         groups.Bind(ItemsControl.ItemsSourceProperty, new Binding("Groups"));
-        groups.Bind(ComboBox.SelectedItemProperty, new Binding("SelectedGroup") { Mode = BindingMode.TwoWay });
+        groups.Bind(ComboBox.SelectedItemProperty, new Binding(nameof(MainViewModel.SelectedGroup)) { Mode = BindingMode.OneWay });
+        groups.SelectionChanged += (_, _) =>
+        {
+            if (vm.CanSelectProfile && groups.SelectedItem is ProfileGroup selected) vm.SelectedGroup = selected;
+        };
         groups.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
         panel.Children.Add(groups);
-        var cancelConnection = Button("Отменить подключение", () => vm.CancelConnectionCommand.Execute(null));
-        cancelConnection.Bind(ContentControl.ContentProperty, new Binding("CancelConnectionText") { Converter = new TranslationConverter() });
-        cancelConnection.Bind(Visual.IsVisibleProperty, new Binding("HasPendingConnection"));
-        cancelConnection.Bind(Control.IsEnabledProperty, new Binding("CanCancelConnection"));
-        cancelConnection.Classes.Add("danger");
-        cancelConnection.HorizontalAlignment = HorizontalAlignment.Left;
-        cancelConnection.VerticalAlignment = VerticalAlignment.Top;
-        cancelConnection.Margin = new Thickness(0, 0, 8, 4);
         var list = new ListBox
         {
-            MinHeight = OperatingSystem.IsAndroid() ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
-            ItemsPanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel { MinimumTileWidth = 200, MaximumTileWidth = 360, TileSpacing = 6 }),
+            MinHeight = mobile ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
+            ItemsPanel = mobile
+                ? new FuncTemplate<Panel?>(() => new VirtualizingStackPanel())
+                : new FuncTemplate<Panel?>(() => new AdaptiveTilePanel { MinimumTileWidth = 200, MaximumTileWidth = 360, TileSpacing = 6 }),
             ItemTemplate = new FuncDataTemplate<ServerItemViewModel>((row, _) =>
             {
                 var flag = new Image { Width = 60, Height = 42, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -625,6 +660,7 @@ public static class Dialogs
             Setters =
             {
                 new Avalonia.Styling.Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
+                new Avalonia.Styling.Setter(Layoutable.MarginProperty, mobile ? new Thickness(0, 0, 0, 6) : default(Thickness)),
                 new Avalonia.Styling.Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
                 new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
                 new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d),
@@ -641,7 +677,9 @@ public static class Dialogs
         list.SelectionChanged += (_, _) =>
         {
             if (vm.CanSelectProfile && list.SelectedItem is ServerItemViewModel selected) vm.SelectedProfile = selected;
-            else if (!ReferenceEquals(list.SelectedItem, vm.SelectedProfile)) list.SelectedItem = vm.SelectedProfile;
+            else if (list.SelectedItem is not null && vm.SelectedProfile is { } current &&
+                     !ReferenceEquals(list.SelectedItem, current) && vm.Profiles.Contains(current))
+                list.SelectedItem = current;
         };
         ServerItemViewModel? ProfileAt(object? source) => source is Visual visual
             ? visual.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext as ServerItemViewModel : null;
@@ -701,42 +739,46 @@ public static class Dialogs
         emptySubscription.HorizontalAlignment = HorizontalAlignment.Center;
         emptySubscription.Bind(Visual.IsVisibleProperty, new Binding(nameof(MainViewModel.IsSelectedSubscriptionEmpty)));
         panel.Children.Add(emptySubscription);
-        var testActions = new WrapPanel { Margin = new Thickness(0, 0, 0, 2), VerticalAlignment = VerticalAlignment.Top };
+        const double buttonRowSpacing = 6;
+        var testActions = new WrapPanel { ItemSpacing = 8, LineSpacing = buttonRowSpacing, VerticalAlignment = VerticalAlignment.Bottom };
         var testOne = Button("Проверить сервер", () => vm.ProbeSelectedCommand.Execute(null));
-        testOne.Margin = new Thickness(0, 0, 8, 4); testOne.Bind(Control.IsEnabledProperty, new Binding("CanProbe")); testActions.Children.Add(testOne);
+        testOne.Bind(Control.IsEnabledProperty, new Binding("CanProbe")); testActions.Children.Add(testOne);
         var testAll = Button("Проверить все", () => vm.ProbeAllCommand.Execute(null));
-        testAll.Margin = new Thickness(0, 0, 8, 4); testAll.Bind(Control.IsEnabledProperty, new Binding("CanProbeAll")); testActions.Children.Add(testAll);
+        testAll.Bind(Control.IsEnabledProperty, new Binding("CanProbeAll")); testActions.Children.Add(testAll);
+
+        var visibleOpacity = new FuncValueConverter<bool, double>(visible => visible ? 1d : 0d);
+        var actionAccessibility = new FuncValueConverter<bool, AccessibilityView>(visible => visible ? AccessibilityView.Default : AccessibilityView.Raw);
+        // Let all variants reserve space, even when the two probe actions wrap.
+        testActions.Bind(Visual.OpacityProperty, new Binding("!HasPendingOperation") { Converter = visibleOpacity });
+        testActions.Bind(InputElement.IsHitTestVisibleProperty, new Binding("!HasPendingOperation"));
+        testOne.Bind(AutomationProperties.AccessibilityViewProperty, new Binding("!HasPendingOperation") { Converter = actionAccessibility });
+        testAll.Bind(AutomationProperties.AccessibilityViewProperty, new Binding("!HasPendingOperation") { Converter = actionAccessibility });
+
         var cancelTests = Button("Отменить проверку", () => vm.CancelProbesCommand.Execute(null));
         cancelTests.Classes.Add("danger");
         cancelTests.HorizontalAlignment = HorizontalAlignment.Left;
-        cancelTests.VerticalAlignment = VerticalAlignment.Top;
-        cancelTests.Margin = new Thickness(0, 0, 8, 4);
-        cancelTests.Bind(Visual.IsVisibleProperty, new MultiBinding
+        cancelTests.VerticalAlignment = VerticalAlignment.Bottom;
+        cancelTests.Bind(Control.IsEnabledProperty, new MultiBinding
         {
             Converter = BoolConverters.And,
             Bindings = { new Binding("IsProbing"), new Binding("!HasPendingConnection") }
         });
-        testActions.Bind(Visual.IsVisibleProperty, new Binding("!HasPendingOperation"));
-        var testSlot = new Grid { MinHeight = 48 };
-        testActions.SizeChanged += (_, _) => { if (!vm.HasPendingOperation) testSlot.MinHeight = Math.Max(48,
-            testActions.Bounds.Height + testActions.Margin.Top + testActions.Margin.Bottom); };
-        testSlot.SizeChanged += (_, _) =>
-        {
-            // The page may open after a connection has already started, before
-            // the hidden normal buttons have ever been laid out. Reserve their
-            // wrapped height in that case too, including after a window resize.
-            if (!vm.HasPendingOperation || testSlot.Bounds.Width <= 0) return;
-            var unconstrained = new Size(double.PositiveInfinity, double.PositiveInfinity);
-            testOne.Measure(unconstrained); testAll.Measure(unconstrained);
-            var one = testOne.DesiredSize; var all = testAll.DesiredSize;
-            var height = one.Width + all.Width > testSlot.Bounds.Width
-                ? one.Height + all.Height : Math.Max(one.Height, all.Height);
-            testSlot.MinHeight = Math.Max(48, height + testActions.Margin.Top + testActions.Margin.Bottom);
-        };
-        testSlot.Children.Add(testActions);
-        testSlot.Children.Add(cancelTests);
-        testSlot.Children.Add(cancelConnection);
-        panel.Children.Add(testSlot);
+        cancelTests.Bind(Visual.OpacityProperty, new Binding(nameof(Control.IsEnabled)) { Source = cancelTests, Converter = visibleOpacity });
+        cancelTests.Bind(InputElement.IsHitTestVisibleProperty, cancelTests.GetObservable(Control.IsEnabledProperty));
+        cancelTests.Bind(AutomationProperties.AccessibilityViewProperty, new Binding(nameof(Control.IsEnabled))
+            { Source = cancelTests, Converter = actionAccessibility });
+
+        var cancelConnection = Button("Отменить подключение", () => vm.CancelConnectionCommand.Execute(null));
+        cancelConnection.Bind(ContentControl.ContentProperty, new Binding("CancelConnectionText") { Converter = new TranslationConverter() });
+        cancelConnection.Bind(Control.IsEnabledProperty, new Binding("CanCancelConnection"));
+        cancelConnection.Bind(Visual.OpacityProperty, new Binding("HasPendingConnection") { Converter = visibleOpacity });
+        cancelConnection.Bind(InputElement.IsHitTestVisibleProperty, new Binding("HasPendingConnection"));
+        cancelConnection.Bind(AutomationProperties.AccessibilityViewProperty, new Binding("HasPendingConnection") { Converter = actionAccessibility });
+        cancelConnection.Classes.Add("danger");
+        cancelConnection.HorizontalAlignment = HorizontalAlignment.Left;
+        cancelConnection.VerticalAlignment = VerticalAlignment.Bottom;
+
+        var testSlot = new Grid { Children = { testActions, cancelTests, cancelConnection } };
         var probeMode = Button("", () => { });
         void UpdateProbeMode() => probeMode.Content = L.T(UserSettings.Current.ServerProbeMode == ServerProbeMode.Fast
             ? "Проверка: Быстрая" : "Проверка: Точная (HTTPS)");
@@ -744,7 +786,7 @@ public static class Dialogs
         UpdateProbeMode();
         ToolTip.SetTip(probeMode, L.T("Метод быстрой проверки зависит от платформы и протокола: TCP, HTTP или TLS. Точная проверка выполняет HTTPS-запрос через профиль. Метод и время показаны в результате."));
         probeMode.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.Children.Add(probeMode);
+        panel.Children.Add(new StackPanel { Spacing = buttonRowSpacing, Children = { testSlot, probeMode } });
         var lowest = new CheckBox { Content = L.T("Lowest: выбирать сервер с минимальной задержкой"), IsChecked = vm.IsLowestMode };
         var lowestHint = Label("Проверки: через 5, затем 10, затем каждые 15 минут. При смене сервера VPN переподключится.");
         lowestHint.Bind(Visual.IsVisibleProperty, new Binding(nameof(ToggleButton.IsChecked)) { Source = lowest });
@@ -857,7 +899,7 @@ public static class Dialogs
         static Button ManagementButton(string label, string description, string geometry, Action action)
         {
             var button = Button(description, action);
-            button.Margin = new Thickness(0, 0, 8, 6);
+            button.Margin = new Thickness(0, 0, 8, buttonRowSpacing);
             button.Padding = new Thickness(12, 10);
             var icon = new Avalonia.Controls.Shapes.Path
             {
@@ -906,7 +948,7 @@ public static class Dialogs
         panel.Children.Add(management);
         var status = Label(""); status.Bind(TextBlock.TextProperty, new Binding("SubscriptionStatus") { Converter = new TranslationConverter() }); panel.Children.Add(status);
         var operationNotice = Label(""); operationNotice.Bind(TextBlock.TextProperty, new Binding("DisplayNotice") { Converter = new TranslationConverter() }); panel.Children.Add(operationNotice);
-        var page = Page("Подписки и профили", back, panel);
+        var page = Page("Подписки и профили", back, panel, mobileScroll: mobile);
         var root = new Grid { DataContext = vm };
         root.Children.Add(page);
         root.Children.Add(confirmation);

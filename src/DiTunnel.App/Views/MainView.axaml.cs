@@ -44,8 +44,10 @@ public partial class MainView : UserControl
     }
     private async void SubscriptionsClick(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is MainViewModel vm)
-            await Dialogs.Subscriptions(NavigationOwner, vm);
+        if (DataContext is not MainViewModel vm) return;
+        if (vm.Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 && this.FindAncestorOfType<ApplicationShell>() is { } shell)
+            await shell.OpenSubscriptionsAsync(vm);
+        else await Dialogs.Subscriptions(NavigationOwner, vm);
     }
     private void AddClick(object? sender, RoutedEventArgs e)
     {

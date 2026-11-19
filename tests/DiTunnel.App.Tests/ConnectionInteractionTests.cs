@@ -98,13 +98,16 @@ public sealed class ConnectionInteractionTests
     }
     private sealed class SortingProbe : IServerProbe
     {
-        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
-            Task.FromResult(profile.Name switch
-            {
-                "A" => new ServerProbeResult(180, "HTTPS · 180 мс"),
-                "C" => new ServerProbeResult(60, "HTTPS · 60 мс"),
-                _ => new ServerProbeResult(null, "Тайм-аут")
-            });
+        public TaskCompletionSource? HoldSuccessfulChecks { get; set; }
+
+        public async Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
+        {
+            if (profile.Name == "B") return new(null, "Тайм-аут");
+            var hold = HoldSuccessfulChecks;
+            if (hold is not null) await hold.Task.WaitAsync(cancellationToken);
+            var slow = hold is null ? profile.Name == "A" : profile.Name == "C";
+            return ProbePolicy.Success(slow ? 180 : 60, "HTTPS", "HTTPS", true);
+        }
     }
     private sealed class SortingStore : IProfileStore
     {
@@ -134,7 +137,37 @@ public sealed class ConnectionInteractionTests
         vm.RemoveUnavailableCommand.Execute(null);
 
         Assert.Equal(["A", "C"], store.Items.Select(profile => profile.Name).Order());
-        Assert.DoesNotContain(vm.Profiles, profile => profile.Name == "B");
+        Assert.Equal(["C", "A"], vm.Profiles.Select(profile => profile.Name));
+    }
+
+    [Fact]
+    public async Task FilteringDuringProbePreservesRowOrderThroughCompletion()
+    {
+        var probe = new SortingProbe();
+        var vm = new MainViewModel(null, new SortingStore(), probe, selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            var retained = vm.Profiles.Take(2).ToArray();
+            Assert.Equal(["C", "A"], retained.Select(row => row.Name));
+            vm.SelectedProfile = retained[1];
+
+            probe.HoldSuccessfulChecks = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var checking = vm.ProbeAllCommand.ExecuteAsync(null);
+            await WaitForAsync(() => vm.CanRemoveUnavailable);
+            vm.RemoveUnavailableCommand.Execute(null);
+            Assert.Equal(retained, vm.Profiles.ToArray());
+            Assert.Same(retained[1], vm.SelectedProfile);
+
+            probe.HoldSuccessfulChecks.SetResult();
+            await checking;
+            Assert.Equal(retained, vm.Profiles.ToArray());
+            Assert.Equal([180d, 60d], vm.Profiles.Select(row => row.ProbeMilliseconds!.Value));
+
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.Equal(["A", "C"], vm.Profiles.Select(row => row.Name));
+        }
+        finally { await vm.ShutdownAsync(); }
     }
 
     private sealed class GroupedStore : IProfileStore
