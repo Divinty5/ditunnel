@@ -1,16 +1,20 @@
 # Сборка и публикация
 
-Последний публичный релиз Windows, Android и Linux — 0.6.13. Текущая версия исходников 0.6.14 задаётся в `Directory.Build.props`, Android versionCode 60014 — в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
+Для общего выпуска 0.6.18 номер каждой платформы задан в `Directory.Build.props`. Android versionCode 60022 задан в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
+
+## Разработка и тесты
+
+После установки SDK и workloads выполните `dotnet restore` и `dotnet test DiTunnel.sln`. На Windows `./scripts/Start-DiTunnel.ps1` подготавливает закреплённые нативные компоненты и запускает приложение из исходников. Для тестирования нативных частей есть `./scripts/Build-AmneziaWG.ps1 -Test` и `./scripts/Build-ShellIcon.ps1 -Test`.
 
 ## Windows
 
-Нужны .NET SDK, C++ Build Tools для ShellIcon, Go из manifests и **Inno Setup 6.7+**. Из корня PowerShell:
+Нужны .NET SDK из global.json, C++ Build Tools x64 и CMake 3.21+ для ShellIcon, Go из manifests и **Inno Setup 6.7+**. Из корня PowerShell:
 
 ```powershell
 ./scripts/Build-WindowsInstaller.ps1
 ```
 
-`-CompilerPath` задаёт путь ISCC.exe. Скрипт создаёт `artifacts/installer/Di-Tunnel-0.6.14-Setup-x64.exe` и `.exe.sha256`. Оформление и выбор языка определяются файлами `.iss` в `installer/`. Установщик выпускается без подписи Authenticode.
+`-CompilerPath` задаёт путь ISCC.exe. Скрипт создаёт `artifacts/installer/Di-Tunnel-0.6.18-Setup-x64.exe` и `.exe.sha256`. Оформление и выбор языка определяются файлами `.iss` в `installer/`. Установщик выпускается без подписи Authenticode.
 
 ## Android
 
@@ -39,7 +43,7 @@ python3 scripts/Build-LinuxPackage.py --test
 
 ## GitHub
 
-Workflow **Platform packages** автоматически запускается при отправке тега `vX.Y.Z`. Он берёт исходники из коммита тега и запускает сборку для каждой платформы, чья версия в `Directory.Build.props` совпадает с тегом. Тег должен указывать на коммит, в котором уже есть workflow. Для проверки кандидата до тега используйте **Actions → Platform packages → Run workflow** на `main`, укажите версию и отметьте нужные платформы. Можно также запустить проверку на существующем теге через `gh workflow run platform-packages.yml --ref v0.6.14` и задать выбор через `-f windows=true -f android=false -f linux=false`.
+Workflow **Platform packages** автоматически запускается при отправке тега `vX.Y.Z`. Он берёт исходники из коммита тега и запускает сборку для каждой платформы, чья версия в `Directory.Build.props` совпадает с тегом. Тег должен указывать на коммит, в котором уже есть workflow. Для проверки кандидата до тега используйте **Actions → Platform packages → Run workflow** на `main`, укажите версию и отметьте нужные платформы. Можно также запустить проверку на существующем теге через `gh workflow run platform-packages.yml --ref v0.6.18` и задать выбор через `-f windows=true -f android=false -f linux=false`.
 
 Windows CI запускает общие и Windows-тесты, самопроверку ShellIcon и тесты Go, а также проверяет версию и SHA-256 установщика. Linux переиспользует **Linux release package**, включая тесты, проверки `.deb` и `.run`. Android запускает тесты политик VPN из Core, проверяет ARM64 APK с тестовой подписью и сохраняет его с суффиксом `-ci.apk`. Для публикации Android используйте локально подписанный APK и команду проверки выше. GitHub runners не требуют релизных ключей.
 
@@ -49,4 +53,4 @@ Windows CI запускает общие и Windows-тесты, самопров
 4. Проверить публичные ссылки и выбор пакетов для обновлённых платформ. Номер в имени файла должен совпадать с тегом.
 5. При изменении диагностики сверить короткое сообщение и поля отчёта на Windows, Android и Linux. Одинаковый этап и причина дают одинаковый текст. При повторной проверке отчёт должен соответствовать текущей попытке, в том числе при переходе от успеха к ошибке.
 
-Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения выпуска](release-0.6.13.md).
+Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения выпуска](release-0.6.18.md).
