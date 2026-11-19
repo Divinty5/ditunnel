@@ -161,10 +161,7 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             // Manual switches have no recovery loop to transition a failed start out of
             // Reconnecting. Otherwise the tile/widgets would stay busy indefinitely.
             StopHealthMonitor();
-            activeProfile = null;
-            SetStatus(cancellationToken.IsCancellationRequested ? VpnStatus.Disconnected
-                : new(VpnConnectionState.Error, error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
-                    ? error.Message : "Не удалось запустить Android VPN."));
+            SetConnectionFailure(profile, error, cancellationToken);
             throw;
         }
         finally { EndConnection(operation); lifecycle.Release(); }
@@ -218,7 +215,12 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
                 throw new TimeoutException($"{AndroidLocalization.T("Android VPN не подтвердил запуск за 30 секунд.")} ({AndroidVpnStartupDiagnostics.Read(context)})");
             }
             if (started.State != VpnConnectionState.Connected)
-                throw new InvalidOperationException(started.Message ?? "Не удалось запустить Android VPN.");
+            {
+                var message = started.Message ?? "Не удалось запустить Android VPN.";
+                if (started.Probe is { Diagnostics: { } diagnostics } failure)
+                    throw new AndroidVpnStartupException(message, failure, diagnostics);
+                throw new InvalidOperationException(message);
+            }
             activeProfile = profile;
             SetStatus(new(VpnConnectionState.Connected,
                 "Туннель Android VPN запущен. Проверяем HTTPS через VPN…",
@@ -233,15 +235,19 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
         {
             if (!recovering) StopHealthMonitor();
             try { await StopCoreAsync(CancellationToken.None); } catch { }
-            if (!recovering)
-            {
-                var message = error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
-                    ? error.Message
-                    : "Не удалось запустить Android VPN.";
-                SetStatus(cancellationToken.IsCancellationRequested ? VpnStatus.Disconnected : new(VpnConnectionState.Error, message));
-            }
+            if (!recovering) SetConnectionFailure(profile, error, cancellationToken);
             throw;
         }
+    }
+
+    private void SetConnectionFailure(ImportedProfile profile, Exception error, CancellationToken cancellationToken)
+    {
+        var failure = cancellationToken.IsCancellationRequested ? null : (error as AndroidVpnStartupException)?.Result;
+        activeProfile = failure is null ? null : profile;
+        var message = error is InvalidOperationException or NotSupportedException or FormatException or TimeoutException
+            ? error.Message : "Не удалось запустить Android VPN.";
+        SetStatus(cancellationToken.IsCancellationRequested ? VpnStatus.Disconnected
+            : new(VpnConnectionState.Error, message, Probe: failure));
     }
 
     private async Task StopCoreAsync(CancellationToken cancellationToken)

@@ -1,6 +1,19 @@
 using DiTunnel.Core.Connection;
 namespace DiTunnel.Platform.Android;
 internal sealed class AndroidProbeException(string stage, string errorType, string? message = null) : ProbeFailureException(stage, errorType, message);
+
+internal sealed class AndroidVpnStartupException : ProbeFailureException
+{
+    internal AndroidVpnStartupException(string message, ServerProbeResult result, ProbeDiagnostics diagnostics)
+        : base(diagnostics.Stage, diagnostics.ErrorType, message)
+    {
+        Result = result;
+        Diagnostics = diagnostics;
+    }
+
+    internal ServerProbeResult Result { get; }
+}
+
 internal static class AndroidProbePolicy
 {
     internal static readonly TimeSpan XrayDnsBudget = TimeSpan.FromSeconds(8);
@@ -16,6 +29,12 @@ internal static class AndroidProbePolicy
             "Служба проверки", "HTTPS", milliseconds) with { IsDeferred = true };
     internal static ServerProbeResult ActiveTunnelResult(ServerProbeResult result) =>
         result.Diagnostics?.ErrorType is "Internal" or "Runtime" ? result with { IsDeferred = true } : result;
+    internal static ServerProbeResult StartupFailure(Exception error, string stage, double milliseconds)
+    {
+        var result = Failure(error, stage, "Запуск VPN", milliseconds);
+        return result.Diagnostics?.ErrorType is "Internal" or "Runtime" or "ServiceStopped"
+            ? result with { IsDeferred = true } : result;
+    }
     internal static string Classify(Exception error) => ProbePolicy.Classify(error);
     internal static void ValidateResponse(Uri target, int status) => ProbePolicy.ValidateResponse(target, status);
     internal static string TunnelMessage(ServerProbeResult result) => ProbePolicy.TunnelMessage(result);

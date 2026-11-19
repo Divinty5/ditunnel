@@ -223,9 +223,10 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
             AndroidVpnRuntimeState.Clear(this);
             CloseTunnel();
             StopForeground(StopForegroundFlags.Remove);
-            var failure = AndroidProbePolicy.Failure(error, startupStage.ToString(), "Запуск VPN", startupWatch.Elapsed.TotalMilliseconds);
-            var message = error is SubscriptionExhaustedException ? SubscriptionAccess.ExhaustedMessage
-                : $"Не удалось запустить Android VPN. {failure.Message}\n{failure.Diagnostics!.ToDisplayString()}";
+            var failure = error is SubscriptionExhaustedException ? null
+                : AndroidProbePolicy.StartupFailure(error, startupStage.ToString(), startupWatch.Elapsed.TotalMilliseconds);
+            var message = failure is null ? SubscriptionAccess.ExhaustedMessage
+                : $"Не удалось запустить Android VPN. {failure.Message}";
             if (error is not SubscriptionExhaustedException && !manualRequest && OwnsRecovery && PersistedRequestAvailable()) _ = RestartForRecoveryAsync();
             else
             {
@@ -233,7 +234,7 @@ public sealed class DiTunnelVpnService : global::Android.Net.VpnService
                 stopRequested = true;
                 StopSelf();
                 if (wasStopping) AndroidVpnServiceBridge.PublishStopped(this);
-                else AndroidVpnServiceBridge.PublishStartFailed(this, message);
+                else AndroidVpnServiceBridge.PublishStartFailed(this, message, failure);
                 TerminateVpnProcess();
             }
         }

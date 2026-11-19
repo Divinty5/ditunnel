@@ -10,6 +10,30 @@ namespace DiTunnel.Core.Tests;
 
 public sealed class AndroidProbePolicyTests
 {
+    [Fact]
+    public void AwgStartupTimeoutKeepsItsShortStatusAndStructuredReportAcrossServiceSerialization()
+    {
+        var failure = AndroidProbePolicy.StartupFailure(new AndroidProbeException("Handshake AWG", "Timeout"), "AwgHandshake", 7500);
+        var json = System.Text.Json.JsonSerializer.Serialize(failure, DiTunnelJsonContext.Default.ServerProbeResult);
+        var received = System.Text.Json.JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResult)!;
+        var error = new AndroidVpnStartupException("Не удалось запустить Android VPN. " + received.Message, received, received.Diagnostics!);
+
+        Assert.Equal(failure, error.Result);
+        Assert.Equal("Handshake AWG · Тайм-аут", error.Result.Message);
+        Assert.False(error.Result.IsDeferred);
+        Assert.Contains("Метод: Запуск VPN\nЭтап: Handshake AWG\nДлительность: 7500 мс\nТип ошибки: Timeout",
+            error.Diagnostics!.ToDisplayString());
+    }
+
+    [Fact]
+    public void LocalStartupFailureDoesNotMarkTheServerUnavailable()
+    {
+        var failure = AndroidProbePolicy.StartupFailure(new AndroidProbeException("Xray", "Runtime"), "Xray", 54);
+
+        Assert.Equal("Xray · Ошибка запуска", failure.Message);
+        Assert.True(failure.IsDeferred);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

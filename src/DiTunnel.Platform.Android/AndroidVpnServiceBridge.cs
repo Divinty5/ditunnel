@@ -1,4 +1,5 @@
 using Android.Content;
+using DiTunnel.Core;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using System.Text.Json;
@@ -13,6 +14,7 @@ internal static class AndroidVpnServiceBridge
     private const string ActionRecovering = "com.divintyinteractive.ditunnel.status.RECOVERING";
     private const string ExtraRequest = "request";
     private const string ExtraMessage = "message";
+    private const string ExtraProbe = "probe";
     private static readonly object Sync = new();
     private static TaskCompletionSource<VpnStatus>? startCompletion;
     private static TaskCompletionSource<VpnStatus>? stopCompletion;
@@ -68,15 +70,25 @@ internal static class AndroidVpnServiceBridge
     public static Task<VpnStatus> ExpectStart() { lock (Sync) return (startCompletion = NewCompletion()).Task; }
     public static Task<VpnStatus> ExpectStop() { lock (Sync) return (stopCompletion = NewCompletion()).Task; }
     public static void PublishStarted(Context context) => Publish(context, ActionStarted, "Туннель Android VPN запущен; работоспособность ещё не подтверждена.");
-    public static void PublishStartFailed(Context context, string message) => Publish(context, ActionStartFailed, message);
+    public static void PublishStartFailed(Context context, string message, ServerProbeResult? failure = null)
+        => Publish(context, ActionStartFailed, message, failure);
     public static void PublishStopped(Context context) => Publish(context, ActionStopped, "VPN отключён.");
     public static void PublishRecovering(Context context) => Publish(context, ActionRecovering, "Восстанавливаем VPN…");
 
     private static TaskCompletionSource<VpnStatus> NewCompletion() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private static void Publish(Context context, string action, string message)
+    private static void Publish(Context context, string action, string message, ServerProbeResult? failure = null)
     {
-        context.SendBroadcast(new Intent(action).SetPackage(context.PackageName).PutExtra(ExtraMessage, message));
+        using var intent = new Intent(action).SetPackage(context.PackageName).PutExtra(ExtraMessage, message);
+        if (failure is not null) intent.PutExtra(ExtraProbe, JsonSerializer.Serialize(failure, DiTunnelJsonContext.Default.ServerProbeResult));
+        context.SendBroadcast(intent);
         context.SendBroadcast(new Intent(action).SetClassName(context.PackageName!, "com.divintyinteractive.ditunnel.VpnStatusReceiver"));
+    }
+
+    private static ServerProbeResult? ReadProbe(Intent intent)
+    {
+        if (intent.GetStringExtra(ExtraProbe) is not { } json) return null;
+        try { return JsonSerializer.Deserialize(json, DiTunnelJsonContext.Default.ServerProbeResult); }
+        catch (JsonException) { return null; }
     }
 
     private sealed class StatusReceiver : BroadcastReceiver
@@ -85,6 +97,7 @@ internal static class AndroidVpnServiceBridge
         {
             if (intent?.Action is not { } action) return;
             var message = intent.GetStringExtra(ExtraMessage);
+            var failure = action == ActionStartFailed ? ReadProbe(intent) : null;
             TaskCompletionSource<VpnStatus>? completion;
             VpnStatus status;
             lock (Sync)
@@ -104,7 +117,10 @@ internal static class AndroidVpnServiceBridge
                     completion = startCompletion; startCompletion = null;
                     status = action == ActionStarted
                         ? new(VpnConnectionState.Connected, message, DateTimeOffset.UtcNow)
-                        : new(VpnConnectionState.Error, message);
+                        // A result belongs to the waiting start request. An unsolicited report has no matching profile.
+                        : completion is not null ? new(VpnConnectionState.Error, message, Probe: failure)
+                        : new(VpnConnectionState.Error, failure?.Diagnostics is { } diagnostics
+                            ? $"{message}\n{diagnostics.ToDisplayString()}" : message);
                 }
             }
             completion?.TrySetResult(status);

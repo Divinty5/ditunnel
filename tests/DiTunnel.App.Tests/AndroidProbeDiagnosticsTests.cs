@@ -173,6 +173,7 @@ public sealed class AndroidProbeDiagnosticsTests
 
     [Theory]
     [InlineData(ReleaseTarget.WindowsX64, "Windows", VpnConnectionState.Error)]
+    [InlineData(ReleaseTarget.AndroidArm64, "Android", VpnConnectionState.Error)]
     [InlineData(ReleaseTarget.AndroidArm64, "Android", VpnConnectionState.Connected)]
     [InlineData(ReleaseTarget.LinuxX64, "Linux", VpnConnectionState.Reconnecting)]
     public async Task ConnectionFailureReplacesThePreviousSuccessfulCheck(ReleaseTarget target, string platform, VpnConnectionState state)
@@ -207,6 +208,31 @@ public sealed class AndroidProbeDiagnosticsTests
             var restored = ProbePolicy.Success(22, "HTTPS", "HTTPS", true, platform: platform);
             vm.ApplyEngineStatus(new(VpnConnectionState.Connected, restored.Message, Probe: restored), active.Profile);
             Assert.False(vm.Profiles.Single(row => row.Name == "C").IsUnavailable);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task AndroidStartupTimeoutReplacesUncheckedStatusOnlyForTheAttemptedProfile()
+    {
+        var vm = new MainViewModel(null, new Store(), platform: AppPlatform.Android);
+        try
+        {
+            var target = vm.Profiles.Single(row => row.Name == "C");
+            var other = vm.Profiles.Single(row => row.Name == "A");
+            Assert.Equal("Не проверен", target.ProbeDisplayText);
+
+            var failure = ProbePolicy.Failure(new ProbeFailureException("Handshake AWG", "Timeout"),
+                "Handshake AWG", "Запуск VPN", 7500, "Android");
+            var message = "Не удалось запустить Android VPN. " + failure.Message;
+            vm.ApplyEngineStatus(new(VpnConnectionState.Error, message, Probe: failure), target.Profile);
+
+            Assert.Equal("Handshake AWG · Тайм-аут", target.ProbeDisplayText);
+            Assert.Equal("Не проверен", other.ProbeDisplayText);
+            Assert.True(target.IsUnavailable);
+            Assert.Equal(message, vm.DisplayNotice);
+            Assert.Contains("Метод: Запуск VPN\nЭтап: Handshake AWG\nДлительность: 7500 мс\nТип ошибки: Timeout", vm.DiagnosticText);
+            Assert.Contains("Работа профиля подтверждена: нет", vm.DiagnosticText);
         }
         finally { await vm.ShutdownAsync(); }
     }
