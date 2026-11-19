@@ -934,15 +934,34 @@ public static class Dialogs
             Bindings = { new Binding(nameof(MainViewModel.CanManageProfiles)), new Binding(nameof(MainViewModel.SelectedGroup)) { Converter = ObjectConverters.IsNotNull } }
         });
         management.Children.Add(remove);
-        var removeOne = ManagementButton("Сервер", "Удалить выбранный сервер", deleteIcon, () => vm.RemoveProfileCommand.Execute(null));
+        var removeOne = ManagementButton("Сервер", "Удалить выбранный сервер", deleteIcon, () =>
+        {
+            if (vm.SelectedProfile is not { } selected) return;
+            ShowConfirmation("Удалить выбранный сервер?", () =>
+            {
+                if (ReferenceEquals(vm.SelectedProfile, selected)) vm.RemoveProfileCommand.Execute(null);
+            });
+        });
         removeOne.Bind(Control.IsEnabledProperty, new MultiBinding
         {
             Converter = BoolConverters.And,
             Bindings = { new Binding(nameof(MainViewModel.CanManageProfiles)), new Binding(nameof(MainViewModel.SelectedProfile)) { Converter = ObjectConverters.IsNotNull } }
         });
         management.Children.Add(removeOne);
-        var removeUnavailable = ManagementButton("Недоступные", "Удалить недоступные серверы", deleteIcon,
-            () => vm.RemoveUnavailableCommand.Execute(null));
+        var removeUnavailable = ManagementButton("Недоступные", "Удалить недоступные серверы", deleteIcon, () =>
+        {
+            if (!vm.CanRemoveUnavailable) return;
+            if (vm.SelectedGroup is { SourceUrl: null } group && vm.Profiles.Count == 1)
+            {
+                var server = vm.Profiles[0];
+                ShowConfirmation("Удалить выбранный сервер?", () =>
+                {
+                    if (vm.SelectedGroup == group && vm.Profiles.Count == 1 && ReferenceEquals(vm.Profiles[0], server))
+                        vm.RemoveUnavailableCommand.Execute(null);
+                });
+            }
+            else vm.RemoveUnavailableCommand.Execute(null);
+        });
         removeUnavailable.Bind(Control.IsEnabledProperty, new Binding(nameof(MainViewModel.CanRemoveUnavailable)));
         management.Children.Add(removeUnavailable);
         panel.Children.Add(management);

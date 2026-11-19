@@ -243,6 +243,7 @@
     "es": "Eliminar servidor seleccionado",
     "zh-Hans": "删除所选服务器"
   },
+  "Delete the selected server?": { "es": "¿Eliminar el servidor seleccionado?", "zh-Hans": "删除所选服务器？" },
   "Delete the selected subscription and all its servers?": {
     "es": "¿Eliminar la suscripción seleccionada y todos sus servidores?",
     "zh-Hans": "删除所选订阅及其所有服务器？"

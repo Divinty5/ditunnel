@@ -103,6 +103,7 @@
   "Блокируются известные рекламные домены во всём трафике VPN. Реклама YouTube может не блокироваться, потому что доставляется с тех же доменов, что и видео.": "Known advertising domains are blocked across all VPN traffic. YouTube ads may not be blocked because they are delivered from the same domains as videos.",
   "Подписки": "Subscriptions",
   "Удалить выбранную подписку и все её серверы?": "Delete the selected subscription and all its servers?",
+  "Удалить выбранный сервер?": "Delete the selected server?",
   "Ваше пространство. Ваша сеть.": "Your space. Your network.",
   "Твой VPN. Твой выбор.": "Your VPN. Your choice.",
   "АКТИВНЫЙ ПРОФИЛЬ": "ACTIVE PROFILE",
