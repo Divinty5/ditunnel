@@ -745,40 +745,26 @@ public static class Dialogs
         testOne.Bind(Control.IsEnabledProperty, new Binding("CanProbe")); testActions.Children.Add(testOne);
         var testAll = Button("Проверить все", () => vm.ProbeAllCommand.Execute(null));
         testAll.Bind(Control.IsEnabledProperty, new Binding("CanProbeAll")); testActions.Children.Add(testAll);
-
-        var visibleOpacity = new FuncValueConverter<bool, double>(visible => visible ? 1d : 0d);
-        var actionAccessibility = new FuncValueConverter<bool, AccessibilityView>(visible => visible ? AccessibilityView.Default : AccessibilityView.Raw);
-        // Let all variants reserve space, even when the two probe actions wrap.
-        testActions.Bind(Visual.OpacityProperty, new Binding("!HasPendingOperation") { Converter = visibleOpacity });
-        testActions.Bind(InputElement.IsHitTestVisibleProperty, new Binding("!HasPendingOperation"));
-        testOne.Bind(AutomationProperties.AccessibilityViewProperty, new Binding("!HasPendingOperation") { Converter = actionAccessibility });
-        testAll.Bind(AutomationProperties.AccessibilityViewProperty, new Binding("!HasPendingOperation") { Converter = actionAccessibility });
+        testActions.Bind(Visual.IsVisibleProperty, new Binding("!HasPendingOperation"));
 
         var cancelTests = Button("Отменить проверку", () => vm.CancelProbesCommand.Execute(null));
         cancelTests.Classes.Add("danger");
         cancelTests.HorizontalAlignment = HorizontalAlignment.Left;
         cancelTests.VerticalAlignment = VerticalAlignment.Bottom;
-        cancelTests.Bind(Control.IsEnabledProperty, new MultiBinding
+        cancelTests.Bind(Visual.IsVisibleProperty, new MultiBinding
         {
             Converter = BoolConverters.And,
             Bindings = { new Binding("IsProbing"), new Binding("!HasPendingConnection") }
         });
-        cancelTests.Bind(Visual.OpacityProperty, new Binding(nameof(Control.IsEnabled)) { Source = cancelTests, Converter = visibleOpacity });
-        cancelTests.Bind(InputElement.IsHitTestVisibleProperty, cancelTests.GetObservable(Control.IsEnabledProperty));
-        cancelTests.Bind(AutomationProperties.AccessibilityViewProperty, new Binding(nameof(Control.IsEnabled))
-            { Source = cancelTests, Converter = actionAccessibility });
-
         var cancelConnection = Button("Отменить подключение", () => vm.CancelConnectionCommand.Execute(null));
         cancelConnection.Bind(ContentControl.ContentProperty, new Binding("CancelConnectionText") { Converter = new TranslationConverter() });
         cancelConnection.Bind(Control.IsEnabledProperty, new Binding("CanCancelConnection"));
-        cancelConnection.Bind(Visual.OpacityProperty, new Binding("HasPendingConnection") { Converter = visibleOpacity });
-        cancelConnection.Bind(InputElement.IsHitTestVisibleProperty, new Binding("HasPendingConnection"));
-        cancelConnection.Bind(AutomationProperties.AccessibilityViewProperty, new Binding("HasPendingConnection") { Converter = actionAccessibility });
+        cancelConnection.Bind(Visual.IsVisibleProperty, new Binding("HasPendingConnection"));
         cancelConnection.Classes.Add("danger");
         cancelConnection.HorizontalAlignment = HorizontalAlignment.Left;
         cancelConnection.VerticalAlignment = VerticalAlignment.Bottom;
 
-        var testSlot = new Grid { Children = { testActions, cancelTests, cancelConnection } };
+        var testSlot = new SubscriptionActionSlot(testActions) { Children = { testActions, cancelTests, cancelConnection } };
         var probeMode = Button("", () => { });
         void UpdateProbeMode() => probeMode.Content = L.T(UserSettings.Current.ServerProbeMode == ServerProbeMode.Fast
             ? "Проверка: Быстрая" : "Проверка: Точная (HTTPS)");
