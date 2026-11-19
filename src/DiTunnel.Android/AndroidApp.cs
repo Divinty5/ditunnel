@@ -63,6 +63,7 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
                 model.SelectedProfile = model.Profiles.FirstOrDefault(row => VpnQuickControls.Key(row.Profile) == VpnQuickControls.Key(profile)) ?? model.SelectedProfile;
             });
             VpnQuickControls.SelectFromApp(model.SelectedProfile?.Profile);
+            VpnQuickControls.FollowPresentation(model);
             return mainViewModel = model;
         };
         base.OnCreate();

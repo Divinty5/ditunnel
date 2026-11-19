@@ -272,7 +272,7 @@ public sealed partial class MainViewModel : ViewModelBase
         noticeDiagnostics = diagnostics;
         OnPropertyChanged(nameof(HasConnectionError));
     }
-    private double? DisplayDelay => ConnectionState == VpnConnectionState.Connected && activeProbeFailures == 0
+    internal double? DisplayDelay => ConnectionState == VpnConnectionState.Connected && activeProbeFailures == 0
         ? probe is IActiveTunnelProbe ? activeDelayMilliseconds : activeDelayMilliseconds ?? engine?.Status.DelayMilliseconds
         : null;
     public string ConnectionHint => DisplayDelay is { } delay
@@ -390,21 +390,13 @@ public sealed partial class MainViewModel : ViewModelBase
     public string AppVersion => UserSettings.Version;
     private static bool IsLightTheme => Avalonia.Application.Current?.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light;
     public IBrush PowerBrush => new SolidColorBrush(Color.Parse(IsLightTheme ? "#E9DFFA" : "#292039"));
-    internal VpnConnectionState DisplayConnectionState => IsSubscriptionExhausted ? VpnConnectionState.Error
-        : (ConnectionState == VpnConnectionState.Connected && (activeProbeFailures > 0 || TunnelUnconfirmed)
-            || ConnectionState == VpnConnectionState.Disconnected && IsConnecting)
-            ? VpnConnectionState.Connecting : ConnectionState;
+    internal VpnConnectionState DisplayConnectionState => ConnectionPalette.DisplayState(ConnectionState,
+        IsSubscriptionExhausted, activeProbeFailures > 0 || TunnelUnconfirmed, IsConnecting);
     public IBrush PowerBorderBrush => new SolidColorBrush(ConnectionPalette.AccentFor(DisplayConnectionState));
     public IBrush PowerGlowBrush => DisplayConnectionState == VpnConnectionState.Disconnected
         ? new SolidColorBrush(Color.Parse("#18000000"))
         : new SolidColorBrush(ConnectionPalette.AccentFor(DisplayConnectionState), .25);
-    public IBrush ConnectionStateBrush => new SolidColorBrush(Color.Parse(DisplayConnectionState switch
-    {
-        VpnConnectionState.Connected => IsLightTheme ? "#16804A" : "#66E491",
-        VpnConnectionState.Error => IsLightTheme ? "#C83243" : "#FF7783",
-        VpnConnectionState.Disconnected => IsLightTheme ? "#684096" : "#C9B9FF",
-        _ => IsLightTheme ? "#805600" : "#F1C453"
-    }));
+    public IBrush ConnectionStateBrush => new SolidColorBrush(ConnectionPalette.ForegroundFor(DisplayConnectionState, IsLightTheme));
 
     private void NotifyConnectionPresentation()
     {

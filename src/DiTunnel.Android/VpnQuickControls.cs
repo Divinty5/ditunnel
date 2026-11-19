@@ -2,6 +2,7 @@ using Android.App;
 using Android.Content;
 using Android.OS;
 using DiTunnel.App;
+using DiTunnel.App.ViewModels;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 using DiTunnel.Platform.Android;
@@ -27,37 +28,69 @@ internal static class VpnQuickControls
     private static readonly object LatencyGate = new();
     private static CancellationTokenSource? latencyCancellation;
     private static string? latencyProfileKey;
-    private sealed record LatencyReading(string ProfileKey, double Milliseconds);
+    private static DateTimeOffset? latencyConnectedAt;
+    private sealed record LatencyReading(string ProfileKey, DateTimeOffset? ConnectedAt, double? Milliseconds);
     private static LatencyReading? latencyReading;
+    internal sealed record Presentation(VpnConnectionState State, VpnConnectionState DisplayState, double? Delay);
+    private static Presentation? appPresentation;
     private static WakeReceiver? wakeReceiver;
-    public static double? LatencyMilliseconds => Status.State == VpnConnectionState.Connected &&
-        engine.ActiveProfile is { } profile && Volatile.Read(ref latencyReading) is { } reading && reading.ProfileKey == Key(profile)
-            ? reading.Milliseconds : null;
+    private static readonly Handler RefreshHandler = new(Looper.MainLooper!);
+    private static int refreshQueued;
+
+    internal static void FollowPresentation(MainViewModel model)
+    {
+        void Update()
+        {
+            var snapshot = new Presentation(model.ConnectionState, model.DisplayConnectionState,
+                model.DisplayConnectionState == VpnConnectionState.Connected ? model.DisplayDelay : null);
+            if (Interlocked.Exchange(ref appPresentation, snapshot) != snapshot) Refresh();
+        }
+        model.PropertyChanged += (_, change) =>
+        {
+            if (change.PropertyName is nameof(MainViewModel.DisplayConnectionState) or nameof(MainViewModel.ConnectionHint)) Update();
+        };
+        Update();
+    }
+
+    internal static Presentation GetPresentation(VpnStatus current, bool subscriptionExhausted)
+    {
+        if (Volatile.Read(ref appPresentation) is { } app && app.State == current.State) return app;
+
+        double? delay = current.State == VpnConnectionState.Connected
+            ? current.Probe is { } check ? check.Milliseconds : current.DelayMilliseconds : null;
+        if (current.State == VpnConnectionState.Connected && engine.ActiveProfile is { } profile &&
+            Volatile.Read(ref latencyReading) is { } reading && reading.ProfileKey == Key(profile) && reading.ConnectedAt == current.ConnectedAt)
+            delay = reading.Milliseconds;
+        var state = ConnectionPalette.DisplayState(current.State, subscriptionExhausted, checking: delay is null);
+        return new(current.State, state, state == VpnConnectionState.Connected ? delay : null);
+    }
 
     public static void EnsureLatencyMonitoring()
     {
         lock (LatencyGate)
         {
-            var profile = Status.State == VpnConnectionState.Connected ? engine.ActiveProfile : null;
+            var status = Status;
+            var profile = Volatile.Read(ref appPresentation) is null && status.State == VpnConnectionState.Connected ? engine.ActiveProfile : null;
             var key = profile is null ? null : Key(profile);
-            if (key is not null && key == latencyProfileKey && latencyCancellation is not null) return;
+            if (key is not null && key == latencyProfileKey && latencyConnectedAt == status.ConnectedAt && latencyCancellation is not null) return;
             latencyCancellation?.Cancel();
             latencyCancellation?.Dispose();
             latencyCancellation = null;
             latencyProfileKey = key;
+            latencyConnectedAt = status.ConnectedAt;
             Volatile.Write(ref latencyReading, null);
-            if (key is null || !VpnWidgets.HasLargeWidgets(context)) return;
+            if (key is null || !VpnWidgets.HasWidgets(context)) return;
             latencyCancellation = new CancellationTokenSource();
-            _ = MeasureLatencyAsync(key, latencyCancellation.Token);
+            _ = MeasureLatencyAsync(key, status.ConnectedAt, latencyCancellation.Token);
         }
     }
-    private static async Task MeasureLatencyAsync(string key, CancellationToken cancellationToken)
+    private static async Task MeasureLatencyAsync(string key, DateTimeOffset? connectedAt, CancellationToken cancellationToken)
     {
         try
         {
             await Task.Delay(1000, cancellationToken);
             var probe = new AndroidServerProbe(context);
-            while (!cancellationToken.IsCancellationRequested && VpnWidgets.HasLargeWidgets(context))
+            while (!cancellationToken.IsCancellationRequested && VpnWidgets.HasWidgets(context))
             {
                 ServerProbeResult result;
                 try { result = await probe.ProbeActiveTunnelAsync(cancellationToken); }
@@ -69,9 +102,9 @@ internal static class VpnQuickControls
                 cancellationToken.ThrowIfCancellationRequested();
                 lock (LatencyGate)
                 {
-                    if (latencyCancellation?.Token != cancellationToken || Status.State != VpnConnectionState.Connected ||
+                    if (latencyCancellation?.Token != cancellationToken || Status is not { State: VpnConnectionState.Connected } status || status.ConnectedAt != connectedAt ||
                         engine.ActiveProfile is not { } profile || Key(profile) != key) return;
-                    Volatile.Write(ref latencyReading, result.Milliseconds is { } delay ? new LatencyReading(key, delay) : null);
+                    Volatile.Write(ref latencyReading, new LatencyReading(key, connectedAt, result.Milliseconds));
                 }
                 Refresh();
                 await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
@@ -100,7 +133,8 @@ internal static class VpnQuickControls
     internal static bool SubscriptionExhausted => engine.ActiveProfile is { } active
         && (Profiles().FirstOrDefault(p => p.Content == active.Content && p.SourceId == active.SourceId)?.Usage
             ?? Profiles().FirstOrDefault(p => p.SourceId == active.SourceId)?.Usage ?? active.Usage)?.IsExhausted(DateTimeOffset.UtcNow) == true;
-    public static string StatusText => SubscriptionExhausted ? L.T("Подписка исчерпана") : L.T(Status.State switch
+    public static string StatusText => StatusTextFor(Status.State, SubscriptionExhausted);
+    internal static string StatusTextFor(VpnConnectionState state, bool subscriptionExhausted) => subscriptionExhausted ? L.T("Подписка исчерпана") : L.T(state switch
     {
         VpnConnectionState.Connecting => "Подключаем VPN…",
         VpnConnectionState.Disconnecting => "Отключаем VPN…",
@@ -115,12 +149,7 @@ internal static class VpnQuickControls
     {
         context = owner; engine = vpnEngine; store = profileStore;
         selectedKey = owner.GetSharedPreferences("ditunnel_controls", FileCreationMode.Private)?.GetString("selected", null);
-        engine.StatusChanged += (_, _) =>
-        {
-            try { EnsureLatencyMonitoring(); }
-            catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelWidgetLatency", error.GetType().Name); }
-            Refresh();
-        };
+        engine.StatusChanged += (_, _) => Refresh();
         UserSettings.ThemeChanged += Refresh;
         AndroidProfileStore.ProfilesChanged += () => { profiles = null; Refresh(); };
         L.Changed += () =>
@@ -202,6 +231,13 @@ internal static class VpnQuickControls
         global::Android.Widget.Toast.MakeText(context, L.T(text), global::Android.Widget.ToastLength.Long)?.Show());
     public static void Refresh()
     {
+        // Engine callbacks, probes and the activity can all request a refresh.
+        if (Interlocked.Exchange(ref refreshQueued, 1) == 0) RefreshHandler.Post(RefreshOnMainThread);
+    }
+
+    private static void RefreshOnMainThread()
+    {
+        Interlocked.Exchange(ref refreshQueued, 0);
         engine.RefreshRuntimeState();
         try { Refreshed?.Invoke(); }
         catch (Exception error) { global::Android.Util.Log.Warn("DiTunnelControls", error.GetType().Name); }

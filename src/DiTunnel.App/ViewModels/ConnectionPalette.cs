@@ -5,6 +5,21 @@ namespace DiTunnel.App.ViewModels;
 
 internal static class ConnectionPalette
 {
+    public static VpnConnectionState DisplayState(VpnConnectionState state, bool subscriptionExhausted, bool checking, bool starting = false)
+    {
+        if (subscriptionExhausted) return VpnConnectionState.Error;
+        return (state == VpnConnectionState.Connected && checking) || (state == VpnConnectionState.Disconnected && starting)
+            ? VpnConnectionState.Connecting : state;
+    }
+
+    public static Color ForegroundFor(VpnConnectionState state, bool light) => Color.Parse(state switch
+    {
+        VpnConnectionState.Connected => light ? "#16804A" : "#66E491",
+        VpnConnectionState.Error => light ? "#C83243" : "#FF7783",
+        VpnConnectionState.Disconnected => light ? "#684096" : "#C9B9FF",
+        _ => light ? "#805600" : "#F1C453"
+    });
+
     public static Color AccentFor(VpnConnectionState state) => state switch
     {
         VpnConnectionState.Connected => Color.FromRgb(0x55, 0xD7, 0x84),
