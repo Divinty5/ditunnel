@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -6,6 +7,8 @@ namespace DiTunnel.Core.Profiles;
 public sealed record ImportedProfile(string Name, string Kind, string Content, string SourceId = "legacy", string SourceName = "Ранее импортированные", string? SourceUrl = null, SubscriptionUsage? Usage = null)
 {
     public string? ProtocolVersion { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayName => SourceUrl is null ? Name : ProfileParser.RemoveGeneratedHysteriaSuffix(this, SourceName);
     [System.Text.Json.Serialization.JsonIgnore]
     public string ProtocolName
     {
@@ -27,6 +30,30 @@ public sealed record VmessProfileConfiguration(string Host, ushort Port, string 
 public static class ProfileParser
 {
     public const int MaximumBytes = 2 * 1024 * 1024;
+
+    internal static string RemoveGeneratedHysteriaSuffix(ImportedProfile profile, string? subscriptionName)
+    {
+        const string prefix = "HY2-Salamander-";
+        if (profile.Kind != "Hysteria 2" || !profile.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || !Uri.TryCreate(profile.Content, UriKind.Absolute, out var uri) || uri.Scheme is not ("hy2" or "hysteria2"))
+            return profile.Name;
+        var port = (uri.IsDefaultPort ? 443 : uri.Port).ToString(CultureInfo.InvariantCulture);
+        var titleLength = prefix.Length + port.Length;
+        if (!profile.Name.AsSpan(prefix.Length).StartsWith(port, StringComparison.Ordinal)
+            || profile.Name.Length <= titleLength || profile.Name[titleLength] is not ('-' or ' ' or '|' or '｜' or '·'))
+            return profile.Name;
+
+        var suffix = profile.Name[titleLength..].TrimStart('-', ' ', '|', '｜', '·').Replace('_', '-');
+        var appendedSubscription = suffix.Equals(subscriptionName?.Trim().Replace('_', '-'), StringComparison.OrdinalIgnoreCase);
+        var usesSalamander = uri.Query.TrimStart('?').Split('&').Any(field =>
+        {
+            var pair = field.Split('=', 2);
+            return pair.Length == 2 && Uri.UnescapeDataString(pair[0]).Equals("obfs", StringComparison.OrdinalIgnoreCase)
+                && Uri.UnescapeDataString(pair[1]).Equals("salamander", StringComparison.OrdinalIgnoreCase);
+        });
+        return appendedSubscription || usesSalamander ? profile.Name[..titleLength] : profile.Name;
+    }
+
     public static IReadOnlyList<ImportedProfile> Parse(string input) => Parse(input, out _);
 
     public static IReadOnlyList<ImportedProfile> Parse(string input, out int skippedEntries)
@@ -256,9 +283,10 @@ public sealed class ProfileImporter
         var usage = response.Headers.TryGetValues("Subscription-Userinfo", out var headers) ? SubscriptionUsage.Parse(string.Join(";", headers)) : null;
         var profiles = ProfileParser.Parse(Encoding.UTF8.GetString(buffer.ToArray()), out var skippedEntries);
         SkippedEntries = skippedEntries;
-        var identity = ReadSubscriptionIdentity(response, string.IsNullOrWhiteSpace(subscriptionName) && uri.Fragment.Length > 1
-            ? Uri.UnescapeDataString(uri.Fragment[1..]) : subscriptionName);
-        return profiles.Select(p => p with { Usage = usage, Name = RemoveClientSuffix(p, identity) }).ToArray();
+        if (string.IsNullOrWhiteSpace(subscriptionName) && uri.Fragment.Length > 1)
+            subscriptionName = Uri.UnescapeDataString(uri.Fragment[1..]);
+        var identity = ReadSubscriptionIdentity(response, subscriptionName);
+        return profiles.Select(p => p with { Usage = usage, Name = RemoveClientSuffix(p, identity, subscriptionName) }).ToArray();
     }
 
     private static string? ReadSubscriptionIdentity(HttpResponseMessage response, string? subscriptionName)
@@ -282,15 +310,16 @@ public sealed class ProfileImporter
         }
     }
 
-    private static string RemoveClientSuffix(ImportedProfile profile, string? identity)
+    private static string RemoveClientSuffix(ImportedProfile profile, string? identity, string? subscriptionName)
     {
+        var name = ProfileParser.RemoveGeneratedHysteriaSuffix(profile, subscriptionName);
         if (identity is null || profile.Kind is not ("Hysteria 2" or AmneziaWgConfiguration.ProfileKind))
-            return profile.Name;
+            return name;
         var suffix = "-" + identity;
-        var decoration = profile.Name.IndexOfAny(['|', '｜']);
-        var title = (decoration < 0 ? profile.Name.AsSpan() : profile.Name.AsSpan(0, decoration)).TrimEnd();
+        var decoration = name.IndexOfAny(['|', '｜']);
+        var title = (decoration < 0 ? name.AsSpan() : name.AsSpan(0, decoration)).TrimEnd();
         return title.Length > suffix.Length && title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-            ? string.Concat(title[..^suffix.Length], profile.Name.AsSpan(title.Length)) : profile.Name;
+            ? string.Concat(title[..^suffix.Length], name.AsSpan(title.Length)) : name;
     }
 
     private async Task<HttpResponseMessage> GetFollowingRedirectsAsync(Uri initial, CancellationToken cancellationToken)

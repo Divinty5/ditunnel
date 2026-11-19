@@ -144,6 +144,41 @@ public sealed class SubscriptionDownloadTests
         Assert.Equal(hysteria, profiles[1].Content);
     }
 
+    [Theory]
+    [InlineData("HY2-Salamander-443-Other-Client", "HY2-Salamander-443")]
+    [InlineData("HY2-Salamander-443 | Other Client", "HY2-Salamander-443")]
+    [InlineData("HY2-Salamander-4430-Custom", "HY2-Salamander-4430-Custom")]
+    [InlineData("My Salamander server", "My Salamander server")]
+    public async Task FormatsGeneratedSalamanderTitlesOnImportAndForStoredSubscriptionProfiles(string name, string expected)
+    {
+        var link = "hy2://synthetic@example.test:443?obfs=salamander&obfs-password=synthetic#" + Uri.EscapeDataString(name);
+        using var client = new HttpClient(new Responses(_ => new(HttpStatusCode.OK) { Content = new StringContent(link) }));
+        var profile = Assert.Single(await new ProfileImporter(client).ImportAsync("https://example.test/sub"));
+        Assert.Equal(expected, profile.Name);
+        Assert.Equal(link, profile.Content);
+
+        var stored = profile with { Name = name, SourceUrl = "https://example.test/sub" };
+        Assert.Equal(expected, stored.DisplayName);
+        Assert.Equal(name, (stored with { SourceUrl = null }).DisplayName);
+    }
+
+    [Theory]
+    [InlineData("?sni=example.test", "Di-Tunnel_Android")]
+    [InlineData("?obfs=sala%6Dander&obfs-password=synthetic", "Another subscription")]
+    public async Task DropsGeneratedAndroidSubscriptionSuffix(string query, string subscriptionName)
+    {
+        const string original = "HY2-Salamander-443-Di-Tunnel-Android";
+        const string expected = "HY2-Salamander-443";
+        const string subscriptionUrl = "https://example.test/sub";
+        var link = $"hysteria2://synthetic@example.test:443{query}#{original}";
+        using var client = new HttpClient(new Responses(_ => new(HttpStatusCode.OK) { Content = new StringContent(link) }));
+
+        var profile = Assert.Single(await new ProfileImporter(client).ImportAsync(subscriptionUrl, subscriptionName: subscriptionName));
+        Assert.Equal(expected, profile.Name);
+        Assert.Equal(link, profile.Content);
+        Assert.Equal(expected, (profile with { Name = original, SourceUrl = subscriptionUrl, SourceName = subscriptionName }).DisplayName);
+    }
+
     [Fact]
     public async Task MalformedAwgResponseReportsAConfigurationError()
     {

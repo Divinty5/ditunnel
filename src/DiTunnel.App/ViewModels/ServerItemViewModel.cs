@@ -18,7 +18,7 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     private static string DisplayName(ImportedProfile profile)
     {
         const string awg = AmneziaWgConfiguration.ProfileKind;
-        if (!profile.Kind.Equals(awg, StringComparison.OrdinalIgnoreCase)) return profile.Name;
+        if (!profile.Kind.Equals(awg, StringComparison.OrdinalIgnoreCase)) return profile.DisplayName;
 
         var name = IpLiteral().Replace(profile.Name, match =>
             IPAddress.TryParse(match.Groups["address"].ValueSpan, out _) ? "…" : match.Value);
