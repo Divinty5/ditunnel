@@ -17,9 +17,20 @@ public sealed class AndroidProbePolicyTests
     {
         var result = AndroidProbePolicy.ServiceFailure(timeout ? new TimeoutException() : new InvalidOperationException(), 12);
         Assert.True(result.IsDeferred);
-        Assert.Equal("Проверка не завершена", result.Message);
+        Assert.Equal(timeout ? "Служба проверки · Тайм-аут" : "Служба проверки · Ошибка запуска", result.Message);
         Assert.Equal("Служба проверки", result.Diagnostics!.Stage);
         Assert.Equal(timeout ? "Timeout" : "Runtime", result.Diagnostics.ErrorType);
+        Assert.False(result.Diagnostics.ProfileConfirmed);
+    }
+
+    [Fact]
+    public void DisconnectedServicePreservesTheCauseAndDoesNotMarkTheProfileUnavailable()
+    {
+        var result = AndroidProbePolicy.ServiceFailure(new AndroidProbeException("Служба проверки", "ServiceStopped"), 32);
+        Assert.True(result.IsDeferred);
+        Assert.Equal("Служба проверки · Связь со службой потеряна", result.Message);
+        Assert.Contains("Метод: HTTPS\nЭтап: Служба проверки\nДлительность: 32 мс\nТип ошибки: ServiceStopped",
+            result.Diagnostics!.ToDisplayString());
     }
 
     [Theory]
@@ -43,7 +54,7 @@ public sealed class AndroidProbePolicyTests
         var check = await AndroidProbePolicy.CheckHttpsAsync((_, _) => Task.FromException(new InvalidOperationException()), default);
         var result = AndroidProbePolicy.ActiveTunnelResult(check);
         Assert.True(result.IsDeferred);
-        Assert.Equal("Проверка не завершена", result.Message);
+        Assert.Equal("HTTPS · Ошибка проверки", result.Message);
         Assert.Equal("Internal", result.Diagnostics!.ErrorType);
     }
 

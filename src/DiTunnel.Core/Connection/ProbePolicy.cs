@@ -24,8 +24,8 @@ public static class ProbePolicy
     public static ServerProbeResult ActiveTunnelDeferred(string platform) => new(null,
         "Проверка через туннель недоступна", IsDeferred: true,
         Diagnostics: new("HTTPS", "TUN", "Unconfirmed", 0, false, VersionFor(platform), Platform: platform));
-    public static ServerProbeResult Incomplete(ServerProbeResult result) =>
-        result with { Message = "Проверка не завершена", IsDeferred = true };
+    public static ServerProbeResult NetworkUnavailable(string method, double milliseconds, string platform) =>
+        Failure(new ProbeFailureException("Сеть", "Offline"), "Сеть", method, milliseconds, platform);
     public static string VersionFor(string platform) => typeof(ProbePolicy).Assembly
         .GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(item => item.Key == platform + "Version")?.Value ?? "unknown";
 
@@ -42,7 +42,7 @@ public static class ProbePolicy
         if (stage is "Профиль" or "Profile" && error is InvalidOperationException) kind = "Configuration";
         if (stage is "AmneziaWG" or "Xray" && kind == "Internal") kind = "Runtime";
         var attempts = (error as ProbeFailureException)?.Diagnostics?.Attempts ?? "";
-        return new(null, ShortFailure(kind, stage),
+        return new(null, ShortFailure(kind, stage), IsDeferred: kind == "Offline",
             Diagnostics: new(method, stage, kind, milliseconds, false, VersionFor(platform), attempts, platform));
     }
 
@@ -57,6 +57,8 @@ public static class ProbePolicy
             "ControlService" => "Ошибка контрольного сайта",
             "Configuration" => "Ошибка конфигурации",
             "Runtime" => "Ошибка запуска",
+            "Offline" => "Нет подключения к интернету",
+            "ServiceStopped" => "Связь со службой потеряна",
             _ => "Ошибка проверки"
         };
         var label = stage switch
@@ -81,6 +83,7 @@ public static class ProbePolicy
         for (Exception? current = error; current is not null; current = current.InnerException)
         {
             if (current is ProbeFailureException known) return known.ErrorType;
+            if (current is SocketException { SocketErrorCode: SocketError.NetworkDown }) return "Offline";
             if (current is AuthenticationException || current.GetType().Name.Contains("SSL", StringComparison.Ordinal)) return "Tls";
             if (current is TimeoutException or OperationCanceledException or SocketException { SocketErrorCode: SocketError.TimedOut }
                 || current.GetType().Name == "SocketTimeoutException") return "Timeout";
@@ -169,7 +172,8 @@ public static class ProbePolicy
         // Both real request implementations honour cancellation and close their sockets.
         var attempts = await Task.WhenAll(primary, fallback);
         cancellationToken.ThrowIfCancellationRequested();
-        winner ??= attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType is "Tls" or "Dns" or "ControlService")
+        winner ??= attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType == "Offline")
+            ?? attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType is "Tls" or "Dns" or "ControlService")
             ?? attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType == "Timeout")
             ?? attempts.FirstOrDefault(item => item.Diagnostics!.ErrorType == "Connection")
             ?? attempts[0];

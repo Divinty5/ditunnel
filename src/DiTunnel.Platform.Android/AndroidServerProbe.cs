@@ -16,11 +16,11 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
         => (await ProbeManyAsync([profile], cancellationToken, mode))[0];
 
     public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast)
-        => ProbeManyCoreAsync(profiles, null, cancellationToken, mode);
+        => Task.Run(() => ProbeManyCoreAsync(profiles, null, cancellationToken, mode), cancellationToken);
 
     public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
         IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode)
-        => ProbeManyCoreAsync(profiles, progress, cancellationToken, mode);
+        => Task.Run(() => ProbeManyCoreAsync(profiles, progress, cancellationToken, mode), cancellationToken);
 
     private async Task<IReadOnlyList<ServerProbeResult>> ProbeManyCoreAsync(IReadOnlyList<ImportedProfile> profiles,
         IProgress<(int Index, ServerProbeResult Result)>? progress, CancellationToken cancellationToken, ServerProbeMode mode)
@@ -37,6 +37,13 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
             await XrayProbeGate.WaitAsync(cancellationToken);
             try
             {
+                if (mode == ServerProbeMode.Https && IsOffline())
+                {
+                    var offline = ProbePolicy.NetworkUnavailable("HTTPS", 0, "Android");
+                    for (var index = 0; index < profiles.Count; index++) Complete(index, offline);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return results.Select(result => result!).ToArray();
+                }
                 var configurations = new XrayProfileConfiguration?[profiles.Count];
                 for (var index = 0; index < profiles.Count; index++)
                 {
@@ -101,9 +108,8 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
             try
             {
                 var configuration = AmneziaWgProfileConverter.Convert(profile);
-                var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager;
-                var network = manager is null ? null : AndroidXrayProbeRunner.FindPhysicalNetwork(manager);
-                if (network is null) throw new AndroidProbeException("Подключение к серверу", "Connection");
+                var network = PhysicalNetwork();
+                if (network is null) return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
                 stage = "DNS сервера";
                 var addresses = await Task.Run(() => network.GetAllByName(configuration.ServerHost), timeout.Token)
                     .WaitAsync(TimeSpan.FromSeconds(8), timeout.Token);
@@ -117,10 +123,17 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
                 // An authenticated handshake alone does not verify HTTPS/data forwarding.
                 stage = "HTTPS";
                 var result = await bridge.ProbeHttpsAsync(timeout.Token);
+                if (result.Milliseconds is null && IsOffline())
+                    return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
                 return result with { Diagnostics = result.Diagnostics! with { DurationMilliseconds = watch.Elapsed.TotalMilliseconds } };
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception error) { return AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds); }
+            catch (Exception error)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return stage != "Профиль" && IsOffline() ? ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android")
+                    : AndroidProbePolicy.Failure(error, stage, "HTTPS", watch.Elapsed.TotalMilliseconds);
+            }
         }
         return mode == ServerProbeMode.Https
             ? await AndroidProbePolicy.RetryTimeoutAsync(() => ProbeActiveTunnelAsync(cancellationToken))
@@ -130,9 +143,12 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
     // Bind explicitly to the VPN Network; widget latency must never use a physical network fallback.
     public async Task<ServerProbeResult> ProbeActiveTunnelAsync(CancellationToken cancellationToken = default)
     {
+        var watch = Stopwatch.StartNew();
         Network? network = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (IsOffline()) return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
             var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager;
             // The STARTED broadcast may precede the system's VPN Network registration.
             for (var attempt = 0; attempt < 6 && network is null; attempt++)
@@ -174,6 +190,8 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
             catch (Exception) when (token.IsCancellationRequested) { throw new OperationCanceledException(token); }
             finally { Disconnect(); }
         }, token), cancellationToken, ProbePolicy.ActiveHttpsAttemptBudget);
+        if (result.Milliseconds is null && IsOffline())
+            return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
         return AndroidProbePolicy.ActiveTunnelResult(result);
     }
 
@@ -190,16 +208,14 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
         {
             var milliseconds = MeasureTcp(configuration.ServerHost, configuration.ServerPort, timeout);
             return AndroidProbePolicy.Success(milliseconds, "TCP", "Подключение к серверу", false);
-        }, timeout), error => AndroidProbePolicy.Failure(timeout.IsCancellationRequested ? new TimeoutException() : error,
-            "Подключение к серверу", "TCP", watch.Elapsed.TotalMilliseconds), caller);
+        }, timeout), error => IsOffline() ? ProbePolicy.NetworkUnavailable("TCP", watch.Elapsed.TotalMilliseconds, "Android")
+            : AndroidProbePolicy.Failure(timeout.IsCancellationRequested ? new TimeoutException() : error,
+                "Подключение к серверу", "TCP", watch.Elapsed.TotalMilliseconds), caller);
     }
 
     private double MeasureTcp(string host, int port, CancellationToken cancellationToken)
     {
-        var manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager
-            ?? throw new InvalidOperationException("Сетевой сервис Android недоступен.");
-        var network = AndroidXrayProbeRunner.FindPhysicalNetwork(manager)
-            ?? throw new InvalidOperationException("Нет доступной физической сети.");
+        var network = PhysicalNetwork() ?? throw new AndroidProbeException("Сеть", "Offline");
         using var socket = network.SocketFactory?.CreateSocket()
             ?? throw new InvalidOperationException("Android не создал сетевой сокет.");
         using var registration = cancellationToken.Register(socket.Close);
@@ -215,5 +231,15 @@ public sealed class AndroidServerProbe(Context context) : IProgressiveServerProb
         if (address is null) throw new AndroidProbeException("DNS сервера", "Dns");
         socket.Connect(new Java.Net.InetSocketAddress(address, port), 8000);
         return watch.Elapsed.TotalMilliseconds;
+    }
+
+    private Network? PhysicalNetwork() => context.GetSystemService(Context.ConnectivityService) is ConnectivityManager manager
+        ? AndroidXrayProbeRunner.FindPhysicalNetwork(manager)
+        : throw new AndroidProbeException("Служба проверки", "Runtime");
+
+    private bool IsOffline()
+    {
+        try { return AndroidXrayProbeRunner.IsOffline(context.GetSystemService(Context.ConnectivityService) as ConnectivityManager); }
+        catch (Java.Lang.Exception) { return false; }
     }
 }

@@ -424,7 +424,9 @@ public sealed partial class MainViewModel : ViewModelBase
             var isActive = active is not null && SameProfile(row.Profile, active);
             row.ActiveConnectionBrush = isActive ? brush : null;
             var wasUnavailable = row.IsUnavailable;
-            row.ActiveProbeResult = probeSnapshots.GetValueOrDefault(ProfileKey(row.Profile))?.ConnectionResult;
+            var snapshot = probeSnapshots.GetValueOrDefault(ProfileKey(row.Profile));
+            row.ConnectionAttemptFailed = snapshot?.ConnectionAttemptFailed == true;
+            row.ActiveProbeResult = snapshot?.ConnectionResult;
             unavailableChanged |= wasUnavailable != row.IsUnavailable;
         }
         if (unavailableChanged)
@@ -498,6 +500,8 @@ public sealed partial class MainViewModel : ViewModelBase
                 Notice = engine?.Status.Message ?? "VPN подключён.";
             }
             else if (SelectedProfile is not null) Notice = "Выберите профиль и сервер для подключения.";
+            if (engine?.Status is { State: VpnConnectionState.Error, Probe: not null } failed)
+                ApplyEngineStatus(failed, engine.ActiveProfile);
         }
         catch (ProfileStoreUnavailableException error) { Notice = error.Message; storageAvailable = false; }
         catch { Notice = "Не удалось прочитать сохранённые профили. Исходный файл не изменён."; storageAvailable = false; }
@@ -554,11 +558,11 @@ public sealed partial class MainViewModel : ViewModelBase
                 activeTunnelConfirmed = false;
                 activeDelayMilliseconds = null;
             }
-            if (status.Probe is { IsDeferred: false } check && statusChanged)
+            if (status.Probe is { } check && statusChanged)
             {
                 activeTunnelConfirmed = check.Diagnostics?.ProfileConfirmed == true;
                 activeDelayMilliseconds = check.Milliseconds;
-                if (server is not null) RememberConnectionProbe(server.Profile, check);
+                if (server is not null) RememberConnectionProbe(server.Profile, check, connectionAttempt: true);
             }
             else if (status.Probe is null && status.DelayMilliseconds is { } delay && (probe is not IActiveTunnelProbe ||
                 androidVerificationChanged || newSession && Platform.ReleaseTarget == ReleaseTarget.AndroidArm64))
@@ -578,8 +582,12 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         else if (status.State == VpnConnectionState.Disconnected) activeProfile = null;
         else if (statusChanged && status.State is (VpnConnectionState.Error or VpnConnectionState.Reconnecting) &&
-                 status.Probe is { IsDeferred: false } failure && (running ?? connectingProfile?.Profile) is { } target)
-            RememberConnectionProbe(target, failure);
+                 status.Probe is { } failure && (running ?? connectingProfile?.Profile) is { } target)
+        {
+            RememberConnectionProbe(target, failure, connectionAttempt: true);
+            if (status.State == VpnConnectionState.Error && connectingProfile is null)
+                activeProfile = Profiles.FirstOrDefault(row => SameProfile(row.Profile, target)) ?? new ServerItemViewModel(target);
+        }
         if (newSession && ConnectionState == status.State) StartActiveLatencyChecks();
         ConnectionState = status.State;
         // Connected -> Connected and external widget switches also need to invalidate
@@ -605,7 +613,9 @@ public sealed partial class MainViewModel : ViewModelBase
 
     private void SetConnectionExceptionNotice(Exception error)
     {
-        if (noticeDiagnostics is null || Notice != error.Message.Split('\n', 2)[0])
+        if (error is ProbeFailureException { Diagnostics: { } diagnostics })
+            SetOperationNotice(error.Message, diagnostics);
+        else if (noticeDiagnostics is null || Notice != error.Message.Split('\n', 2)[0])
             SetOperationNotice(error.Message);
     }
 
@@ -1185,9 +1195,18 @@ public sealed partial class MainViewModel : ViewModelBase
             SetOperationNotice(servers.Length == 1 ? $"Проверяем сервер {servers[0].Name}…" : $"Проверяем серверы: {servers.Length}…");
             var results = await ProbeServersAsync(servers, probeCancellation.Token);
             SortProfilesByProbe();
+            if (all && results[0].IsDeferred && results.All(result => result.IsDeferred && result.Message == results[0].Message))
+            {
+                SetOperationNotice(results[0].Message, results[0].Diagnostics);
+                return;
+            }
             var changed = all && IsLowestMode && await SelectLowestProfileAsync();
             if (!changed && all)
-                Notice = $"Проверены: {servers.Length}. Ответили: {results.Count(result => result.Milliseconds is not null)}. Ошибки: {results.Count(result => !result.IsDeferred && result.Milliseconds is null)}.";
+            {
+                var deferred = results.Count(result => result.IsDeferred);
+                Notice = $"Проверены: {results.Length - deferred}. Ответили: {results.Count(result => result.Milliseconds is not null)}. Ошибки: {results.Count(result => !result.IsDeferred && result.Milliseconds is null)}."
+                    + (deferred > 0 ? $" Пропущены: {deferred}." : "");
+            }
             else if (!changed) SetOperationNotice($"{servers[0].Name}: {results[0].Message}.", results[0].Diagnostics);
         }
         catch (OperationCanceledException) { SetOperationNotice("Проверка отменена."); }
@@ -1210,7 +1229,8 @@ public sealed partial class MainViewModel : ViewModelBase
                 Milliseconds = result.Milliseconds,
                 TimedOut = timedOut,
                 Diagnostics = result.Diagnostics,
-                ConnectionResult = null
+                ConnectionResult = null,
+                ConnectionAttemptFailed = false
             };
         pendingProbes.Remove(key);
         var visible = Profiles.FirstOrDefault(candidate => ProfileKey(candidate.Profile) == key) ?? server;
@@ -1219,6 +1239,7 @@ public sealed partial class MainViewModel : ViewModelBase
         visible.ProbeTimedOut = timedOut;
         visible.IsProbeUnconfirmed = result.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
         visible.IsProbePending = false;
+        visible.ConnectionAttemptFailed = false;
         visible.ActiveProbeResult = null;
         if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } active && SameProfile(visible.Profile, active.Profile) && probe is not IActiveTunnelProbe &&
             Platform.ReleaseTarget != ReleaseTarget.AndroidArm64)
@@ -1273,15 +1294,23 @@ public sealed partial class MainViewModel : ViewModelBase
             : new ProbeSnapshot(row.ProbeText, row.ProbeMilliseconds, row.ProbeTimedOut, row.CountryCode);
     }
 
-    private void RememberConnectionProbe(ImportedProfile profile, ServerProbeResult result)
+    private void RememberConnectionProbe(ImportedProfile profile, ServerProbeResult result, bool connectionAttempt = false)
     {
         var key = ProfileKey(profile);
         if (allProfiles.Any(candidate => SameProfile(candidate, profile)))
-            probeSnapshots[key] = GetSnapshot(profile) with { ConnectionResult = result };
+        {
+            var snapshot = GetSnapshot(profile);
+            probeSnapshots[key] = snapshot with
+            {
+                ConnectionResult = result,
+                ConnectionAttemptFailed = result.Milliseconds is null && !result.IsDeferred &&
+                    result.Diagnostics?.ErrorType != "ControlService" && (connectionAttempt || snapshot.ConnectionAttemptFailed)
+            };
+        }
     }
 
     private sealed record ProbeSnapshot(string Text, double? Milliseconds, bool TimedOut, string? CountryCode,
-        ProbeDiagnostics? Diagnostics = null, ServerProbeResult? ConnectionResult = null);
+        ProbeDiagnostics? Diagnostics = null, ServerProbeResult? ConnectionResult = null, bool ConnectionAttemptFailed = false);
 
     private void ClearPendingProbes()
     {
@@ -1313,6 +1342,7 @@ public sealed partial class MainViewModel : ViewModelBase
         if (probe is IProgressiveServerProbe progressive)
         {
             var completed = new bool[servers.Length];
+            var progressGate = new object();
             var receivingProgress = true;
             void Apply(int index, ServerProbeResult result)
             {
@@ -1323,11 +1353,12 @@ public sealed partial class MainViewModel : ViewModelBase
             }
             var progress = new Progress<(int Index, ServerProbeResult Result)>(item =>
             {
-                if (receivingProgress) Apply(item.Index, item.Result);
+                lock (progressGate)
+                    if (receivingProgress) Apply(item.Index, item.Result);
             });
             IReadOnlyList<ServerProbeResult> progressiveResults;
             try { progressiveResults = await progressive.ProbeManyAsync(servers.Select(server => server.Profile).ToArray(), progress, cancellationToken, mode); }
-            finally { receivingProgress = false; }
+            finally { lock (progressGate) receivingProgress = false; }
             cancellationToken.ThrowIfCancellationRequested();
             if (progressiveResults.Count != servers.Length) throw new InvalidOperationException("Проверка вернула неполный результат.");
             for (var index = 0; index < progressiveResults.Count; index++) Apply(index, progressiveResults[index]);
@@ -1432,8 +1463,18 @@ public sealed partial class MainViewModel : ViewModelBase
             if (result.IsDeferred)
             {
                 activeTransportFailures = 0;
-                if (!IsBusy && !activeTunnelConfirmed && result.Diagnostics is not null &&
-                    GetSnapshot(server.Profile).ConnectionResult is null)
+                var offline = result.Diagnostics?.ErrorType == "Offline";
+                if (!offline &&
+                    (activeTunnelConfirmed || GetSnapshot(server.Profile).ConnectionResult is not null)) return;
+                if (offline)
+                {
+                    activeTunnelConfirmed = false;
+                    activeDelayMilliseconds = null;
+                    NotifyConnectionDelay();
+                }
+                if (tunnel is not null) RememberConnectionProbe(server.Profile, result);
+                NotifyConnectionPresentation();
+                if (!IsBusy && result.Diagnostics is not null)
                 {
                     SetActiveProbeFailures(0);
                     SetOperationNotice("Туннель запущен. " + result.Message, result.Diagnostics);

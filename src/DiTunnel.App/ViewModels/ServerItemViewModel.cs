@@ -58,7 +58,10 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private ServerProbeResult? activeProbeResult;
 
-    internal bool IsUnavailable => ProbeTimedOut && !IsProbePending && ActiveProbeResult?.Milliseconds is null;
+    internal bool ConnectionAttemptFailed { get; set; }
+    internal bool IsUnavailable => !IsProbePending && (ActiveProbeResult is { } connection
+        ? !connection.IsDeferred && connection.Milliseconds is null && (ProbeTimedOut || ConnectionAttemptFailed)
+        : ProbeTimedOut);
     private double? DisplayedProbeMilliseconds => ActiveProbeResult is { } active ? active.Milliseconds : ProbeMilliseconds;
     public string ProbeStatusText => IsProbePending ? "Проверяем…" : ActiveProbeResult?.Message ?? ProbeText;
     public string ProbeDisplayText => IsProbePending || DisplayedProbeMilliseconds is not { } delay
@@ -73,7 +76,8 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     }
     public IBrush ProbeBrush => IsProbePending
         ? LatencyPalette.For(null)
-        : LatencyPalette.For(DisplayedProbeMilliseconds, ActiveProbeResult is { } active ? active.Milliseconds is null : ProbeTimedOut);
+        : LatencyPalette.For(DisplayedProbeMilliseconds, ActiveProbeResult is { } active
+            ? active.Milliseconds is null && !active.IsDeferred : ProbeTimedOut);
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FlagImage))]
     [NotifyPropertyChangedFor(nameof(HasFlag))]

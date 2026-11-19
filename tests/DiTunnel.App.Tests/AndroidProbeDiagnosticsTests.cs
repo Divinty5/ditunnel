@@ -189,6 +189,8 @@ public sealed class AndroidProbeDiagnosticsTests
             var failure = ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 75, platform);
             vm.ApplyEngineStatus(new(state, failure.Message, Probe: failure), active.Profile);
             Assert.Equal("HTTPS · Тайм-аут", active.ProbeDisplayText);
+            Assert.True(vm.CanRemoveUnavailable);
+            Assert.True(active.IsUnavailable);
             Assert.Equal("HTTPS · Тайм-аут", vm.DisplayNotice);
             Assert.StartsWith(vm.DisplayNotice, vm.DiagnosticText);
             Assert.Contains($"Di-Tunnel {platform} ", vm.DiagnosticText);
@@ -202,8 +204,103 @@ public sealed class AndroidProbeDiagnosticsTests
             vm.SelectedGroup = group;
             Assert.Equal("HTTPS · Тайм-аут", vm.Profiles.Single(row => row.Name == "C").ProbeDisplayText);
             Assert.Equal(otherCheck, vm.Profiles.Single(row => row.Name == "A").ProbeDisplayText);
+            var restored = ProbePolicy.Success(22, "HTTPS", "HTTPS", true, platform: platform);
+            vm.ApplyEngineStatus(new(VpnConnectionState.Connected, restored.Message, Probe: restored), active.Profile);
+            Assert.False(vm.Profiles.Single(row => row.Name == "C").IsUnavailable);
         }
         finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task OfflineBatchReportsItsOwnCauseAndOnlineRetryReplacesEveryRow()
+    {
+        var probe = new OfflineBatchProbe();
+        var vm = new MainViewModel(null, new Store(), probe, platform: AppPlatform.Android);
+        try
+        {
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.All(vm.Profiles, row => Assert.Equal("31 мс · HTTPS", row.ProbeDisplayText));
+
+            probe.Offline = true;
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.Equal("Нет подключения к интернету", vm.DisplayNotice);
+            Assert.Contains("Метод: HTTPS\nЭтап: Сеть\nДлительность: 0 мс\nТип ошибки: Offline", vm.DiagnosticText);
+            Assert.DoesNotContain("Тип ошибки: None", vm.DiagnosticText);
+            Assert.All(vm.Profiles, row => Assert.Equal(vm.DisplayNotice, row.ProbeDisplayText));
+            Assert.False(vm.CanRemoveUnavailable);
+
+            probe.Offline = false;
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.All(vm.Profiles, row => Assert.Equal("31 мс · HTTPS", row.ProbeDisplayText));
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class OfflineBatchProbe : IProgressiveServerProbe
+    {
+        public bool Offline { get; set; }
+
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default,
+            ServerProbeMode mode = ServerProbeMode.Fast) => Task.FromResult(Offline
+                ? ProbePolicy.NetworkUnavailable("HTTPS", 0, "Android") : ProbePolicy.Success(31, "HTTPS", "HTTPS", true));
+
+        public async Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            await Task.WhenAll(profiles.Select(profile => ProbeAsync(profile, cancellationToken, mode)));
+
+        public async Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode)
+        {
+            var results = await ProbeManyAsync(profiles, cancellationToken, mode);
+            for (var index = 0; index < results.Count; index++) progress.Report((index, results[index]));
+            return results;
+        }
+    }
+
+    [Fact]
+    public async Task OfflineConnectionReplacesOnlyTheAttemptedProfilesLastLatency()
+    {
+        var vm = new MainViewModel(null, new Store(), new Probe(), platform: AppPlatform.Android);
+        try
+        {
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            var target = vm.Profiles.Single(row => row.Name == "C");
+            var peer = vm.Profiles.Single(row => row.Name == "A");
+            var peerText = peer.ProbeDisplayText;
+            Assert.Equal("80 мс · HTTPS", target.ProbeDisplayText);
+
+            var offline = ProbePolicy.NetworkUnavailable("VPN", 40, "Android");
+            vm.ApplyEngineStatus(new(VpnConnectionState.Error, offline.Message, Probe: offline), target.Profile);
+
+            Assert.Equal(VpnConnectionState.Error, vm.DisplayConnectionState);
+            Assert.NotNull(target.ActiveConnectionBrush);
+            Assert.Equal("Нет подключения к интернету", target.ProbeDisplayText);
+            Assert.Equal(LatencyPalette.For(null), target.ProbeBrush);
+            Assert.False(target.IsUnavailable);
+            Assert.False(vm.HasDisplayDelay);
+            Assert.Equal(peerText, peer.ProbeDisplayText);
+            Assert.Contains("Метод: VPN\nЭтап: Сеть\nДлительность: 40 мс\nТип ошибки: Offline", vm.DiagnosticText);
+            Assert.DoesNotContain("Тип ошибки: None", vm.DiagnosticText);
+
+            var restored = ProbePolicy.Success(67, "HTTPS", "HTTPS", true);
+            vm.ApplyEngineStatus(new(VpnConnectionState.Connected, restored.Message, Probe: restored), target.Profile);
+            Assert.Equal(VpnConnectionState.Connected, vm.DisplayConnectionState);
+            Assert.Equal("67 мс · HTTPS", target.ProbeDisplayText);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(VpnConnectionState.Connecting)]
+    [InlineData(VpnConnectionState.Reconnecting)]
+    [InlineData(VpnConnectionState.Disconnecting)]
+    [InlineData(VpnConnectionState.Connected)]
+    public void IntermediateStatesUseTheSharedYellowPalette(VpnConnectionState state)
+    {
+        var display = ConnectionPalette.DisplayState(state, subscriptionExhausted: false, checking: true);
+        Assert.Equal("#fff1c453", ConnectionPalette.AccentFor(display).ToString());
+        Assert.Equal("#fff1c453", ConnectionPalette.ForegroundFor(display, light: false).ToString());
+        Assert.Equal("#ff805600", ConnectionPalette.ForegroundFor(display, light: true).ToString());
     }
 
     [Theory]

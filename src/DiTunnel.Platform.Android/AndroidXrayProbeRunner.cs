@@ -14,6 +14,8 @@ namespace DiTunnel.Platform.Android;
 internal static class AndroidXrayProbeRunner
 {
     private static readonly SemaphoreSlim RuntimeGate = new(1, 1);
+    // The Go resolver can retain an in-flight callback even after ResetDNS.
+    private static readonly BoundSocketController DnsController = new();
 
     public static async Task<ServerProbeResult> MeasureAsync(Context context, ImportedProfile profile, CancellationToken cancellationToken)
     {
@@ -27,8 +29,8 @@ internal static class AndroidXrayProbeRunner
         var watch = Stopwatch.StartNew();
         var stage = "Профиль";
         ConnectivityManager? manager = null;
-        UnchangedSocketController? controller = null;
         var bound = false;
+        var configuringDns = false;
         var startingXray = false;
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
@@ -37,7 +39,8 @@ internal static class AndroidXrayProbeRunner
             stage = "Служба проверки";
             manager = context.GetSystemService(Context.ConnectivityService) as ConnectivityManager;
             var network = manager is null ? null : FindPhysicalNetwork(manager);
-            if (manager is null || network is null) throw new AndroidProbeException(stage, "Connection");
+            if (manager is null) throw new AndroidProbeException(stage, "Runtime");
+            if (network is null) return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
 
             stage = "DNS сервера";
             var address = IPAddress.TryParse(configuration.ServerHost, out var ip) ? ip.ToString()
@@ -54,10 +57,10 @@ internal static class AndroidXrayProbeRunner
             stage = "Xray";
             budget.CancelAfter(AndroidProbePolicy.XrayProfileBudget);
             var item = new AndroidProbeOutbound(configuration, address, ReserveLoopbackPort());
-            controller = new UnchangedSocketController();
-            global::LibXray.LibXray.RegisterDialerController(controller);
-            global::LibXray.LibXray.RegisterListenerController(controller);
-            global::LibXray.LibXray.SetDNS(controller, "1.1.1.1:53");
+            // Sockets already inherit the physical network binding. Registering no-op
+            // dialer/listener callbacks would leave them in Xray's process-wide registry.
+            configuringDns = true;
+            global::LibXray.LibXray.SetDNS(DnsController, "1.1.1.1:53");
             startingXray = true;
             if (!Invoke("runXrayFromJson", new JsonObject { ["configJSON"] = AndroidProbeBatchConfiguration.Build([item]) }))
                 throw new AndroidProbeException(stage, "Runtime");
@@ -71,25 +74,26 @@ internal static class AndroidXrayProbeRunner
             using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
             var result = await ProbePolicy.CheckHttpClientAsync(http, budget.Token);
             result = result with { Diagnostics = result.Diagnostics! with { DurationMilliseconds = watch.Elapsed.TotalMilliseconds } };
-            return result.Diagnostics?.ErrorType == "Internal" ? ProbePolicy.Incomplete(result) : result;
+            if (result.Milliseconds is null && IsOffline(manager))
+                return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
+            return AndroidProbePolicy.ActiveTunnelResult(result);
         }
         catch (Exception error)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IsOffline(manager))
+                return ProbePolicy.NetworkUnavailable("HTTPS", watch.Elapsed.TotalMilliseconds, "Android");
             var failure = AndroidProbePolicy.Failure(budget.IsCancellationRequested ? new TimeoutException() : error,
                 stage, "HTTPS", watch.Elapsed.TotalMilliseconds);
             return stage is "Служба проверки" or "Xray" || failure.Diagnostics?.ErrorType is "Internal" or "Runtime"
-                ? ProbePolicy.Incomplete(failure) : failure;
+                ? failure with { IsDeferred = true } : failure;
         }
         finally
         {
             if (startingXray)
                 try { _ = Invoke("stopXray", new JsonObject()); } catch { }
-            if (controller is not null)
-            {
+            if (configuringDns)
                 try { global::LibXray.LibXray.ResetDNS(); } catch { }
-                controller.Dispose();
-            }
             if (bound)
                 try { _ = manager!.BindProcessToNetwork(null); } catch { }
         }
@@ -100,6 +104,12 @@ internal static class AndroidXrayProbeRunner
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    internal static bool IsOffline(ConnectivityManager? manager)
+    {
+        try { return manager is not null && FindPhysicalNetwork(manager) is null; }
+        catch (Java.Lang.Exception) { return false; }
     }
 
     public static Network? FindPhysicalNetwork(ConnectivityManager manager)
@@ -126,7 +136,7 @@ internal static class AndroidXrayProbeRunner
         return response.RootElement.TryGetProperty("success", out var success) && success.GetBoolean();
     }
 
-    private sealed class UnchangedSocketController : Java.Lang.Object, global::LibXray.IDialerController
+    private sealed class BoundSocketController : Java.Lang.Object, global::LibXray.IDialerController
     {
         public bool ProtectFd(long fileDescriptor) => fileDescriptor >= 0;
     }

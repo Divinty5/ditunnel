@@ -30,7 +30,8 @@ internal static class AndroidProbeServiceBridge
             data.PutString(Payload, JsonSerializer.Serialize(profile, DiTunnelJsonContext.Default.ImportedProfile));
             message.Data = data;
             message.ReplyTo = replies;
-            target.Send(message);
+            try { target.Send(message); }
+            catch (RemoteException) { throw ServiceStopped(); }
             return await handler.Completion.Task.WaitAsync(AndroidProbePolicy.XrayReplyBudget, cancellationToken);
         }
         finally
@@ -42,6 +43,7 @@ internal static class AndroidProbeServiceBridge
     }
 
     private static AndroidProbeException Unavailable() => new("Служба проверки", "Runtime");
+    private static AndroidProbeException ServiceStopped() => new("Служба проверки", "ServiceStopped");
 
     private sealed class Connection(TaskCompletionSource<ServerProbeResult> result) : Java.Lang.Object, IServiceConnection
     {
@@ -49,17 +51,17 @@ internal static class AndroidProbeServiceBridge
 
         public void OnServiceConnected(ComponentName? name, IBinder? service)
         {
-            if (service is null) LostService();
+            if (service is null) OnNullBinding(name);
             else Binder.TrySetResult(service);
         }
 
         public void OnServiceDisconnected(ComponentName? name) => LostService();
         public void OnBindingDied(ComponentName? name) => LostService();
-        public void OnNullBinding(ComponentName? name) => LostService();
+        public void OnNullBinding(ComponentName? name) => Binder.TrySetException(Unavailable());
 
         private void LostService()
         {
-            if (!Binder.TrySetException(Unavailable())) result.TrySetException(Unavailable());
+            if (!Binder.TrySetException(ServiceStopped())) result.TrySetException(ServiceStopped());
         }
     }
 

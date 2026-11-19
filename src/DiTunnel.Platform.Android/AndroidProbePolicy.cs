@@ -11,11 +11,11 @@ internal static class AndroidProbePolicy
     internal static ServerProbeResult Success(double milliseconds, string method, string stage, bool confirmed, string attempts = "") => ProbePolicy.Success(milliseconds, method, stage, confirmed, attempts);
     internal static ServerProbeResult Failure(Exception error, string stage, string method, double milliseconds) => ProbePolicy.Failure(error, stage, method, milliseconds);
     internal static ServerProbeResult ServiceFailure(Exception error, double milliseconds) =>
-        ProbePolicy.Incomplete(Failure(
-            new AndroidProbeException("Служба проверки", ProbePolicy.Classify(error) == "Timeout" ? "Timeout" : "Runtime"),
-            "Служба проверки", "HTTPS", milliseconds));
+        Failure(error is ProbeFailureException ? error : new AndroidProbeException("Служба проверки",
+            ProbePolicy.Classify(error) == "Timeout" ? "Timeout" : "Runtime"),
+            "Служба проверки", "HTTPS", milliseconds) with { IsDeferred = true };
     internal static ServerProbeResult ActiveTunnelResult(ServerProbeResult result) =>
-        result.Diagnostics?.ErrorType is "Internal" or "Runtime" ? ProbePolicy.Incomplete(result) : result;
+        result.Diagnostics?.ErrorType is "Internal" or "Runtime" ? result with { IsDeferred = true } : result;
     internal static string Classify(Exception error) => ProbePolicy.Classify(error);
     internal static void ValidateResponse(Uri target, int status) => ProbePolicy.ValidateResponse(target, status);
     internal static string TunnelMessage(ServerProbeResult result) => ProbePolicy.TunnelMessage(result);

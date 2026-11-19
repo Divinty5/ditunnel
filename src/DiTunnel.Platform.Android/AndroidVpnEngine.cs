@@ -101,11 +101,15 @@ public sealed class AndroidVpnEngine : IProfileVpnEngine
             if (status.State is not (VpnConnectionState.Disconnected or VpnConnectionState.Error))
                 throw new InvalidOperationException("VPN уже подключается или подключён.");
             SetStatus(new(VpnConnectionState.Connecting, "Запрашиваем разрешение Android на VPN…"));
+            var networkCheck = System.Diagnostics.Stopwatch.StartNew();
             if (!await HasAvailablePhysicalNetworkAsync(cancellationToken))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 const string message = "Нет подключения к интернету. Включите Wi-Fi или мобильную сеть и повторите подключение.";
-                SetStatus(new(VpnConnectionState.Error, message));
-                throw new InvalidOperationException(message);
+                var failure = ProbePolicy.NetworkUnavailable("VPN", networkCheck.Elapsed.TotalMilliseconds, "Android");
+                activeProfile = profile;
+                SetStatus(new(VpnConnectionState.Error, message, Probe: failure));
+                throw new ProbeFailureException("Сеть", "Offline", message) { Diagnostics = failure.Diagnostics };
             }
             await ConnectCoreAsync(profile, cancellationToken, recovering: false);
         }

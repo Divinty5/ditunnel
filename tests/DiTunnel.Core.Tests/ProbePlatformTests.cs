@@ -32,6 +32,21 @@ public sealed class ProbePlatformTests
     [InlineData("Windows")]
     [InlineData("Android")]
     [InlineData("Linux")]
+    public void MissingNetworkKeepsTheProfileUnconfirmedAndReportsTheNetworkStage(string platform)
+    {
+        var result = ProbePolicy.NetworkUnavailable("HTTPS", 5, platform);
+        Assert.Equal("Нет подключения к интернету", result.Message);
+        Assert.True(result.IsDeferred);
+        Assert.Null(result.Milliseconds);
+        Assert.Contains($"Di-Tunnel {platform} ", result.Diagnostics!.ToDisplayString());
+        Assert.Contains("Метод: HTTPS\nЭтап: Сеть\nДлительность: 5 мс\nТип ошибки: Offline\nРабота профиля подтверждена: нет",
+            result.Diagnostics.ToDisplayString());
+    }
+
+    [Theory]
+    [InlineData("Windows")]
+    [InlineData("Android")]
+    [InlineData("Linux")]
     public async Task SharedPolicyPreservesPlatformAndVersionInCopiedReport(string platform)
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
