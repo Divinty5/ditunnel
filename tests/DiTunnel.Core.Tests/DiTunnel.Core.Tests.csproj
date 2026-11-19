@@ -29,4 +29,8 @@
     <AssemblyMetadata Include="AndroidVersion" Value="$(AndroidVersion)" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../src/DiTunnel.Android/VpnWidgetProfiles.cs" Link="Platform/VpnWidgetProfiles.cs" />
+  </ItemGroup>
+
 </Project>

@@ -349,6 +349,8 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     private ServerItemViewModel? DisplayProfile => connectingProfile ?? (ConnectionState is VpnConnectionState.Connected or
         VpnConnectionState.Reconnecting or VpnConnectionState.Disconnecting or VpnConnectionState.Error ? activeProfile : null) ?? SelectedProfile;
+    internal ImportedProfile? RunningProfile => activeProfile?.Profile;
+    internal DateTimeOffset? TunnelConnectedAt => lastEngineStatus?.ConnectedAt;
     public string SelectedName => DisplayProfile?.Name ?? L.T("Сервер не выбран");
     internal string DisplayProfileProbeText => DisplayProfile is { } server
         ? GetSnapshot(server.Profile).ConnectionResult?.Message ?? server.ProbeStatusText : "Не проверен";

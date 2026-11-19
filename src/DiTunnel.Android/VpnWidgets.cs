@@ -29,22 +29,23 @@ internal static class VpnWidgets
     // Provider callbacks and the refresh queue both run on the Android main looper.
     private static readonly HashSet<int> InitializedWidgets = [];
     private static IReadOnlyList<ImportedProfile>? lastProfiles;
-    private static ImportedProfile? lastSelected;
+    private static ImportedProfile? lastDisplayed;
     private static bool lastLight;
-    private sealed record WidgetSnapshot(ImportedProfile? Selected, VpnQuickControls.Presentation Presentation,
+    private sealed record WidgetSnapshot(ImportedProfile? Profile, VpnQuickControls.Presentation Presentation,
         string Status, bool Light, bool CanToggle, bool Busy, bool Active, bool NeedsActivity);
 
     private static WidgetSnapshot Capture(Context context)
     {
         VpnQuickControls.EnsureLatencyMonitoring();
         var current = VpnQuickControls.Status;
-        var exhausted = VpnQuickControls.SubscriptionExhausted;
-        var presentation = VpnQuickControls.GetPresentation(current, exhausted);
+        var running = VpnQuickControls.ActiveProfile;
+        var exhausted = VpnQuickControls.IsSubscriptionExhausted(running);
+        var presentation = VpnQuickControls.GetPresentation(current, running, exhausted);
         var status = presentation is { State: VpnConnectionState.Connected, DisplayState: VpnConnectionState.Connecting }
             ? L.T("Идёт проверка…") : current.State == VpnConnectionState.Error
                 ? L.T(current.Message ?? "Не удалось подключиться") : VpnQuickControls.StatusTextFor(current.State, exhausted);
         var transition = current.State is VpnConnectionState.Connecting or VpnConnectionState.Disconnecting;
-        return new(VpnQuickControls.Selected, presentation, status, IsLight(context), !transition,
+        return new(VpnQuickControls.WidgetProfile(current.State, running), presentation, status, IsLight(context), !transition,
             transition || current.State == VpnConnectionState.Reconnecting,
             current.State is VpnConnectionState.Connected or VpnConnectionState.Reconnecting, VpnQuickControls.NeedsActivity);
     }
@@ -60,10 +61,7 @@ internal static class VpnWidgets
         var snapshot = Capture(context);
         using var bitmap = PowerBitmap(snapshot.Presentation.DisplayState, snapshot.Light);
         var profiles = VpnQuickControls.Profiles();
-        var refreshList = !ReferenceEquals(profiles, lastProfiles) || snapshot.Selected != lastSelected || snapshot.Light != lastLight;
-        lastProfiles = profiles;
-        lastSelected = snapshot.Selected;
-        lastLight = snapshot.Light;
+        var refreshList = !ReferenceEquals(profiles, lastProfiles) || snapshot.Profile != lastDisplayed || snapshot.Light != lastLight;
 
         foreach (var (type, ids) in widgets)
         {
@@ -80,6 +78,9 @@ internal static class VpnWidgets
             foreach (var (type, ids) in widgets)
                 if (IsLarge(type) && ids.Length > 0) manager.NotifyAppWidgetViewDataChanged(ids, Resource.Id.widget_servers);
 #pragma warning restore CA1422
+        lastProfiles = profiles;
+        lastDisplayed = snapshot.Profile;
+        lastLight = snapshot.Light;
     }
 
     public static void Update(Context context, AppWidgetManager manager, int id, Type provider)
@@ -96,11 +97,12 @@ internal static class VpnWidgets
         var small = provider == typeof(VpnWidgetSmall);
         var large = IsLarge(provider);
         var views = new RemoteViews(context.PackageName, small ? Resource.Layout.widget_small : large ? Resource.Layout.widget_large : Resource.Layout.widget_medium);
-        var (selected, presentation, status, light, canToggle, busy, active, needsActivity) = snapshot;
+        var (profile, presentation, status, light, canToggle, busy, active, needsActivity) = snapshot;
+        var name = profile?.DisplayName ?? (active ? "—" : L.T("Сначала выберите сервер."));
         var power = L.T(active ? "Отключить" : "Подключить");
         views.SetImageViewBitmap(Resource.Id.widget_power, bitmap);
         views.SetBoolean(Resource.Id.widget_power, "setEnabled", canToggle);
-        views.SetContentDescription(Resource.Id.widget_power, $"Di-Tunnel · {power} · {selected?.DisplayName}");
+        views.SetContentDescription(Resource.Id.widget_power, $"Di-Tunnel · {power} · {name}");
         PendingIntent toggle;
         if (needsActivity) toggle = VpnQuickControls.ActivityPendingIntent();
         else toggle = VpnControlService.Pending(context, 1702, VpnQuickControls.ToggleAction,
@@ -111,7 +113,7 @@ internal static class VpnWidgets
             views.SetInt(Resource.Id.widget_root, "setBackgroundResource", light ? Resource.Drawable.widget_background_light : Resource.Drawable.widget_background);
             views.SetTextColor(Resource.Id.widget_name, TextColor(light));
             views.SetTextColor(Resource.Id.widget_status, NativeColor(ConnectionPalette.ForegroundFor(presentation.DisplayState, light)));
-            views.SetTextViewText(Resource.Id.widget_name, selected?.DisplayName ?? L.T("Сначала выберите сервер."));
+            views.SetTextViewText(Resource.Id.widget_name, name);
             views.SetTextViewText(Resource.Id.widget_status, status);
             views.SetOnClickPendingIntent(Resource.Id.widget_name, VpnQuickControls.ActivityPendingIntent("android.intent.action.MAIN"));
         }
@@ -127,8 +129,8 @@ internal static class VpnWidgets
             views.SetTextColor(Resource.Id.widget_heading, AccentColor(light));
             views.SetTextColor(Resource.Id.widget_empty, AccentColor(light));
             views.SetBoolean(Resource.Id.widget_servers, "setEnabled", !busy);
-            views.SetTextViewText(Resource.Id.widget_heading, "Di-Tunnel · " + (selected?.SourceName ?? L.T("Серверы подписки")));
-            views.SetTextViewText(Resource.Id.widget_empty, L.T("Сначала выберите сервер."));
+            views.SetTextViewText(Resource.Id.widget_heading, "Di-Tunnel · " + (profile?.SourceName ?? L.T("Серверы подписки")));
+            views.SetTextViewText(Resource.Id.widget_empty, active ? "" : L.T("Сначала выберите сервер."));
         }
         if (large && newWidgetId is { } id)
         {
@@ -222,26 +224,35 @@ public sealed class VpnWidgetServersService : RemoteViewsService
     public override IRemoteViewsFactory OnGetViewFactory(Intent? intent) => new ServersFactory(this);
     private sealed class ServersFactory(Context context) : Java.Lang.Object, IRemoteViewsFactory
     {
-        private IReadOnlyList<ImportedProfile> servers = [];
-        public int Count => servers.Count;
+        private sealed record ServerList(ImportedProfile? Displayed, ImportedProfile[] Servers);
+        private ServerList data = new(null, []);
+        public int Count => Volatile.Read(ref data).Servers.Length;
         public bool HasStableIds => true;
         public RemoteViews? LoadingView => null;
         public int ViewTypeCount => 1;
         public void OnCreate() => OnDataSetChanged();
-        public void OnDestroy() { servers = []; }
-        public void OnDataSetChanged() => servers = VpnQuickControls.Servers;
-        public long GetItemId(int position) => position >= 0 && position < servers.Count
-            ? unchecked((long)Convert.ToUInt64(VpnQuickControls.Key(servers[position])[..16], 16)) : -1;
+        public void OnDestroy() => Volatile.Write(ref data, new(null, []));
+        public void OnDataSetChanged()
+        {
+            var profile = VpnQuickControls.WidgetProfile(VpnQuickControls.Status.State, VpnQuickControls.ActiveProfile);
+            Volatile.Write(ref data, new(profile, VpnWidgetProfiles.Servers(profile, VpnQuickControls.Profiles())));
+        }
+        public long GetItemId(int position)
+        {
+            var servers = Volatile.Read(ref data).Servers;
+            return position >= 0 && position < servers.Length
+                ? unchecked((long)Convert.ToUInt64(VpnQuickControls.Key(servers[position])[..16], 16)) : -1;
+        }
         public RemoteViews GetViewAt(int position)
         {
             var row = new RemoteViews(context.PackageName, Resource.Layout.widget_server_row);
             var light = VpnWidgets.IsLight(context);
             row.SetTextColor(Resource.Id.widget_server_name, VpnWidgets.TextColor(light));
             row.SetTextColor(Resource.Id.widget_server_protocol, VpnWidgets.AccentColor(light));
-            if (position < 0 || position >= servers.Count) return row;
+            var (displayed, servers) = Volatile.Read(ref data);
+            if (position < 0 || position >= servers.Length) return row;
             var profile = servers[position];
-            var selected = VpnQuickControls.Selected;
-            row.SetTextViewText(Resource.Id.widget_server_name, (selected is not null && VpnQuickControls.Key(profile) == VpnQuickControls.Key(selected) ? "● " : "○ ") + profile.DisplayName);
+            row.SetTextViewText(Resource.Id.widget_server_name, (VpnWidgetProfiles.SameProfile(profile, displayed) ? "● " : "○ ") + profile.DisplayName);
             row.SetTextViewText(Resource.Id.widget_server_protocol, profile.ProtocolName);
             row.SetOnClickFillInIntent(Resource.Id.widget_server_row, new Intent().PutExtra(VpnQuickControls.ProfileExtra, VpnQuickControls.Key(profile)));
             return row;

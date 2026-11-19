@@ -31,7 +31,8 @@ internal static class VpnQuickControls
     private static DateTimeOffset? latencyConnectedAt;
     private sealed record LatencyReading(string ProfileKey, DateTimeOffset? ConnectedAt, double? Milliseconds);
     private static LatencyReading? latencyReading;
-    internal sealed record Presentation(VpnConnectionState State, VpnConnectionState DisplayState, double? Delay);
+    internal sealed record Presentation(VpnConnectionState State, VpnConnectionState DisplayState, double? Delay,
+        VpnWidgetProfiles.Session? Session);
     private static Presentation? appPresentation;
     private static WakeReceiver? wakeReceiver;
     private static readonly Handler RefreshHandler = new(Looper.MainLooper!);
@@ -42,7 +43,8 @@ internal static class VpnQuickControls
         void Update()
         {
             var snapshot = new Presentation(model.ConnectionState, model.DisplayConnectionState,
-                model.DisplayConnectionState == VpnConnectionState.Connected ? model.DisplayDelay : null);
+                model.DisplayConnectionState == VpnConnectionState.Connected ? model.DisplayDelay : null,
+                VpnWidgetProfiles.SessionFor(model.RunningProfile, model.TunnelConnectedAt));
             if (Interlocked.Exchange(ref appPresentation, snapshot) != snapshot) Refresh();
         }
         model.PropertyChanged += (_, change) =>
@@ -52,17 +54,19 @@ internal static class VpnQuickControls
         Update();
     }
 
-    internal static Presentation GetPresentation(VpnStatus current, bool subscriptionExhausted)
+    internal static Presentation GetPresentation(VpnStatus current, ImportedProfile? active, bool subscriptionExhausted)
     {
-        if (Volatile.Read(ref appPresentation) is { } app && app.State == current.State) return app;
+        var session = VpnWidgetProfiles.SessionFor(active, current.ConnectedAt);
+        if (Volatile.Read(ref appPresentation) is { } app && app.State == current.State &&
+            (current.State != VpnConnectionState.Connected || session is not null && app.Session == session)) return app;
 
-        double? delay = current.State == VpnConnectionState.Connected
+        double? delay = current.State == VpnConnectionState.Connected && active is not null
             ? current.Probe is { } check ? check.Milliseconds : current.DelayMilliseconds : null;
-        if (current.State == VpnConnectionState.Connected && engine.ActiveProfile is { } profile &&
-            Volatile.Read(ref latencyReading) is { } reading && reading.ProfileKey == Key(profile) && reading.ConnectedAt == current.ConnectedAt)
+        if (current.State == VpnConnectionState.Connected && active is not null &&
+            Volatile.Read(ref latencyReading) is { } reading && reading.ProfileKey == Key(active) && reading.ConnectedAt == current.ConnectedAt)
             delay = reading.Milliseconds;
         var state = ConnectionPalette.DisplayState(current.State, subscriptionExhausted, checking: delay is null);
-        return new(current.State, state, state == VpnConnectionState.Connected ? delay : null);
+        return new(current.State, state, state == VpnConnectionState.Connected ? delay : null, session);
     }
 
     public static void EnsureLatencyMonitoring()
@@ -130,7 +134,9 @@ internal static class VpnQuickControls
     public static bool Busy => Status.State is VpnConnectionState.Connecting or VpnConnectionState.Disconnecting or VpnConnectionState.Reconnecting;
     public static bool Active => Status.State is VpnConnectionState.Connected or VpnConnectionState.Reconnecting;
     public static bool CanToggle => Status.State is not (VpnConnectionState.Connecting or VpnConnectionState.Disconnecting);
-    internal static bool SubscriptionExhausted => engine.ActiveProfile is { } active
+    internal static ImportedProfile? ActiveProfile => engine.ActiveProfile;
+    internal static bool SubscriptionExhausted => IsSubscriptionExhausted(ActiveProfile);
+    internal static bool IsSubscriptionExhausted(ImportedProfile? active) => active is not null
         && (Profiles().FirstOrDefault(p => p.Content == active.Content && p.SourceId == active.SourceId)?.Usage
             ?? Profiles().FirstOrDefault(p => p.SourceId == active.SourceId)?.Usage ?? active.Usage)?.IsExhausted(DateTimeOffset.UtcNow) == true;
     public static string StatusText => StatusTextFor(Status.State, SubscriptionExhausted);
@@ -175,8 +181,8 @@ internal static class VpnQuickControls
     }
     public static ImportedProfile? Selected => Profiles().FirstOrDefault(p => Key(p) == selectedKey)
         ?? Profiles().FirstOrDefault(p => p.SourceId == UserSettings.Current.SelectedSourceId) ?? Profiles().FirstOrDefault();
-    public static IReadOnlyList<ImportedProfile> Servers => Profiles().Where(p => p.SourceId == Selected?.SourceId)
-        .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+    internal static ImportedProfile? WidgetProfile(VpnConnectionState state, ImportedProfile? active)
+        => VpnWidgetProfiles.Displayed(state, active, () => Selected);
 
     public static void SelectFromApp(ImportedProfile? profile)
     {
@@ -204,13 +210,14 @@ internal static class VpnQuickControls
             if (action == SelectAction)
             {
                 // PendingIntent carries an identifier, never credentials. Validate against the encrypted store.
-                var profile = Servers.FirstOrDefault(p => Key(p) == profileKey);
-                if (profile is null || Busy) return;
+                if (Busy || WidgetProfile(Status.State, ActiveProfile) is not { } displayed) return;
+                var profile = Profiles().FirstOrDefault(p => p.SourceId == displayed.SourceId && Key(p) == profileKey);
+                if (profile is null) return;
                 SelectFromApp(profile);
                 UserSettings.Current.SelectedSourceId = profile.SourceId;
                 UserSettings.Current.Save();
                 SelectionChanged?.Invoke(profile);
-                if (Active && engine.ActiveProfile?.Content != profile.Content) await engine.SwitchAsync(profile);
+                if (Active && !VpnWidgetProfiles.SameProfile(ActiveProfile, profile)) await engine.SwitchAsync(profile);
             }
             else if (action == ToggleAction)
             {
