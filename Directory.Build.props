@@ -8,7 +8,7 @@
     <Product>Di-Tunnel</Product>
     <Version>0.6.14</Version>
     <WindowsVersion>0.6.14</WindowsVersion>
-    <AndroidVersion>0.6.14</AndroidVersion>
+    <AndroidVersion>0.6.17</AndroidVersion>
     <AndroidMinimumApiLevel>27</AndroidMinimumApiLevel>
     <LinuxVersion>0.6.14</LinuxVersion>
     <Company>Di Vinty Interactive</Company>
