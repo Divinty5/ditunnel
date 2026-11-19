@@ -31,13 +31,17 @@ public sealed class SettingsAndRefreshTests
         finally { File.Delete(path); Directory.Delete(Path.GetDirectoryName(path)!); }
     }
 
-    [Fact]
-    public async Task DirectRefreshUsesItsOwnHttpClientAndKeepsOldServersOnFailure()
+    [Theory]
+    [InlineData(ReleaseTarget.AndroidArm64)]
+    [InlineData(ReleaseTarget.WindowsX64)]
+    [InlineData(ReleaseTarget.LinuxX64)]
+    public async Task DirectRefreshUsesItsOwnHttpClientAndKeepsOldServersOnFailure(ReleaseTarget target)
     {
         var store = new Store();
         var handler = new SubscriptionHandler();
         var settings = new UserSettings { RefreshSubscriptionsDirectly = true };
-        var vm = new MainViewModel(null, store, selectionSettings: settings, persistSelection: () => { },
+        var vm = new MainViewModel(null, store, platform: PlatformFor(target),
+            selectionSettings: settings, persistSelection: () => { },
             directSubscriptionClient: () => new HttpClient(handler, disposeHandler: false));
         try
         {
@@ -52,6 +56,13 @@ public sealed class SettingsAndRefreshTests
         }
         finally { await vm.ShutdownAsync(); handler.Dispose(); }
     }
+
+    private static AppPlatform PlatformFor(ReleaseTarget target) => target switch
+    {
+        ReleaseTarget.AndroidArm64 => AppPlatform.Android,
+        ReleaseTarget.LinuxX64 => AppPlatform.Linux,
+        _ => AppPlatform.Windows
+    };
 
     private sealed class SubscriptionHandler : HttpMessageHandler
     {
@@ -75,7 +86,7 @@ public sealed class SettingsAndRefreshTests
     public async Task ProtectedDesktopDoesNotOpenADirectSubscriptionClient(ReleaseTarget target)
     {
         var store = new Store();
-        var platform = target == ReleaseTarget.WindowsX64 ? AppPlatform.Windows : AppPlatform.Linux;
+        var platform = PlatformFor(target);
         var vm = new MainViewModel(new ProtectedEngine(), store, platform: platform,
             selectionSettings: new UserSettings { RefreshSubscriptionsDirectly = true }, persistSelection: () => { },
             directSubscriptionClient: () => throw new InvalidOperationException());
