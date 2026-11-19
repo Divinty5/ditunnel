@@ -48,7 +48,8 @@ public sealed class AndroidApp : AvaloniaAndroidApplication<App.App>
             installedApplicationProvider: new AndroidInstalledApplicationProvider(this),
             directSubscriptionClient: () => AndroidSubscriptionNetwork.CreateClient(this));
             var restoring = VpnQuickControls.Selected;
-            if (restoring is not null)
+            // Quick controls can fall back to another group when this subscription has no servers.
+            if (restoring is not null && !model.IsSelectedSubscriptionEmpty)
             {
                 model.SelectedGroup = model.Groups.FirstOrDefault(group => group.Id == restoring.SourceId) ?? model.SelectedGroup;
                 model.SelectedProfile = model.Profiles.FirstOrDefault(row => VpnQuickControls.Key(row.Profile) == VpnQuickControls.Key(restoring)) ?? model.SelectedProfile;

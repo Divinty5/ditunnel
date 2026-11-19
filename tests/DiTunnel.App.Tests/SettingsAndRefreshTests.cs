@@ -183,15 +183,20 @@ public sealed class SettingsAndRefreshTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RemovingLastServerKeepsSubscriptionAcrossRestart(bool filter)
+    [InlineData(ReleaseTarget.AndroidArm64, true)]
+    [InlineData(ReleaseTarget.WindowsX64, true)]
+    [InlineData(ReleaseTarget.LinuxX64, true)]
+    [InlineData(ReleaseTarget.AndroidArm64, false)]
+    public async Task RemovingLastServerKeepsSubscriptionAcrossRestart(ReleaseTarget target, bool filter)
     {
         var store = new Store();
-        var vm = new MainViewModel(null, store, new TimeoutProbe());
+        var platform = PlatformFor(target);
+        var settings = new UserSettings { SelectedSourceId = "sub" };
+        var vm = new MainViewModel(null, store, new TimeoutProbe(), platform: platform,
+            selectionSettings: settings, persistSelection: () => { });
         try
         {
-            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "sub");
+            Assert.Equal("sub", vm.SelectedGroup?.Id);
             if (filter)
             {
                 await vm.ProbeAllCommand.ExecuteAsync(null);
@@ -206,15 +211,19 @@ public sealed class SettingsAndRefreshTests
             Assert.True(vm.CanShareSubscription);
             Assert.False(vm.CanShareServer);
             Assert.False(vm.CanProbeAll);
+            Assert.Equal(new EmptySubscription("sub", "Subscription", "https://example.com/sub"),
+                Assert.Single(store.EmptySubscriptions));
         }
         finally { await vm.ShutdownAsync(); }
 
-        var reopened = new MainViewModel(null, store);
+        var reopened = new MainViewModel(null, store, platform: platform,
+            selectionSettings: settings, persistSelection: () => { });
         try
         {
-            reopened.SelectedGroup = reopened.Groups.Single(group => group.Id == "sub");
+            Assert.Equal("sub", reopened.SelectedGroup?.Id);
             Assert.Equal("https://example.com/sub", reopened.SelectedSubscriptionUrl);
             Assert.True(reopened.IsSelectedSubscriptionEmpty);
+            Assert.True(reopened.CanShareSubscription);
             var backgroundRequests = 0;
             await reopened.RefreshSubscriptionsOnStartupAsync((_, _) =>
             {
@@ -243,6 +252,7 @@ public sealed class SettingsAndRefreshTests
         }
         finally { await reopened.ShutdownAsync(); }
     }
+
     [Fact] public async Task FailedDownloadOrSaveNeverDestroysSnapshot()
     {
         var store = new Store(); var vm = new MainViewModel(null, store);
