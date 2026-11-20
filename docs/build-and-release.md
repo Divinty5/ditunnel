@@ -1,6 +1,6 @@
 # Сборка и публикация
 
-Для общего выпуска 0.6.18 номер каждой платформы задан в `Directory.Build.props`. Android versionCode 60022 задан в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
+Номера выпусков по платформам заданы в `Directory.Build.props`. Android versionCode задан в `src/DiTunnel.Android/DiTunnel.Android.csproj`. Версии SDK и нативных компонентов закреплены в `global.json` и `eng/`.
 
 ## Разработка и тесты
 
