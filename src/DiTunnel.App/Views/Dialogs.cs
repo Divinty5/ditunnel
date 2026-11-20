@@ -609,12 +609,20 @@ public static class Dialogs
         };
         groups.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
         panel.Children.Add(groups);
+        const double mobileTileWidth = 220;
+        const double tileSpacing = 6;
+        var tilePanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel
+        {
+            MinimumTileWidth = mobile ? mobileTileWidth : 200,
+            MaximumTileWidth = 360,
+            TileSpacing = tileSpacing,
+            HorizontalAlignment = mobile ? HorizontalAlignment.Center : HorizontalAlignment.Stretch
+        });
+        var stackPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel());
         var list = new ListBox
         {
             MinHeight = mobile ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
-            ItemsPanel = mobile
-                ? new FuncTemplate<Panel?>(() => new VirtualizingStackPanel())
-                : new FuncTemplate<Panel?>(() => new AdaptiveTilePanel { MinimumTileWidth = 200, MaximumTileWidth = 360, TileSpacing = 6 }),
+            ItemsPanel = mobile ? stackPanel : tilePanel,
             ItemTemplate = new FuncDataTemplate<ServerItemViewModel>((row, _) =>
             {
                 var flag = new Image { Width = 60, Height = 42, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -655,6 +663,14 @@ public static class Dialogs
                 return tile;
             })
         };
+        if (mobile)
+        {
+            panel.SizeChanged += (_, e) =>
+            {
+                var itemsPanel = e.NewSize.Width >= 2 * mobileTileWidth + tileSpacing ? tilePanel : stackPanel;
+                if (list.ItemsPanel != itemsPanel) list.ItemsPanel = itemsPanel;
+            };
+        }
         list.Styles.Add(new Avalonia.Styling.Style(selector => selector.OfType<ListBoxItem>())
         {
             Setters =

@@ -157,6 +157,8 @@ jobs:
           global-json-file: global.json
       - name: Run Android policy tests
         run: dotnet test tests/DiTunnel.Core.Tests/DiTunnel.Core.Tests.csproj -c Release --filter 'FullyQualifiedName~Android'
+      - name: Verify Android profile layout at phone and tablet widths
+        run: dotnet run --project tests/DiTunnel.Icon.Smoke/DiTunnel.Icon.Smoke.csproj -c Release -- --android-profile-layout
       - name: Install .NET Android workload
         run: dotnet workload install android
       - name: Build APK and verify its debug signature and contents

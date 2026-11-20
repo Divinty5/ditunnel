@@ -8,6 +8,7 @@ using Avalonia.Controls.Presenters;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.Styling;
@@ -37,6 +38,11 @@ internal static class Program
         if (OperatingSystem.IsLinux()) builder.With(new X11PlatformOptions { ForceDrawnDecorations = true, WmClass = "Di-Tunnel.Linux" });
 #pragma warning restore AVALONIA_X11_FORCE_CSD
         builder.SetupWithoutStarting();
+        if (args is ["--android-profile-layout"])
+        {
+            VerifyAndroidProfileLayout();
+            return;
+        }
         if (OperatingSystem.IsWindows() && args is ["--managed-caption"])
         {
             WindowsCaptionSmoke.RunManaged();
@@ -419,6 +425,64 @@ internal static class Program
             model.ShutdownAsync().GetAwaiter().GetResult();
         }
         Console.WriteLine("PASS_SUBSCRIPTIONS_SCROLL_DURING_PROBES_WINDOWS_ANDROID_LINUX_SELECTION_GUARDS");
+    }
+
+    private static void VerifyAndroidProfileLayout()
+    {
+        var model = new MainViewModel(null, new ManyServersStore(), platform: AppPlatform.Android,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var owner = new ContentControl
+        {
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch
+        };
+        var viewport = new Border { Child = owner, Width = 390 };
+        var window = new Window { Width = 960, Height = 720, Content = viewport, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            Dialogs.Subscriptions(owner, model).GetAwaiter().GetResult();
+            window.Show();
+            ResizeViewport(390);
+            var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
+            var first = ProfilePosition(0);
+            var second = ProfilePosition(1);
+            Require(Math.Abs(first.X - second.X) < 1 && second.Y > first.Y, "Android phone lays out profiles in one column");
+            Require(list.GetVisualDescendants().OfType<ListBoxItem>().Count() < list.ItemCount, "Android phone virtualizes long subscriptions");
+
+            var selected = model.Profiles[1];
+            list.SelectedItem = selected;
+            ResizeViewport(860);
+            first = ProfilePosition(0);
+            second = ProfilePosition(1);
+            Require(second.X > first.X && Math.Abs(first.Y - second.Y) < 1, "Android tablet lays out profiles side by side");
+            Require(ReferenceEquals(model.SelectedProfile, selected) && ReferenceEquals(list.SelectedItem, selected),
+                "Widening the Android layout preserves the selected profile");
+
+            ResizeViewport(390);
+            first = ProfilePosition(0);
+            second = ProfilePosition(1);
+            Require(Math.Abs(first.X - second.X) < 1 && second.Y > first.Y, "Android returns to one column after narrowing");
+            Require(ReferenceEquals(list.SelectedItem, selected), "Narrowing the Android layout preserves the selected profile");
+            Require(list.GetVisualDescendants().OfType<ListBoxItem>().Count() < list.ItemCount,
+                "Android restores virtualization after narrowing");
+
+            Point ProfilePosition(int index) => list.ContainerFromIndex(index)?.TranslatePoint(default, list)
+                ?? throw new InvalidOperationException($"Missing visible Android profile at index {index}.");
+        }
+        finally
+        {
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine("PASS_ANDROID_PROFILE_LAYOUT_PHONE_TABLET_PHONE");
+
+        void ResizeViewport(double width)
+        {
+            viewport.Width = width;
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
     }
 
     private static void VerifyLinuxDesktop(string output)
