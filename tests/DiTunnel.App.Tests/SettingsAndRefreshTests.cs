@@ -265,6 +265,29 @@ public sealed class SettingsAndRefreshTests
         Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
         Assert.False(vm.IsBusy);
     }
+
+    [Fact]
+    public async Task RefreshReusesUnchangedVisibleRowsAndSelection()
+    {
+        var store = new Store();
+        store.Items.Add(new("Selected", "VLESS", "selected", "sub", "Subscription", "https://example.com/sub"));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var rows = vm.Profiles.ToArray();
+            vm.SelectedProfile = rows[1];
+            var changes = 0;
+            vm.Profiles.CollectionChanged += (_, _) => changes++;
+
+            await vm.RefreshSubscriptionsAsync((_, _) =>
+                Task.FromResult<IReadOnlyList<ImportedProfile>>([new("Old", "VLESS", "old"), new("Selected", "VLESS", "selected")]));
+
+            Assert.Equal(0, changes);
+            Assert.Equal(rows, vm.Profiles);
+            Assert.Same(rows[1], vm.SelectedProfile);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
     [Fact] public async Task AutomaticStartupRefreshKeepsFailureSilent()
     {
         var store = new Store(); var vm = new MainViewModel(null, store);

@@ -38,6 +38,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly Func<HttpClient>? directSubscriptionClient;
     private readonly Dictionary<string, ProbeSnapshot> probeSnapshots = new(StringComparer.Ordinal);
     private readonly HashSet<string> pendingProbes = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string SourceId, string Content), ServerItemViewModel> visibleProfiles = [];
     private ServerItemViewModel? activeProfile;
     private ServerItemViewModel? connectingProfile;
     private CancellationTokenSource? connectionCancellation;
@@ -740,28 +741,20 @@ public sealed partial class MainViewModel : ViewModelBase
             selectionSettings.SelectedSourceId = value.Id;
             try { persistSelection(); } catch { }
         }
+        var previous = SelectedProfile?.Profile;
+        var existingRows = new Dictionary<ImportedProfile, ServerItemViewModel>();
+        foreach (var row in Profiles) existingRows.TryAdd(row.Profile, row);
+        var rows = allProfiles.Where(p => p.SourceId == value?.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(profile => existingRows.Remove(profile, out var row) ? row : CreateProfileRow(profile)).ToArray();
         restoringProfileSelection = true;
         try
         {
-            Profiles.Clear();
-            foreach (var profile in allProfiles.Where(p => p.SourceId == value?.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                var key = ProfileKey(profile);
-                var row = new ServerItemViewModel(profile) { IsProbePending = pendingProbes.Contains(key) };
-                if (probeSnapshots.TryGetValue(key, out var snapshot))
-                {
-                    row.ProbeText = snapshot.Text;
-                    row.ProbeMilliseconds = snapshot.Milliseconds;
-                    row.ProbeTimedOut = snapshot.TimedOut;
-                    row.IsProbeUnconfirmed = snapshot.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
-                    row.CountryCode = snapshot.CountryCode;
-                }
-                Profiles.Add(row);
-            }
+            UpdateProfileOrder(rows);
+            ReindexVisibleProfiles();
             selectionSettings.SelectedServers.TryGetValue(value?.Id ?? "", out var saved);
-            SelectedProfile = Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).ContentHash == saved.ContentHash)
-                ?? Profiles.FirstOrDefault(row => saved is not null && ServerSelection.From(row.Profile).IdentityHash == saved.IdentityHash)
-                ?? Profiles.FirstOrDefault(row => activeProfile is not null && SameProfile(row.Profile, activeProfile.Profile))
+            SelectedProfile = (previous is null ? null : FindVisibleProfile(previous))
+                ?? RestoreSavedServer(saved)
+                ?? (activeProfile is null ? null : FindVisibleProfile(activeProfile.Profile))
                 ?? Profiles.FirstOrDefault();
         }
         finally { restoringProfileSelection = false; }
@@ -769,7 +762,60 @@ public sealed partial class MainViewModel : ViewModelBase
         NotifyProfileListChanged();
         OnPropertyChanged(nameof(SelectedSubscriptionUrl)); OnPropertyChanged(nameof(CanShareSubscription));
         OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
-        _ = ResolveCountriesAsync(Profiles.ToArray());
+        _ = ResolveCountriesAsync(rows);
+    }
+
+    private ServerItemViewModel CreateProfileRow(ImportedProfile profile)
+    {
+        var key = ProfileKey(profile);
+        var row = new ServerItemViewModel(profile) { IsProbePending = pendingProbes.Contains(key) };
+        if (probeSnapshots.TryGetValue(key, out var snapshot))
+        {
+            row.ProbeText = snapshot.Text;
+            row.ProbeMilliseconds = snapshot.Milliseconds;
+            row.ProbeTimedOut = snapshot.TimedOut;
+            row.IsProbeUnconfirmed = snapshot.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
+            row.CountryCode = snapshot.CountryCode;
+        }
+        return row;
+    }
+
+    private ServerItemViewModel? RestoreSavedServer(ServerSelection? saved)
+    {
+        if (saved is null) return null;
+        ServerItemViewModel? matchingName = null;
+        foreach (var row in Profiles)
+        {
+            var selection = ServerSelection.From(row.Profile);
+            if (selection.ContentHash == saved.ContentHash) return row;
+            if (matchingName is null && selection.IdentityHash == saved.IdentityHash) matchingName = row;
+        }
+        return matchingName;
+    }
+
+    private ServerItemViewModel? FindVisibleProfile(ImportedProfile profile) =>
+        visibleProfiles.GetValueOrDefault((profile.SourceId, profile.Content));
+
+    private void ReindexVisibleProfiles()
+    {
+        visibleProfiles.Clear();
+        foreach (var row in Profiles) visibleProfiles.TryAdd((row.Profile.SourceId, row.Profile.Content), row);
+    }
+
+    private void UpdateProfileOrder(ServerItemViewModel[] rows)
+    {
+        var retained = rows.ToHashSet();
+        for (var index = Profiles.Count - 1; index >= 0; index--)
+            if (!retained.Contains(Profiles[index])) Profiles.RemoveAt(index);
+
+        for (var index = 0; index < rows.Length; index++)
+        {
+            var row = rows[index];
+            if (index < Profiles.Count && ReferenceEquals(Profiles[index], row)) continue;
+            var current = Profiles.IndexOf(row);
+            if (current < 0) Profiles.Insert(index, row);
+            else Profiles.Move(current, index);
+        }
     }
 
     private void NotifyProfileListChanged()
@@ -792,9 +838,9 @@ public sealed partial class MainViewModel : ViewModelBase
             catch { continue; }
             Dispatcher.UIThread.Post(() =>
             {
-                var key = ProfileKey(row.Profile);
-                var visible = Profiles.FirstOrDefault(candidate => ProfileKey(candidate.Profile) == key);
+                var visible = FindVisibleProfile(row.Profile);
                 if (visible is null || !ReferenceEquals(visible.Profile, row.Profile)) return;
+                var key = ProfileKey(row.Profile);
                 probeSnapshots[key] = GetSnapshot(visible.Profile) with { CountryCode = code };
                 visible.CountryCode = code;
                 var displayed = DisplayProfile;
@@ -1095,6 +1141,7 @@ public sealed partial class MainViewModel : ViewModelBase
         try
         {
             foreach (var row in Profiles.Where(row => predicate(row.Profile)).ToArray()) Profiles.Remove(row);
+            ReindexVisibleProfiles();
             SelectedProfile = selected is not null && Profiles.Contains(selected) ? selected
                 : Profiles.FirstOrDefault(row => activeProfile is not null && SameProfile(row.Profile, activeProfile.Profile))
                     ?? Profiles.FirstOrDefault();
@@ -1260,7 +1307,7 @@ public sealed partial class MainViewModel : ViewModelBase
                 ConnectionAttemptFailed = false
             };
         pendingProbes.Remove(key);
-        var visible = Profiles.FirstOrDefault(candidate => ProfileKey(candidate.Profile) == key) ?? server;
+        var visible = FindVisibleProfile(server.Profile) ?? server;
         visible.ProbeText = result.Message;
         visible.ProbeMilliseconds = result.Milliseconds;
         visible.ProbeTimedOut = timedOut;
@@ -1315,7 +1362,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private ProbeSnapshot GetSnapshot(ImportedProfile profile)
     {
         if (probeSnapshots.TryGetValue(ProfileKey(profile), out var snapshot)) return snapshot;
-        var row = Profiles.FirstOrDefault(candidate => ProfileKey(candidate.Profile) == ProfileKey(profile));
+        var row = FindVisibleProfile(profile);
         return row is null
             ? new ProbeSnapshot("Не проверен", null, false, null)
             : new ProbeSnapshot(row.ProbeText, row.ProbeMilliseconds, row.ProbeTimedOut, row.CountryCode);
@@ -1573,8 +1620,9 @@ public sealed partial class MainViewModel : ViewModelBase
             .ThenBy(server => server.ProbeMilliseconds ?? double.MaxValue)
             .ThenBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        Profiles.Clear();
-        foreach (var server in ordered) Profiles.Add(server);
+        if (Profiles.SequenceEqual(ordered)) return;
+        UpdateProfileOrder(ordered);
+        ReindexVisibleProfiles();
         SelectedProfile = selected;
         OnPropertyChanged(nameof(SelectedProfile));
     }

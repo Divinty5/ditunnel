@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using Avalonia;
 using DiTunnel.App.Controls;
 using DiTunnel.App.ViewModels;
@@ -122,9 +123,24 @@ public sealed class ConnectionInteractionTests
     }
     [Fact] public async Task ProbeSortsSuccessfulServersBeforeTimeouts()
     {
-        var vm = new MainViewModel(null, new SortingStore(), new SortingProbe());
-        await vm.ProbeAllCommand.ExecuteAsync(null);
-        Assert.Equal(["C", "A", "B"], vm.Profiles.Select(profile => profile.Name));
+        var vm = new MainViewModel(null, new SortingStore(), new SortingProbe(),
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var selected = vm.SelectedProfile;
+            var changes = new List<NotifyCollectionChangedAction>();
+            vm.Profiles.CollectionChanged += (_, change) => changes.Add(change.Action);
+
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.Equal(["C", "A", "B"], vm.Profiles.Select(profile => profile.Name));
+            Assert.Equal([NotifyCollectionChangedAction.Move], changes);
+            Assert.Same(selected, vm.SelectedProfile);
+
+            changes.Clear();
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.Empty(changes);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
     [Fact]
     public async Task FilteringRemovesOnlyServersThatFailedAProbe()
