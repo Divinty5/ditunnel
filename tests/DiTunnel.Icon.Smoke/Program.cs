@@ -13,6 +13,7 @@ using Avalonia.Layout;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.Styling;
+using DiTunnel.App.Controls;
 using DiTunnel.App.Views;
 using DiTunnel.App.ViewModels;
 using DiTunnel.App;
@@ -43,6 +44,12 @@ internal static class Program
         {
             VerifyAndroidProfileLayout();
             VerifyAndroidSubscriptionActions();
+            return;
+        }
+        if (args is ["--virtualized-profile-grid"])
+        {
+            VerifyVirtualizedProfileGrid(AppPlatform.Android);
+            VerifyVirtualizedProfileGrid(OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows);
             return;
         }
         if (args is ["--split-tunnel-applications"])
@@ -611,6 +618,103 @@ internal static class Program
         }
     }
 
+    private static void VerifyVirtualizedProfileGrid(AppPlatform platform)
+    {
+        var model = new MainViewModel(null, new ManyServersStore(1000), platform: platform,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var owner = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        var viewport = new Border { Child = owner, Width = 860 };
+        var window = new Window { Width = 960, Height = 720, Content = viewport, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            SubscriptionsPage.Show(owner, model);
+            window.Show();
+            Layout();
+            var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
+            var panel = list.FindDescendantOfType<AdaptiveTilePanel>()!;
+            var scroll = list.FindDescendantOfType<ScrollViewer>()!;
+            Require(scroll.Extent.Height > scroll.Viewport.Height, "The grid exposes the full scrollable extent");
+            Require(list.ContainerFromIndex(0) is not null && list.ContainerFromIndex(999) is null, "Only nearby cards are realized initially");
+            Require(panel.Children.Count is > 0 and < 40, "The number of realized cards is bounded by the viewport");
+
+            var below = panel.Children.OfType<ListBoxItem>().First(card =>
+                card.TranslatePoint(default, scroll.Presenter!)!.Value.Y >= scroll.Viewport.Height);
+            list.ScrollIntoView(list.IndexFromContainer(below));
+            var revealedOffset = scroll.Offset.Y;
+            Require(revealedOffset > 0, "Revealing a card in the next row scrolls the grid");
+            below.BringIntoView();
+            Require(scroll.Offset.Y == revealedOffset, "A focus request before layout does not scroll the same card twice");
+            scroll.ScrollToHome();
+            Layout();
+
+            viewport.Width = 390;
+            Layout();
+            var secondRow = list.ContainerFromIndex(1)!.TranslatePoint(default, panel)!.Value.Y -
+                list.ContainerFromIndex(0)!.TranslatePoint(default, panel)!.Value.Y;
+            scroll.Offset = new Vector(0, secondRow);
+            Layout();
+            viewport.Width = 860;
+            Layout();
+            Require(scroll.Offset.Y < 1 && CardIsVisible(1), $"A profile in the first grid row can be anchored at zero offset (was {secondRow}, now {scroll.Offset.Y})");
+            viewport.Width = 390;
+            Layout();
+            Require(Math.Abs(scroll.Offset.Y - secondRow) < 1, "Narrowing restores the anchor even when the wider offset was zero");
+            viewport.Width = 860;
+            Layout();
+
+            var selected = model.Profiles[713];
+            list.ScrollIntoView(713);
+            Layout();
+            list.SelectedItem = selected;
+            Layout();
+            Require(CardIsVisible(713) && list.ContainerFromIndex(713) is ListBoxItem { IsSelected: true }, "A distant card can be selected and brought into view");
+            var anchor = panel.Children.OfType<ListBoxItem>().Select(list.IndexFromContainer).Where(CardIsVisible).Min();
+            var offset = scroll.Offset.Y;
+
+            viewport.Width = 390;
+            Layout();
+            Require(CardIsVisible(anchor), "Narrowing keeps the first visible profile in view");
+            Require(ReferenceEquals(model.SelectedProfile, selected) && ReferenceEquals(list.SelectedItem, selected), "Narrowing preserves logical selection");
+            viewport.Width = 860;
+            Layout();
+            Require(CardIsVisible(anchor) && Math.Abs(scroll.Offset.Y - offset) < 1, "Widening restores the same scroll position");
+
+            var first = list.ContainerFromIndex(anchor)!;
+            var down = ((INavigableContainer)panel).GetControl(NavigationDirection.Down, first, false) as ListBoxItem;
+            Require(down is not null && list.IndexFromContainer(down) > anchor + 1, "Down moves to the same column in the next grid row");
+            list.ScrollIntoView(999);
+            Layout();
+            Require(CardIsVisible(999) && list.ContainerFromIndex(0) is null, "Scrolling to the end releases cards near the start");
+            Require(ReferenceEquals(list.SelectedItem, selected), "Recycling off-screen cards keeps the selection");
+
+            model.Profiles.Move(999, 0);
+            Layout();
+            list.ScrollIntoView(0);
+            Layout();
+            var moved = list.ContainerFromIndex(0) as ListBoxItem;
+            Require(moved is not null && CardIsVisible(0), $"The moved first card can be scrolled into view (offset {scroll.Offset.Y})");
+            Require(ReferenceEquals(moved!.DataContext, model.Profiles[0]), "After a move recycled containers display their current profile");
+            Require(ReferenceEquals(list.SelectedItem, selected) && panel.Children.Count < 40, "Moving a card preserves selection and virtualization");
+
+            bool CardIsVisible(int index) => list.ContainerFromIndex(index) is { } card &&
+                card.TranslatePoint(default, scroll.Presenter!) is { } position && position.Y < scroll.Viewport.Height && position.Y + card.Bounds.Height > 0;
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine($"PASS_VIRTUALIZED_PROFILE_GRID {platform.ReleaseTarget}");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
     private static void VerifyAndroidSubscriptionActions()
     {
         var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: AppPlatform.Android,
@@ -799,9 +903,9 @@ internal static class Program
         Console.WriteLine("PASS_LINUX_DOCK_CUSTOM_ICON_LEASE_CRASH_RECOVERY_PERMISSIONS_AND_USER_EDITS");
     }
 
-    private sealed class ManyServersStore : IProfileStore
+    private sealed class ManyServersStore(int count = 30) : IProfileStore
     {
-        public IReadOnlyList<ImportedProfile> Load() => Enumerable.Range(1, 30)
+        public IReadOnlyList<ImportedProfile> Load() => Enumerable.Range(1, count)
             .Select(index => new ImportedProfile("Test " + index, "VLESS", "synthetic-" + index, "test", "Test subscription")).ToArray();
         public void Save(IEnumerable<ImportedProfile> profiles) { }
     }

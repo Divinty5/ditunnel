@@ -45,20 +45,10 @@ internal static class SubscriptionsPage
         };
         groups.Bind(Control.IsEnabledProperty, new Binding("CanSelectProfile"));
         panel.Children.Add(groups);
-        const double mobileTileWidth = 220;
-        const double tileSpacing = 6;
-        var tilePanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel
-        {
-            MinimumTileWidth = mobile ? mobileTileWidth : 200,
-            MaximumTileWidth = 360,
-            TileSpacing = tileSpacing,
-            HorizontalAlignment = mobile ? HorizontalAlignment.Center : HorizontalAlignment.Stretch
-        });
-        var stackPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel());
         var list = new ListBox
         {
-            MinHeight = mobile ? 84 : 140, MaxHeight = 420, Background = Brushes.Transparent,
-            ItemsPanel = mobile ? stackPanel : tilePanel,
+            MinHeight = mobile ? 84 : 140, MaxHeight = AdaptiveTilePanel.MaximumViewportHeight, Background = Brushes.Transparent,
+            ItemsPanel = new FuncTemplate<Panel?>(() => new AdaptiveTilePanel(mobile)),
             ItemTemplate = new FuncDataTemplate<ServerItemViewModel>((row, _) =>
             {
                 var flag = new Image { Width = 60, Height = 42, Stretch = Stretch.Uniform, Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -99,23 +89,14 @@ internal static class SubscriptionsPage
                 return tile;
             })
         };
-        if (mobile)
-        {
-            panel.SizeChanged += (_, e) =>
-            {
-                var itemsPanel = e.NewSize.Width >= 2 * mobileTileWidth + tileSpacing ? tilePanel : stackPanel;
-                if (list.ItemsPanel != itemsPanel) list.ItemsPanel = itemsPanel;
-            };
-        }
         list.Styles.Add(new Avalonia.Styling.Style(selector => selector.OfType<ListBoxItem>())
         {
             Setters =
             {
                 new Avalonia.Styling.Setter(TemplatedControl.PaddingProperty, new Thickness(0)),
-                new Avalonia.Styling.Setter(Layoutable.MarginProperty, mobile ? new Thickness(0, 0, 0, 6) : default(Thickness)),
                 new Avalonia.Styling.Setter(ContentControl.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch),
                 new Avalonia.Styling.Setter(Layoutable.MinHeightProperty, 0d),
-                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, 80d),
+                new Avalonia.Styling.Setter(Layoutable.MaxHeightProperty, AdaptiveTilePanel.TileHeight),
                 new Avalonia.Styling.Setter(InputElement.IsHoldWithMouseEnabledProperty, true),
                 new Avalonia.Styling.Setter(Control.IsEnabledProperty, new Binding("CanSelectProfile") { Source = vm })
             }
