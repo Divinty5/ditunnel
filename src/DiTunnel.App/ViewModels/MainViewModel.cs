@@ -94,6 +94,7 @@ public sealed partial class MainViewModel : ViewModelBase
             sources = sources.Where(group => populatedSources.Contains(group.Id)).ToArray();
         }
         if (sources.Length == 0) return;
+        var initialProfiles = allProfiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
         var selectedOnly = sourceId is not null;
         var useDirectRoute = download is null && selectionSettings.RefreshSubscriptionsDirectly;
         var directBlocked = useDirectRoute && Platform.SupportsKillSwitch && engine?.IsNetworkProtectionActive == true;
@@ -101,65 +102,52 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRefreshSubscriptions));
         OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
         if (showToast) IsBusy = true;
+        var previousStatus = SubscriptionStatus;
         SubscriptionStatus = selectedOnly ? "Обновляем подписку…" : "Обновляем подписки…";
-        var updated = 0; var failed = 0;
-        var selectedContent = SelectedProfile?.Profile.Content;
         try
         {
-            using var directClient = useDirectRoute && !directBlocked ? directSubscriptionClient?.Invoke() : null;
-            using var concurrency = new SemaphoreSlim(4);
-            var downloads = await Task.WhenAll(sources.Select(async source =>
-            {
-                await concurrency.WaitAsync(lifetimeCancellation.Token);
-                try
-                {
-                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
-                    deadline.CancelAfter(TimeSpan.FromSeconds(10));
-                    if (useDirectRoute && directClient is null) throw new HttpRequestException();
-                    var request = download is not null ? download(source.SourceUrl!, deadline.Token)
-                        : (directClient is null ? new ProfileImporter() : new ProfileImporter(directClient))
-                            .ImportAsync(source.SourceUrl!, deadline.Token, source.Name);
-                    var fresh = await request.WaitAsync(deadline.Token);
-                    return (Source: source, Fresh: fresh, Error: (Exception?)null);
-                }
-                catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { throw; }
-                catch (Exception error) { return (Source: source, Fresh: (IReadOnlyList<ImportedProfile>)Array.Empty<ImportedProfile>(), Error: error); }
-                finally { concurrency.Release(); }
-            }));
+            var token = lifetimeCancellation.Token;
+            var downloads = await SubscriptionRefresh.DownloadAsync(sources, download, useDirectRoute,
+                directBlocked ? null : directSubscriptionClient, token);
+            token.ThrowIfCancellationRequested();
             // Background refresh must not replace the selected profile while a connection
             // or another profile operation is using it.
-            if (!showToast && (IsBusy || HasPendingOperation)) return;
-            if (!showToast) selectedContent = SelectedProfile?.Profile.Content;
-            foreach (var item in downloads)
+            if (!showToast && (IsBusy || HasPendingOperation))
             {
-                lifetimeCancellation.Token.ThrowIfCancellationRequested();
-                if (item.Fresh.Count == 0) { failed++; continue; }
-                try
+                SubscriptionStatus = previousStatus;
+                return;
+            }
+            // Imports and removals can finish while a background download is in flight.
+            var currentGroups = Groups.ToHashSet();
+            var currentProfiles = allProfiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
+            var replacements = downloads.Where(item => item.Profiles.Length > 0 && currentGroups.Contains(item.Source) &&
+                initialProfiles[item.Source.Id].SequenceEqual(currentProfiles[item.Source.Id])).ToArray();
+            var saved = SubscriptionRefresh.TrySave(profileStore, allProfiles, emptySubscriptions, replacements, token);
+            var updated = saved is null ? 0 : replacements.Length;
+            var failed = downloads.Length - updated;
+            if (saved is not null)
+            {
+                foreach (var item in replacements)
                 {
-                    var replacement = item.Fresh.DistinctBy(p => p.Content).Select(p => p with
-                        { SourceId = item.Source.Id, SourceName = item.Source.Name, SourceUrl = item.Source.SourceUrl }).ToArray();
-                    var next = allProfiles.Where(p => p.SourceId != item.Source.Id).Concat(replacement).ToArray();
-                    var retained = replacement.Select(ProfileKey).ToHashSet(StringComparer.Ordinal);
-                    var remainingEmpty = emptySubscriptions.Where(g => g.SourceId != item.Source.Id).ToArray();
-                    profileStore.SaveLibrary(new(next, remainingEmpty));
-                    foreach (var previous in allProfiles.Where(p => p.SourceId == item.Source.Id))
+                    var retained = item.Profiles.Select(ProfileKey).ToHashSet(StringComparer.Ordinal);
+                    foreach (var previous in currentProfiles[item.Source.Id])
                         if (!retained.Contains(ProfileKey(previous))) probeSnapshots.Remove(ProfileKey(previous));
-                    allProfiles.Clear(); allProfiles.AddRange(next);
-                    emptySubscriptions.Clear(); emptySubscriptions.AddRange(remainingEmpty);
-                    updated++;
                 }
-                catch { failed++; }
+                allProfiles.Clear();
+                allProfiles.AddRange(saved.Profiles);
+                emptySubscriptions.Clear();
+                emptySubscriptions.AddRange(saved.EmptySubscriptions);
+                RebuildGroups();
+                if (activeProfile is { } active)
+                {
+                    var refreshed = allProfiles.FirstOrDefault(profile => SameProfile(profile, active.Profile));
+                    if (refreshed is null && allProfiles.FirstOrDefault(profile => profile.SourceId == active.Profile.SourceId) is { } sourcePeer)
+                        refreshed = active.Profile with { Usage = sourcePeer.Usage };
+                    if (refreshed is not null && refreshed != active.Profile)
+                        activeProfile = Profiles.FirstOrDefault(row => row.Profile == refreshed) ?? new ServerItemViewModel(refreshed);
+                }
+                RefreshSubscriptionPresentation();
             }
-            RebuildGroups();
-            SelectedProfile = Profiles.FirstOrDefault(p => p.Profile.Content == selectedContent) ?? SelectedProfile;
-            if (activeProfile is { } active)
-            {
-                var refreshed = allProfiles.FirstOrDefault(p => p.SourceId == active.Profile.SourceId && p.Content == active.Profile.Content);
-                if (refreshed is null && allProfiles.FirstOrDefault(p => p.SourceId == active.Profile.SourceId) is { } sourcePeer)
-                    refreshed = active.Profile with { Usage = sourcePeer.Usage };
-                if (refreshed is not null) activeProfile = Profiles.FirstOrDefault(row => row.Profile == refreshed) ?? new ServerItemViewModel(refreshed);
-            }
-            RefreshSubscriptionPresentation();
             var summary = selectedOnly
                 ? failed == 0 ? "Подписка успешно обновлена" : "Не удалось обновить подписку"
                 : failed == 0 ? $"Подписки успешно обновлены: {updated}"

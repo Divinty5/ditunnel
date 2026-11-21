@@ -122,12 +122,14 @@ public sealed class SettingsAndRefreshTests
     {
         public List<ImportedProfile> Items = [new("Old", "VLESS", "old", "sub", "Subscription", "https://example.com/sub"), new("Manual", "SS", "manual", "manual", "Manual")];
         public bool Fail;
+        public int SaveLibraryCalls { get; private set; }
         public EmptySubscription[] EmptySubscriptions { get; private set; } = [];
         public IReadOnlyList<ImportedProfile> Load() => Items;
         public void Save(IEnumerable<ImportedProfile> profiles) { if (Fail) throw new IOException(); Items = profiles.ToList(); }
         public ProfileLibrary LoadLibrary() => new(Items.ToArray(), EmptySubscriptions);
         public void SaveLibrary(ProfileLibrary library)
         {
+            SaveLibraryCalls++;
             Save(library.Profiles);
             EmptySubscriptions = library.EmptySubscriptions;
         }
@@ -256,14 +258,60 @@ public sealed class SettingsAndRefreshTests
     [Fact] public async Task FailedDownloadOrSaveNeverDestroysSnapshot()
     {
         var store = new Store(); var vm = new MainViewModel(null, store);
-        await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException());
-        Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
-        Assert.Equal("#d9c8324a", vm.RefreshToastBackground.ToString());
-        store.Fail = true;
-        await vm.RefreshSubscriptionsAsync((_, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new")]));
-        Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
-        Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
-        Assert.False(vm.IsBusy);
+        try
+        {
+            var selected = vm.SelectedProfile;
+            await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException());
+            Assert.Same(selected, vm.SelectedProfile);
+            Assert.Equal(0, store.SaveLibraryCalls);
+            Assert.Equal("#d9c8324a", vm.RefreshToastBackground.ToString());
+            store.Fail = true;
+            await vm.RefreshSubscriptionsAsync((_, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new")]));
+            Assert.Same(selected, vm.SelectedProfile);
+            Assert.Equal(1, store.SaveLibraryCalls);
+            Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
+            Assert.False(vm.IsBusy);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task StartupRefreshDoesNotRestoreDeletedSource()
+    {
+        var store = new Store();
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2"));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        var download = new TaskCompletionSource<IReadOnlyList<ImportedProfile>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var refresh = vm.RefreshSubscriptionsOnStartupAsync((_, _) => download.Task);
+            Assert.Equal("sub", vm.SelectedGroup?.Id);
+            vm.RemoveGroupCommand.Execute(null);
+            download.SetResult([new("Fresh", "VLESS", "fresh")]);
+            await refresh;
+
+            Assert.DoesNotContain(vm.Groups, group => group.Id == "sub");
+            Assert.Equal("fresh", Assert.Single(store.Items, profile => profile.SourceId == "sub2").Content);
+            Assert.Equal(2, store.SaveLibraryCalls);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task ShutdownCancelsRefreshBeforeAnySourceIsSaved()
+    {
+        var store = new Store();
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2"));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        var download = new TaskCompletionSource<IReadOnlyList<ImportedProfile>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refresh = vm.RefreshSubscriptionsAsync((url, _) => url.EndsWith("/sub2")
+            ? download.Task : Task.FromResult<IReadOnlyList<ImportedProfile>>([new("Fresh", "VLESS", "fresh")]));
+
+        await vm.ShutdownAsync();
+        await refresh.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(0, store.SaveLibraryCalls);
+        Assert.Equal(["old", "manual", "second"], store.Items.Select(profile => profile.Content));
     }
 
     [Fact]
@@ -374,6 +422,7 @@ public sealed class SettingsAndRefreshTests
             release.TrySetResult();
             await refresh;
             Assert.Equal(6, store.Items.Count);
+            Assert.Equal(1, store.SaveLibraryCalls);
             Assert.Contains(store.Items, item => item.Content == "old-2");
             Assert.Equal(5, store.Items.Count(item => item.Content.StartsWith("new-")));
             Assert.True(vm.IsRefreshToastVisible);
