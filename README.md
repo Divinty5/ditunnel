@@ -43,4 +43,4 @@ Di-Tunnel — VPN-клиент с открытым исходным кодом �
 
 [Руководство пользователя](docs/user-guide.md) · [Установка Ubuntu](docs/linux-installation.md) · [Архитектура](docs/architecture.md) · [Сборка и публикация](docs/build-and-release.md) · [Каталог документации](docs/README.md).
 
-[История изменений](CHANGELOG.md) · [Работа с репозиторием](AGENTS.md) · [Политика безопасности](SECURITY.md) · [Лицензия MIT](LICENSE).
+[История изменений](CHANGELOG.md) · [Политика безопасности](SECURITY.md) · [Лицензия MIT](LICENSE).
