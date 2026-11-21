@@ -1,17 +1,13 @@
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.App.ViewModels;
-
-public sealed record ProfileGroup(string Id, string Name, string? SourceUrl = null)
-{
-    public override string ToString() => Name;
-}
 
 public sealed partial class MapLightViewModel(double x, double y) : ObservableObject
 {
@@ -24,10 +20,8 @@ public sealed partial class MapLightViewModel(double x, double y) : ObservableOb
 public sealed partial class MainViewModel : ViewModelBase
 {
     public bool IsAndroid => OperatingSystem.IsAndroid();
-    private readonly List<ImportedProfile> allProfiles = [];
-    private readonly List<EmptySubscription> emptySubscriptions = [];
+    private readonly ProfileCatalog catalog;
     private readonly IProfileVpnEngine? engine;
-    private readonly IProfileStore profileStore;
     private readonly UserSettings selectionSettings;
     private readonly Action persistSelection;
     public AppPlatform Platform { get; }
@@ -38,7 +32,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly Func<HttpClient>? directSubscriptionClient;
     private readonly Dictionary<string, ProbeSnapshot> probeSnapshots = new(StringComparer.Ordinal);
     private readonly HashSet<string> pendingProbes = new(StringComparer.Ordinal);
-    private readonly Dictionary<(string SourceId, string Content), ServerItemViewModel> visibleProfiles = [];
+    private IEnumerable<ServerItemViewModel> highlightedProfiles = [];
     private ServerItemViewModel? activeProfile;
     private ServerItemViewModel? connectingProfile;
     private CancellationTokenSource? connectionCancellation;
@@ -90,11 +84,11 @@ public sealed partial class MainViewModel : ViewModelBase
         var sources = Groups.Where(g => g.SourceUrl is not null && (sourceId is null || g.Id == sourceId)).ToArray();
         if (!includeEmpty)
         {
-            var populatedSources = allProfiles.Select(profile => profile.SourceId).ToHashSet(StringComparer.Ordinal);
+            var populatedSources = catalog.Library.Profiles.Select(profile => profile.SourceId).ToHashSet(StringComparer.Ordinal);
             sources = sources.Where(group => populatedSources.Contains(group.Id)).ToArray();
         }
         if (sources.Length == 0) return;
-        var initialProfiles = allProfiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
+        var initialProfiles = catalog.Library.Profiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
         var selectedOnly = sourceId is not null;
         var useDirectRoute = download is null && selectionSettings.RefreshSubscriptionsDirectly;
         var directBlocked = useDirectRoute && Platform.SupportsKillSwitch && engine?.IsNetworkProtectionActive == true;
@@ -119,13 +113,16 @@ public sealed partial class MainViewModel : ViewModelBase
             }
             // Imports and removals can finish while a background download is in flight.
             var currentGroups = Groups.ToHashSet();
-            var currentProfiles = allProfiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
-            var replacements = downloads.Where(item => item.Profiles.Length > 0 && currentGroups.Contains(item.Source) &&
+            var currentProfiles = catalog.Library.Profiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
+            var eligible = downloads.Where(item => item.Profiles.Length > 0 && currentGroups.Contains(item.Source) &&
                 initialProfiles[item.Source.Id].SequenceEqual(currentProfiles[item.Source.Id])).ToArray();
-            var saved = SubscriptionRefresh.TrySave(profileStore, allProfiles, emptySubscriptions, replacements, token);
-            var updated = saved is null ? 0 : replacements.Length;
+            var emptySources = catalog.Library.EmptySubscriptions.Select(source => source.SourceId).ToHashSet(StringComparer.Ordinal);
+            var replacements = eligible.Where(item => emptySources.Contains(item.Source.Id) ||
+                !currentProfiles[item.Source.Id].SequenceEqual(item.Profiles)).ToArray();
+            var saved = SubscriptionRefresh.TrySave(catalog, replacements, token);
+            var updated = saved ? eligible.Length : eligible.Length - replacements.Length;
             var failed = downloads.Length - updated;
-            if (saved is not null)
+            if (saved)
             {
                 foreach (var item in replacements)
                 {
@@ -133,15 +130,12 @@ public sealed partial class MainViewModel : ViewModelBase
                     foreach (var previous in currentProfiles[item.Source.Id])
                         if (!retained.Contains(ProfileKey(previous))) probeSnapshots.Remove(ProfileKey(previous));
                 }
-                allProfiles.Clear();
-                allProfiles.AddRange(saved.Profiles);
-                emptySubscriptions.Clear();
-                emptySubscriptions.AddRange(saved.EmptySubscriptions);
                 RebuildGroups();
                 if (activeProfile is { } active)
                 {
-                    var refreshed = allProfiles.FirstOrDefault(profile => SameProfile(profile, active.Profile));
-                    if (refreshed is null && allProfiles.FirstOrDefault(profile => profile.SourceId == active.Profile.SourceId) is { } sourcePeer)
+                    var profiles = catalog.Library.Profiles;
+                    var refreshed = profiles.FirstOrDefault(profile => SameProfile(profile, active.Profile));
+                    if (refreshed is null && profiles.FirstOrDefault(profile => profile.SourceId == active.Profile.SourceId) is { } sourcePeer)
                         refreshed = active.Profile with { Usage = sourcePeer.Usage };
                     if (refreshed is not null && refreshed != active.Profile)
                         activeProfile = Profiles.FirstOrDefault(row => row.Profile == refreshed) ?? new ServerItemViewModel(refreshed);
@@ -199,8 +193,8 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRefreshSelectedSubscription))]
     private bool isProbing;
-    public ObservableCollection<ServerItemViewModel> Profiles { get; } = [];
-    public ObservableCollection<ProfileGroup> Groups { get; } = [];
+    public ObservableCollection<ServerItemViewModel> Profiles => catalog.VisibleProfiles;
+    public ObservableCollection<ProfileGroup> Groups => catalog.Groups;
     [ObservableProperty] private ProfileGroup? selectedGroup;
     [ObservableProperty] private ServerItemViewModel? selectedProfile;
     [ObservableProperty] private bool isImportOpen;
@@ -396,28 +390,29 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(PowerBorderBrush));
         OnPropertyChanged(nameof(PowerGlowBrush));
         OnPropertyChanged(nameof(ConnectionStateBrush));
+        UpdateHighlightedProfiles();
+    }
+
+    private void UpdateHighlightedProfiles()
+    {
         var state = DisplayConnectionState;
-        var active = state == VpnConnectionState.Disconnected ? null : (connectingProfile ?? activeProfile)?.Profile;
+        var rows = catalog.FindVisibleRows(state == VpnConnectionState.Disconnected ? null : (connectingProfile ?? activeProfile)?.Profile);
+        if (!ReferenceEquals(rows, highlightedProfiles))
+        {
+            foreach (var previous in highlightedProfiles)
+                if (!rows.Contains(previous)) previous.ActiveConnectionBrush = null;
+            highlightedProfiles = rows;
+        }
+        if (!rows.Any()) return;
+
         var accent = ConnectionPalette.AccentFor(state);
         var background = IsLightTheme ? 255 : 18;
         byte Blend(byte channel) => (byte)((channel + 2 * background) / 3);
-        IBrush? brush = active is null ? null : new SolidColorBrush(Color.FromRgb(Blend(accent.R), Blend(accent.G), Blend(accent.B)));
-        var unavailableChanged = false;
-        foreach (var row in Profiles)
-        {
-            var isActive = active is not null && SameProfile(row.Profile, active);
-            row.ActiveConnectionBrush = isActive ? brush : null;
-            var wasUnavailable = row.IsUnavailable;
-            var snapshot = probeSnapshots.GetValueOrDefault(ProfileKey(row.Profile));
-            row.ConnectionAttemptFailed = snapshot?.ConnectionAttemptFailed == true;
-            row.ActiveProbeResult = snapshot?.ConnectionResult;
-            unavailableChanged |= wasUnavailable != row.IsUnavailable;
-        }
-        if (unavailableChanged)
-        {
-            OnPropertyChanged(nameof(UnavailableProfileCount));
-            OnPropertyChanged(nameof(CanRemoveUnavailable));
-        }
+        var color = Color.FromRgb(Blend(accent.R), Blend(accent.G), Blend(accent.B));
+        IBrush? brush = null;
+        foreach (var row in rows)
+            if (row.ActiveConnectionBrush is not ImmutableSolidColorBrush current || current.Color != color)
+                row.ActiveConnectionBrush = brush ??= new ImmutableSolidColorBrush(color);
     }
     public IBrush DelayBrush => LatencyPalette.For(DisplayDelay);
     public bool HasDisplayDelay => DisplayDelay is not null;
@@ -460,16 +455,14 @@ public sealed partial class MainViewModel : ViewModelBase
         this.countryResolver = countryResolver;
         this.installedApplicationProvider = installedApplicationProvider;
         this.directSubscriptionClient = directSubscriptionClient;
-        profileStore = store ?? new UnavailableProfileStore("Защищённое хранилище профилей не настроено.");
+        catalog = new(store ?? new UnavailableProfileStore("Защищённое хранилище профилей не настроено."));
         if (engine is not null) engine.StatusChanged += EngineStatusChanged;
         mapLightsTimer.Tick += (_, _) => AdvanceMapLights();
         subscriptionTimer.Tick += (_, _) => RefreshSubscriptionPresentation();
         subscriptionTimer.Start();
         try
         {
-            var library = profileStore.LoadLibrary();
-            allProfiles.AddRange(library.Profiles);
-            emptySubscriptions.AddRange(library.EmptySubscriptions);
+            catalog.Load();
             RebuildGroups();
             ConnectionState = engine?.Status.State ?? VpnConnectionState.Disconnected;
             if (ConnectionState == VpnConnectionState.Connected)
@@ -522,10 +515,10 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             var server = !profileChanged
                 ? activeProfile
-                : Profiles.FirstOrDefault(row => SameProfile(row.Profile, running!));
+                : catalog.FindVisible(running);
             if (server is null && running is not null)
             {
-                var stored = allProfiles.FirstOrDefault(profile => SameProfile(profile, running)) ?? running;
+                var stored = catalog.Library.Profiles.FirstOrDefault(profile => SameProfile(profile, running)) ?? running;
                 server = new ServerItemViewModel(stored);
                 if (probeSnapshots.TryGetValue(ProfileKey(stored), out var snapshot))
                 {
@@ -570,7 +563,7 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             RememberConnectionProbe(target, failure, connectionAttempt: true);
             if (status.State == VpnConnectionState.Error && connectingProfile is null)
-                activeProfile = Profiles.FirstOrDefault(row => SameProfile(row.Profile, target)) ?? new ServerItemViewModel(target);
+                activeProfile = catalog.FindVisible(target) ?? new ServerItemViewModel(target);
         }
         if (newSession && ConnectionState == status.State) StartActiveLatencyChecks();
         ConnectionState = status.State;
@@ -730,20 +723,13 @@ public sealed partial class MainViewModel : ViewModelBase
             try { persistSelection(); } catch { }
         }
         var previous = SelectedProfile?.Profile;
-        var existingRows = new Dictionary<ImportedProfile, ServerItemViewModel>();
-        foreach (var row in Profiles) existingRows.TryAdd(row.Profile, row);
-        var rows = allProfiles.Where(p => p.SourceId == value?.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(profile => existingRows.Remove(profile, out var row) ? row : CreateProfileRow(profile)).ToArray();
+        ServerItemViewModel[] rows;
         restoringProfileSelection = true;
         try
         {
-            UpdateProfileOrder(rows);
-            ReindexVisibleProfiles();
+            rows = catalog.ShowGroup(value?.Id, CreateProfileRow);
             selectionSettings.SelectedServers.TryGetValue(value?.Id ?? "", out var saved);
-            SelectedProfile = (previous is null ? null : FindVisibleProfile(previous))
-                ?? RestoreSavedServer(saved)
-                ?? (activeProfile is null ? null : FindVisibleProfile(activeProfile.Profile))
-                ?? Profiles.FirstOrDefault();
+            SelectedProfile = catalog.RestoreSelection(previous, saved, activeProfile?.Profile);
         }
         finally { restoringProfileSelection = false; }
         NotifyConnectionPresentation();
@@ -764,46 +750,9 @@ public sealed partial class MainViewModel : ViewModelBase
             row.ProbeTimedOut = snapshot.TimedOut;
             row.IsProbeUnconfirmed = snapshot.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
             row.CountryCode = snapshot.CountryCode;
+            row.UpdateConnectionProbe(snapshot.ConnectionResult, snapshot.ConnectionAttemptFailed);
         }
         return row;
-    }
-
-    private ServerItemViewModel? RestoreSavedServer(ServerSelection? saved)
-    {
-        if (saved is null) return null;
-        ServerItemViewModel? matchingName = null;
-        foreach (var row in Profiles)
-        {
-            var selection = ServerSelection.From(row.Profile);
-            if (selection.ContentHash == saved.ContentHash) return row;
-            if (matchingName is null && selection.IdentityHash == saved.IdentityHash) matchingName = row;
-        }
-        return matchingName;
-    }
-
-    private ServerItemViewModel? FindVisibleProfile(ImportedProfile profile) =>
-        visibleProfiles.GetValueOrDefault((profile.SourceId, profile.Content));
-
-    private void ReindexVisibleProfiles()
-    {
-        visibleProfiles.Clear();
-        foreach (var row in Profiles) visibleProfiles.TryAdd((row.Profile.SourceId, row.Profile.Content), row);
-    }
-
-    private void UpdateProfileOrder(ServerItemViewModel[] rows)
-    {
-        var retained = rows.ToHashSet();
-        for (var index = Profiles.Count - 1; index >= 0; index--)
-            if (!retained.Contains(Profiles[index])) Profiles.RemoveAt(index);
-
-        for (var index = 0; index < rows.Length; index++)
-        {
-            var row = rows[index];
-            if (index < Profiles.Count && ReferenceEquals(Profiles[index], row)) continue;
-            var current = Profiles.IndexOf(row);
-            if (current < 0) Profiles.Insert(index, row);
-            else Profiles.Move(current, index);
-        }
     }
 
     private void NotifyProfileListChanged()
@@ -826,7 +775,7 @@ public sealed partial class MainViewModel : ViewModelBase
             catch { continue; }
             Dispatcher.UIThread.Post(() =>
             {
-                var visible = FindVisibleProfile(row.Profile);
+                var visible = catalog.FindVisible(row.Profile);
                 if (visible is null || !ReferenceEquals(visible.Profile, row.Profile)) return;
                 var key = ProfileKey(row.Profile);
                 probeSnapshots[key] = GetSnapshot(visible.Profile) with { CountryCode = code };
@@ -935,16 +884,7 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     private void RebuildGroups(string? preferred = null)
     {
-        preferred ??= SelectedGroup?.Id ?? selectionSettings.SelectedSourceId;
-        Groups.Clear();
-        foreach (var group in allProfiles.GroupBy(p => p.SourceId))
-        {
-            var profile = group.First();
-            Groups.Add(new(group.Key, profile.SourceName, profile.SourceUrl));
-        }
-        foreach (var subscription in emptySubscriptions)
-            Groups.Add(new(subscription.SourceId, subscription.SourceName, subscription.SourceUrl));
-        var groupToSelect = Groups.FirstOrDefault(g => g.Id == preferred) ?? Groups.FirstOrDefault();
+        var groupToSelect = catalog.RebuildGroups(preferred ?? SelectedGroup?.Id ?? selectionSettings.SelectedSourceId);
         // A record-equal selection does not raise a property change after importing into an existing group.
         if (SelectedGroup == groupToSelect)
         {
@@ -1070,7 +1010,7 @@ public sealed partial class MainViewModel : ViewModelBase
         IsConnecting = true;
         try
         {
-            var remaining = allProfiles.Where(profile => !predicate(profile)).ToArray();
+            var remaining = catalog.Library.Profiles.Where(profile => !predicate(profile));
             var best = remaining
                 .Select(profile => (Profile: profile, Delay: Profiles.FirstOrDefault(row => row.Profile.Content == profile.Content)?.ProbeMilliseconds))
                 .OrderBy(candidate => candidate.Profile.SourceId == SelectedGroup?.Id ? 0 : 1)
@@ -1098,25 +1038,19 @@ public sealed partial class MainViewModel : ViewModelBase
     }
     private void RemoveWhere(Func<ImportedProfile, bool> predicate, string message, string? preferredSourceId = null, string? deletedGroupId = null)
     {
-        var remaining = allProfiles.Where(p => !predicate(p)).ToArray();
         try
         {
             if (!storageAvailable) throw new IOException();
-            var remainingSources = remaining.Select(p => p.SourceId).ToHashSet(StringComparer.Ordinal);
-            var nextEmpty = Groups.Where(group => group.Id != deletedGroupId && group.SourceUrl is not null && !remainingSources.Contains(group.Id))
-                .Select(group => new EmptySubscription(group.Id, group.Name, group.SourceUrl!)).ToArray();
-            profileStore.SaveLibrary(new(remaining, nextEmpty));
+            var removedProfiles = catalog.RemoveProfiles(predicate, deletedGroupId);
             preferredSourceId ??= SelectedGroup?.Id ?? activeProfile?.Profile.SourceId;
-            foreach (var removed in allProfiles.Where(predicate)) probeSnapshots.Remove(ProfileKey(removed));
-            allProfiles.Clear(); allProfiles.AddRange(remaining);
-            emptySubscriptions.Clear(); emptySubscriptions.AddRange(nextEmpty);
+            foreach (var removed in removedProfiles) probeSnapshots.Remove(ProfileKey(removed));
             if (IsProbing) profilesRemovedDuringProbe = true;
             if (deletedGroupId is null && SelectedGroup is { } selectedGroup && selectedGroup.Id == preferredSourceId &&
-                (selectedGroup.SourceUrl is not null || remainingSources.Contains(selectedGroup.Id)))
+                (selectedGroup.SourceUrl is not null || catalog.Library.Profiles.Any(profile => profile.SourceId == selectedGroup.Id)))
                 RemoveDisplayedProfiles(predicate);
             else RebuildGroups(preferredSourceId);
             if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } running)
-                activeProfile = Profiles.FirstOrDefault(row => SameProfile(row.Profile, running.Profile)) ?? running;
+                activeProfile = catalog.FindVisible(running.Profile) ?? running;
             Notice = message;
         }
         catch { Notice = "Не удалось сохранить изменения. Профили не удалены."; }
@@ -1128,13 +1062,12 @@ public sealed partial class MainViewModel : ViewModelBase
         restoringProfileSelection = true;
         try
         {
-            foreach (var row in Profiles.Where(row => predicate(row.Profile)).ToArray()) Profiles.Remove(row);
-            ReindexVisibleProfiles();
+            catalog.RemoveVisibleProfiles(predicate);
             SelectedProfile = selected is not null && Profiles.Contains(selected) ? selected
-                : Profiles.FirstOrDefault(row => activeProfile is not null && SameProfile(row.Profile, activeProfile.Profile))
-                    ?? Profiles.FirstOrDefault();
+                : catalog.FindVisible(activeProfile?.Profile) ?? Profiles.FirstOrDefault();
         }
         finally { restoringProfileSelection = false; }
+        UpdateHighlightedProfiles();
         NotifyProfileListChanged();
     }
     [RelayCommand] private async Task ImportAsync()
@@ -1160,17 +1093,12 @@ public sealed partial class MainViewModel : ViewModelBase
                     ?? (sourceUrl is null ? "Ручной профиль" : "Подписка") + $" {Groups.Count + 1}"
                 : ImportName.Trim();
             var imported = await importer.ImportAsync(input, subscriptionName: sourceName);
-            var added = imported.Where(p => !allProfiles.Any(e => e.SourceId == sourceId && e.Content == p.Content))
-                .Select(p => p with { SourceId = sourceId, SourceName = sourceName, SourceUrl = sourceUrl }).ToArray();
             if (!storageAvailable) { ImportMessage = "Хранилище недоступно. Сохранённый файл защищён от перезаписи."; return; }
-            var remainingEmpty = emptySubscriptions.Where(g => g.SourceId != sourceId).ToArray();
-            profileStore.SaveLibrary(new(allProfiles.Concat(added).ToArray(), remainingEmpty));
-            allProfiles.AddRange(added);
-            emptySubscriptions.Clear(); emptySubscriptions.AddRange(remainingEmpty);
+            var added = catalog.AddImportedProfiles(new(sourceId, sourceName, sourceUrl), imported);
             RebuildGroups(ConnectionState == VpnConnectionState.Connected ? SelectedGroup?.Id : sourceId);
-            Notice = added.Length == 0 ? "Эти серверы уже есть в подписке."
-                : importer.SkippedEntries > 0 ? $"Добавлено серверов: {added.Length}. Пропущено записей: {importer.SkippedEntries}."
-                : $"Добавлено серверов: {added.Length}.";
+            Notice = added == 0 ? "Эти серверы уже есть в подписке."
+                : importer.SkippedEntries > 0 ? $"Добавлено серверов: {added}. Пропущено записей: {importer.SkippedEntries}."
+                : $"Добавлено серверов: {added}.";
             ImportText = ""; ImportName = ""; IsImportOpen = false;
         }
         catch (FormatException e) { ImportMessage = e.Message; }
@@ -1284,7 +1212,7 @@ public sealed partial class MainViewModel : ViewModelBase
         var timedOut = !result.IsDeferred && result.Milliseconds is null && result.Message != "Не проверен";
         var previous = GetSnapshot(server.Profile);
         var key = ProfileKey(server.Profile);
-        if (allProfiles.Any(profile => ProfileKey(profile) == key))
+        if (catalog.Library.Profiles.Any(profile => SameProfile(profile, server.Profile)))
             probeSnapshots[key] = previous with
             {
                 Text = result.Message,
@@ -1295,14 +1223,15 @@ public sealed partial class MainViewModel : ViewModelBase
                 ConnectionAttemptFailed = false
             };
         pendingProbes.Remove(key);
-        var visible = FindVisibleProfile(server.Profile) ?? server;
+        var rows = catalog.FindVisibleRows(server.Profile);
+        var visible = rows.FirstOrDefault() ?? server;
         visible.ProbeText = result.Message;
         visible.ProbeMilliseconds = result.Milliseconds;
         visible.ProbeTimedOut = timedOut;
         visible.IsProbeUnconfirmed = result.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
         visible.IsProbePending = false;
-        visible.ConnectionAttemptFailed = false;
-        visible.ActiveProbeResult = null;
+        visible.UpdateConnectionProbe(null, false);
+        foreach (var duplicate in rows.Skip(1)) duplicate.UpdateConnectionProbe(null, false);
         if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } active && SameProfile(visible.Profile, active.Profile) && probe is not IActiveTunnelProbe &&
             Platform.ReleaseTarget != ReleaseTarget.AndroidArm64)
             activeDelayMilliseconds = result.Milliseconds;
@@ -1350,7 +1279,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private ProbeSnapshot GetSnapshot(ImportedProfile profile)
     {
         if (probeSnapshots.TryGetValue(ProfileKey(profile), out var snapshot)) return snapshot;
-        var row = FindVisibleProfile(profile);
+        var row = catalog.FindVisible(profile);
         return row is null
             ? new ProbeSnapshot("Не проверен", null, false, null)
             : new ProbeSnapshot(row.ProbeText, row.ProbeMilliseconds, row.ProbeTimedOut, row.CountryCode);
@@ -1359,15 +1288,24 @@ public sealed partial class MainViewModel : ViewModelBase
     private void RememberConnectionProbe(ImportedProfile profile, ServerProbeResult result, bool connectionAttempt = false)
     {
         var key = ProfileKey(profile);
-        if (allProfiles.Any(candidate => SameProfile(candidate, profile)))
+        if (catalog.Library.Profiles.Any(candidate => SameProfile(candidate, profile)))
         {
             var snapshot = GetSnapshot(profile);
-            probeSnapshots[key] = snapshot with
+            var updated = snapshot with
             {
                 ConnectionResult = result,
                 ConnectionAttemptFailed = result.Milliseconds is null && !result.IsDeferred &&
                     result.Diagnostics?.ErrorType != "ControlService" && (connectionAttempt || snapshot.ConnectionAttemptFailed)
             };
+            probeSnapshots[key] = updated;
+            var unavailableChanged = false;
+            foreach (var row in catalog.FindVisibleRows(profile))
+                unavailableChanged |= row.UpdateConnectionProbe(result, updated.ConnectionAttemptFailed);
+            if (unavailableChanged)
+            {
+                OnPropertyChanged(nameof(UnavailableProfileCount));
+                OnPropertyChanged(nameof(CanRemoveUnavailable));
+            }
         }
     }
 
@@ -1603,14 +1541,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         if (profilesRemovedDuringProbe) return;
         var selected = SelectedProfile;
-        var ordered = Profiles
-            .OrderBy(server => server.ProbeMilliseconds is not null ? 0 : server.ProbeTimedOut ? 2 : 1)
-            .ThenBy(server => server.ProbeMilliseconds ?? double.MaxValue)
-            .ThenBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        if (Profiles.SequenceEqual(ordered)) return;
-        UpdateProfileOrder(ordered);
-        ReindexVisibleProfiles();
+        if (!catalog.SortByProbe()) return;
         SelectedProfile = selected;
         OnPropertyChanged(nameof(SelectedProfile));
     }

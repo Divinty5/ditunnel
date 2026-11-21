@@ -315,7 +315,7 @@ public sealed class SettingsAndRefreshTests
     }
 
     [Fact]
-    public async Task RefreshReusesUnchangedVisibleRowsAndSelection()
+    public async Task RefreshOfUnchangedSubscriptionKeepsSelectionWithoutSavingOrRebuildingGroups()
     {
         var store = new Store();
         store.Items.Add(new("Selected", "VLESS", "selected", "sub", "Subscription", "https://example.com/sub"));
@@ -325,14 +325,49 @@ public sealed class SettingsAndRefreshTests
             var rows = vm.Profiles.ToArray();
             vm.SelectedProfile = rows[1];
             var changes = 0;
+            var groupChanges = 0;
             vm.Profiles.CollectionChanged += (_, _) => changes++;
+            vm.Groups.CollectionChanged += (_, _) => groupChanges++;
+            store.Fail = true;
 
             await vm.RefreshSubscriptionsAsync((_, _) =>
                 Task.FromResult<IReadOnlyList<ImportedProfile>>([new("Old", "VLESS", "old"), new("Selected", "VLESS", "selected")]));
 
             Assert.Equal(0, changes);
+            Assert.Equal(0, groupChanges);
+            Assert.Equal(0, store.SaveLibraryCalls);
+            Assert.Equal("Подписки успешно обновлены: 1", vm.RefreshToast);
             Assert.Equal(rows, vm.Profiles);
             Assert.Same(rows[1], vm.SelectedProfile);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshWritesUpdatedUsageAndReportsUnchangedSourceAsSuccessful(bool failSave)
+    {
+        var store = new Store { Fail = failSave };
+        var previousUsage = new SubscriptionUsage(0, 1, 10, null);
+        var currentUsage = new SubscriptionUsage(0, 2, 10, 4_000_000_000L);
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2", previousUsage));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var groups = vm.Groups.ToArray();
+            var groupChanges = 0;
+            vm.Groups.CollectionChanged += (_, _) => groupChanges++;
+            await vm.RefreshSubscriptionsAsync((url, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>(
+                url.EndsWith("/sub2", StringComparison.Ordinal)
+                    ? [new("Second", "VLESS", "second", Usage: currentUsage)]
+                    : [new("Old", "VLESS", "old")]));
+
+            Assert.Equal(1, store.SaveLibraryCalls);
+            Assert.Equal(0, groupChanges);
+            Assert.Same(groups[2], vm.Groups[2]);
+            Assert.Equal(failSave ? previousUsage : currentUsage, Assert.Single(store.Items, profile => profile.SourceId == "sub2").Usage);
+            Assert.Equal(failSave ? "Обновлено: 1. Не удалось обновить: 1" : "Подписки успешно обновлены: 2", vm.RefreshToast);
         }
         finally { await vm.ShutdownAsync(); }
     }
@@ -366,13 +401,50 @@ public sealed class SettingsAndRefreshTests
         finally { await vm.ShutdownAsync(); }
     }
 
-    private sealed class RefreshTestEngine : IProfileVpnEngine
+    [Fact]
+    public async Task StartupRefreshKeepsRunningServerWhenItsSourceReplacesIt()
     {
-        public VpnStatus Status => VpnStatus.Disconnected;
+        var store = new Store();
+        var running = store.Items[0];
+        var usage = new SubscriptionUsage(0, 1, 10, null);
+        var engine = new RefreshTestEngine(running);
+        var vm = new MainViewModel(engine, store, platform: AppPlatform.Windows,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "manual");
+            var selected = vm.SelectedProfile;
+
+            await vm.RefreshSubscriptionsOnStartupAsync((_, _) =>
+                Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new", Usage: usage)]));
+
+            Assert.Same(selected, vm.SelectedProfile);
+            Assert.Equal("manual", vm.SelectedGroup?.Id);
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+            Assert.Equal(running with { Usage = usage }, vm.RunningProfile);
+            Assert.DoesNotContain(store.Items, profile => profile.Content == running.Content);
+            Assert.Equal(0, engine.ConnectionChanges);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class RefreshTestEngine(ImportedProfile? running = null) : IProfileVpnEngine
+    {
+        public VpnStatus Status => running is null ? VpnStatus.Disconnected : new(VpnConnectionState.Connected);
+        public ImportedProfile? ActiveProfile => running;
+        public int ConnectionChanges { get; private set; }
         public bool RequiresAdministrator => false;
         public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
-        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task DisconnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+        {
+            ConnectionChanges++;
+            return Task.CompletedTask;
+        }
+        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        {
+            ConnectionChanges++;
+            return Task.CompletedTask;
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

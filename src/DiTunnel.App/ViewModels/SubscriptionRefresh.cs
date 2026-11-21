@@ -36,19 +36,18 @@ internal static class SubscriptionRefresh
         }
     }
 
-    public static ProfileLibrary? TrySave(IProfileStore store, IReadOnlyList<ImportedProfile> profiles,
-        IReadOnlyList<EmptySubscription> emptySubscriptions, IReadOnlyList<Download> replacements,
-        CancellationToken cancellationToken)
+    public static bool TrySave(ProfileCatalog catalog, IReadOnlyList<Download> replacements, CancellationToken cancellationToken)
     {
-        if (replacements.Count == 0) return null;
+        if (replacements.Count == 0) return false;
         var replacedSources = replacements.Select(item => item.Source.Id).ToHashSet(StringComparer.Ordinal);
+        var current = catalog.Library;
         var library = new ProfileLibrary(
-            profiles.Where(profile => !replacedSources.Contains(profile.SourceId))
+            current.Profiles.Where(profile => !replacedSources.Contains(profile.SourceId))
                 .Concat(replacements.SelectMany(item => item.Profiles)).ToArray(),
-            emptySubscriptions.Where(source => !replacedSources.Contains(source.SourceId)).ToArray());
+            current.EmptySubscriptions.Where(source => !replacedSources.Contains(source.SourceId)).ToArray());
         cancellationToken.ThrowIfCancellationRequested();
-        try { store.SaveLibrary(library); }
-        catch { return null; }
-        return library;
+        try { catalog.Save(library); }
+        catch { return false; }
+        return true;
     }
 }
