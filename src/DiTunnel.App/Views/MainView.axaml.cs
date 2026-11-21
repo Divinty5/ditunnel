@@ -42,12 +42,12 @@ public partial class MainView : UserControl
             await Dialogs.Settings(NavigationOwner, vm);
         }
     }
-    private async void SubscriptionsClick(object? sender, RoutedEventArgs e)
+    private void SubscriptionsClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
         if (vm.Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 && this.FindAncestorOfType<ApplicationShell>() is { } shell)
-            await shell.OpenSubscriptionsAsync(vm);
-        else await Dialogs.Subscriptions(NavigationOwner, vm);
+            shell.OpenSubscriptions(vm);
+        else Dialogs.Subscriptions(NavigationOwner, vm);
     }
     private void AddClick(object? sender, RoutedEventArgs e)
     {

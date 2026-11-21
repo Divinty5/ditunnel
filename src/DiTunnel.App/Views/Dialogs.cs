@@ -2,19 +2,16 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Input;
-using Avalonia.Input.GestureRecognizers;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
-using Avalonia.Threading;
 using Avalonia.VisualTree;
 using DiTunnel.Core.Connection;
 using DiTunnel.App.Controls;
@@ -62,7 +59,7 @@ public static class Dialogs
         scroll.Bind(ScrollViewer.BackgroundProperty, scroll.GetResourceObservable("PageBrush"));
         return scroll;
     }
-    private static Control Page(string title, Button back, Control content, Control? operations = null, bool mobileScroll = false)
+    private static Control Page(string title, Button back, Control content, bool mobileScroll = false)
     {
         var heading = new TextBlock
         {
@@ -75,41 +72,19 @@ public static class Dialogs
         headerGrid.Children.Add(back); headerGrid.Children.Add(heading); Grid.SetColumn(heading, 1);
         var header = new Border { Padding = new Thickness(16, 9), Child = headerGrid };
         header.Bind(Border.BackgroundProperty, header.GetResourceObservable("PageBrush"));
-        var root = new Grid { RowDefinitions = new RowDefinitions(operations is null ? "Auto,*" : "Auto,Auto,*") };
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
         void UpdateCompactTitle() => heading.Text = title == "Подписки и профили" && root.Bounds.Width < 560
             ? L.T("Подписки") : L.T(title);
         root.SizeChanged += (_, _) => UpdateCompactTitle();
         root.Bind(Grid.BackgroundProperty, root.GetResourceObservable("PageBrush"));
         root.Children.Add(header);
-        if (operations is not null) { root.Children.Add(operations); Grid.SetRow(operations, 1); }
         var scroll = Scroll(content);
         if (mobileScroll)
         {
             scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
             scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
-            // Keep the content viewport independent of the Fluent scrollbar grid.
-            scroll.Template = new FuncControlTemplate<ScrollViewer>((viewer, _) =>
-            {
-                var presenter = new ScrollContentPresenter { HorizontalContentAlignment = HorizontalAlignment.Stretch };
-                presenter.Bind(ContentPresenter.ContentProperty, viewer.GetObservable(ContentControl.ContentProperty));
-                presenter.Bind(ContentPresenter.BackgroundProperty, viewer.GetObservable(TemplatedControl.BackgroundProperty));
-                var gesture = new ScrollGestureRecognizer { CanVerticallyScroll = true };
-                gesture.Bind(ScrollGestureRecognizer.IsScrollInertiaEnabledProperty, viewer.GetObservable(ScrollViewer.IsScrollInertiaEnabledProperty));
-                gesture.Bind(ScrollGestureRecognizer.OffsetProperty, new Binding(nameof(ScrollContentPresenter.Offset)) { Source = presenter });
-                gesture.Bind(ScrollGestureRecognizer.ViewportProperty, new Binding(nameof(ScrollContentPresenter.Viewport)) { Source = presenter });
-                gesture.Bind(ScrollGestureRecognizer.ExtentProperty, new Binding(nameof(ScrollContentPresenter.Extent)) { Source = presenter });
-                presenter.GestureRecognizers.Add(gesture);
-                return presenter;
-            });
-            root.Loaded += (_, _) => Dispatcher.UIThread.Post(() =>
-            {
-                if (!root.IsLoaded || (scroll.Viewport.Height > 0 && content.Bounds.Height > 0)) return;
-                content.InvalidateMeasure();
-                scroll.InvalidateMeasure();
-                root.InvalidateMeasure();
-            }, DispatcherPriority.Background);
         }
-        root.Children.Add(scroll); Grid.SetRow(scroll, operations is null ? 1 : 2);
+        root.Children.Add(scroll); Grid.SetRow(scroll, 1);
         return root;
     }
     private static Window Window(Window owner, string title, double height = 560) => new()
@@ -585,7 +560,7 @@ public static class Dialogs
         return await dialog.ShowDialog<string?>(owner);
     }
 
-    public static async Task Subscriptions(ContentControl owner, MainViewModel vm, Action? closePage = null)
+    public static void Subscriptions(ContentControl owner, MainViewModel vm, Action? closePage = null)
     {
         var originalContent = owner.Content;
         if (TopLevel.GetTopLevel(owner) is Window window) window.Title = $"Di-Tunnel · {L.T("Подписки и профили")}";
@@ -988,7 +963,12 @@ public static class Dialogs
         root.Children.Add(page);
         root.Children.Add(confirmation);
         root.Children.Add(shareOverlay);
+        root.DetachedFromVisualTree += (_, _) =>
+        {
+            shareQr.Source = null;
+            shareBitmap?.Dispose();
+            shareBitmap = null;
+        };
         owner.Content = root;
-        await Task.CompletedTask;
     }
 }

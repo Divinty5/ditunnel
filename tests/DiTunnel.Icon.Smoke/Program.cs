@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Presenters;
@@ -41,6 +42,7 @@ internal static class Program
         if (args is ["--android-profile-layout"])
         {
             VerifyAndroidProfileLayout();
+            VerifyAndroidSubscriptionActions();
             return;
         }
         if (OperatingSystem.IsWindows() && args is ["--managed-caption"])
@@ -387,7 +389,7 @@ internal static class Program
         foreach (var platform in new[] { AppPlatform.Windows, AppPlatform.Android, AppPlatform.Linux })
         {
             var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: platform);
-            Dialogs.Subscriptions(window, model).GetAwaiter().GetResult();
+            Dialogs.Subscriptions(window, model);
             window.ShowInTaskbar = false;
             window.Width = 420; window.Height = 850; window.Show();
             window.UpdateLayout(); Dispatcher.UIThread.RunJobs();
@@ -440,7 +442,7 @@ internal static class Program
         var window = new Window { Width = 960, Height = 720, Content = viewport, ShowInTaskbar = false, ShowActivated = false };
         try
         {
-            Dialogs.Subscriptions(owner, model).GetAwaiter().GetResult();
+            Dialogs.Subscriptions(owner, model);
             window.Show();
             ResizeViewport(390);
             var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
@@ -482,6 +484,121 @@ internal static class Program
             window.UpdateLayout();
             Dispatcher.UIThread.RunJobs();
             window.UpdateLayout();
+        }
+    }
+
+    private static void VerifyAndroidSubscriptionActions()
+    {
+        var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: AppPlatform.Android,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var shell = new ApplicationShell { DataContext = model };
+        var window = new Window { Width = 390, Height = 690, Content = shell, ShowInTaskbar = false, ShowActivated = false };
+        Task? checking = null;
+        try
+        {
+            window.Show();
+            shell.OpenSubscriptions(model);
+            Layout();
+            var first = CheckActions(probing: false);
+            var selected = model.Profiles[1];
+            model.SelectedProfile = selected;
+            Require(AppBackNavigation.TryGoBack(), "Android back closes subscriptions");
+            shell.OpenSubscriptions(model);
+            Layout();
+            Require(!ReferenceEquals(first, CheckActions(probing: false)), "Reopening creates new Android action visuals");
+            Require(ReferenceEquals(model.SelectedProfile, selected), "Reopening preserves the selected profile");
+
+            checking = model.ProbeAllCommand.ExecuteAsync(null);
+            Layout();
+            var beforeResume = CheckActions(probing: true);
+            var listScroll = shell.GetVisualDescendants().OfType<ListBox>().Single().FindDescendantOfType<ScrollViewer>()!;
+            listScroll.Offset = new Vector(0, 84);
+            Layout();
+            var pageOffset = PageScroll().Offset;
+            var listOffset = listScroll.Offset;
+            Require(pageOffset.Y > 0 && listOffset.Y > 0, "Both scroll viewports have moved");
+
+            shell.RestoreSubscriptionsOnResume();
+            Layout();
+            var resumedScroll = PageScroll();
+            Require(Math.Abs(resumedScroll.Offset.Y - pageOffset.Y) < 1,
+                $"Resuming restores the page scroll position ({pageOffset} → {resumedScroll.Offset}, extent {resumedScroll.Extent}, viewport {resumedScroll.Viewport})");
+            Require(shell.GetVisualDescendants().OfType<ListBox>().Single().FindDescendantOfType<ScrollViewer>()!.Offset == listOffset,
+                "Resuming restores the profile list scroll position");
+            Require(!ReferenceEquals(beforeResume, CheckActions(probing: true)), "Resuming creates fresh actions for the pending probe");
+            Require(ReferenceEquals(model.SelectedProfile, selected), "Resuming preserves the selected profile");
+
+            model.CancelProbesCommand.Execute(null);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (!checking.IsCompleted && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+            Require(checking.IsCompleted, "Synthetic probe cancellation completes");
+            checking.GetAwaiter().GetResult();
+            Layout();
+            CheckActions(probing: false);
+
+            shell.RestoreSubscriptionsOnResume();
+            Require(AppBackNavigation.TryGoBack(), "Back can close subscriptions before resume redraw");
+            Layout();
+            Require(shell.NavigationHost.IsVisible && !shell.GetVisualDescendants().OfType<ListBox>().Any(),
+                "A queued resume redraw leaves the closed page detached");
+        }
+        finally
+        {
+            if (checking is { IsCompleted: false }) model.CancelProbesCommand.Execute(null);
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine("PASS_ANDROID_SUBSCRIPTION_ACTIONS_OPEN_REOPEN_RESUME_AND_PROBE_CANCEL");
+
+        ScrollViewer PageScroll() => shell.GetVisualDescendants().OfType<ScrollViewer>().First(scroll => scroll.IsEffectivelyVisible);
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        CheckBox CheckActions(bool probing)
+        {
+            var scroll = PageScroll();
+            Require(scroll.Presenter is ScrollContentPresenter && scroll.Extent.Height > scroll.Viewport.Height,
+                "Android subscriptions have a scroll viewport that includes the action controls");
+            scroll.Offset = new Vector(0, scroll.Extent.Height);
+            Layout();
+            var buttons = scroll.GetVisualDescendants().OfType<Button>().ToArray();
+            var probe = buttons.Single(button => Equals(button.Content, L.T("Проверить сервер")));
+            var probeAll = buttons.Single(button => Equals(button.Content, L.T("Проверить все")));
+            var cancel = buttons.Single(button => Equals(button.Content, L.T("Отменить проверку")));
+            Require(probe.IsEffectivelyVisible == !probing && probeAll.IsEffectivelyVisible == !probing && cancel.IsEffectivelyVisible == probing,
+                "The probe and cancel actions match the current operation");
+            var lowest = scroll.GetVisualDescendants().OfType<CheckBox>().Single();
+            var probeMode = buttons.Single(button => button.Content is string text &&
+                (text == L.T("Проверка: Быстрая") || text == L.T("Проверка: Точная (HTTPS)")));
+            var management = buttons.Where(button => !string.IsNullOrEmpty(AutomationProperties.GetName(button))).ToArray();
+            Require(management.Length == 7, "All seven management buttons are present");
+
+            using var render = new RenderTargetBitmap(new PixelSize((int)shell.Bounds.Width, (int)shell.Bounds.Height));
+            render.Render(shell);
+            using var png = new MemoryStream();
+            render.Save(png, new PngBitmapEncoderOptions());
+            png.Position = 0;
+            using var pixels = SkiaSharp.SKBitmap.Decode(png);
+            foreach (var control in management.Cast<Control>().Concat([probing ? cancel : probe, probeMode, lowest]))
+            {
+                var origin = control.TranslatePoint(default, scroll);
+                Require(control.IsEffectivelyVisible && origin is { } position && position.Y >= -1 &&
+                    position.Y + control.Bounds.Height <= scroll.Viewport.Height + 1,
+                    $"{control.GetType().Name} is fully within the scrolled viewport");
+                var rendered = control.TranslatePoint(default, shell)!.Value;
+                var firstPixel = pixels.GetPixel((int)rendered.X, (int)rendered.Y);
+                var distinct = Enumerable.Range((int)rendered.X, (int)control.Bounds.Width).Any(x =>
+                    Enumerable.Range((int)rendered.Y, (int)control.Bounds.Height).Any(y => pixels.GetPixel(x, y) != firstPixel));
+                Require(distinct, $"{control.GetType().Name} paints pixels in the scrolled viewport");
+            }
+            return lowest;
         }
     }
 

@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -17,7 +16,6 @@ public sealed class ApplicationShell : UserControl
         HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     private readonly ContentControl subscriptionsHost = new() { IsVisible = false,
         HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
-    private string? subscriptionsLanguage;
 
     public ApplicationShell()
     {
@@ -35,32 +33,47 @@ public sealed class ApplicationShell : UserControl
         Content = root;
     }
 
-    internal async Task OpenSubscriptionsAsync(MainViewModel model)
+    internal void OpenSubscriptions(MainViewModel model)
     {
+        Dialogs.Subscriptions(subscriptionsHost, model, CloseSubscriptions);
         NavigationHost.IsVisible = false;
         subscriptionsHost.IsVisible = true;
-        var language = UserSettings.Current.Language;
-        if (subscriptionsHost.Content is not Control page || page.DataContext != model || subscriptionsLanguage != language)
-        {
-            await Dialogs.Subscriptions(subscriptionsHost, model, CloseSubscriptions);
-            subscriptionsLanguage = language;
-        }
-        else AppBackNavigation.Set(CloseSubscriptions);
+    }
 
-        var body = (Control)subscriptionsHost.Content!;
+    internal void RestoreSubscriptionsOnResume()
+    {
+        if (subscriptionsHost.Content is not Control { DataContext: MainViewModel model } page) return;
+
+        // Android can retain layout and input while losing the drawing of controls after resume.
         Dispatcher.UIThread.Post(() =>
         {
-            if (!subscriptionsHost.IsVisible || !ReferenceEquals(subscriptionsHost.Content, body)) return;
-            body.FindDescendantOfType<ScrollViewer>()?.ScrollToHome();
-            // A valid layout can still have stale drawing commands after leaving the page.
-            foreach (var visual in body.GetVisualDescendants().Where(visual => visual.IsEffectivelyVisible))
-                visual.InvalidateVisual();
+            if (!IsLoaded || !ReferenceEquals(subscriptionsHost.Content, page)) return;
+            var pageOffset = page.FindDescendantOfType<ScrollViewer>()?.Offset;
+            var listOffset = page.FindDescendantOfType<ListBox>()?.FindDescendantOfType<ScrollViewer>()?.Offset;
+            OpenSubscriptions(model);
+            var restored = (Control)subscriptionsHost.Content!;
+            restored.Loaded += RestoreScrollOffsets;
+
+            void RestoreScrollOffsets(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+            {
+                restored.Loaded -= RestoreScrollOffsets;
+                if (listOffset is { } inner && restored.FindDescendantOfType<ListBox>()?.FindDescendantOfType<ScrollViewer>() is { } listScroll)
+                    listScroll.Offset = inner;
+                // The virtualizing profile list may change the page extent on its first layout.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (ReferenceEquals(subscriptionsHost.Content, restored) && pageOffset is { } outer &&
+                        restored.FindDescendantOfType<ScrollViewer>() is { } pageScroll)
+                        pageScroll.Offset = outer;
+                }, DispatcherPriority.Background);
+            }
         }, DispatcherPriority.Loaded);
     }
 
     private void CloseSubscriptions()
     {
         subscriptionsHost.IsVisible = false;
+        subscriptionsHost.Content = null;
         NavigationHost.IsVisible = true;
         AppBackNavigation.Clear();
     }

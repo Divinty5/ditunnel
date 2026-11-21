@@ -4,6 +4,7 @@ using Android.Content.PM;
 using Android.OS;
 using Android.Views;
 using Avalonia.Android;
+using DiTunnel.App.Views;
 
 namespace DiTunnel.Android;
 
@@ -36,6 +37,7 @@ public sealed class MainActivity : AvaloniaMainActivity
     protected override void OnResume()
     {
         base.OnResume();
+        if (Content is ApplicationShell shell) shell.RestoreSubscriptionsOnResume();
         VpnQuickControls.Refresh();
         if (VpnQuickControls.CanRecoverAfterSystemStop) _ = VpnQuickControls.RecoverAsync();
     }
