@@ -45,6 +45,11 @@ internal static class Program
             VerifyAndroidSubscriptionActions();
             return;
         }
+        if (args is ["--split-tunnel-applications"])
+        {
+            VerifySplitTunnelApplications();
+            return;
+        }
         if (OperatingSystem.IsWindows() && args is ["--managed-caption"])
         {
             WindowsCaptionSmoke.RunManaged();
@@ -427,6 +432,51 @@ internal static class Program
             model.ShutdownAsync().GetAwaiter().GetResult();
         }
         Console.WriteLine("PASS_SUBSCRIPTIONS_SCROLL_DURING_PROBES_WINDOWS_ANDROID_LINUX_SELECTION_GUARDS");
+    }
+
+    private static void VerifySplitTunnelApplications()
+    {
+        const string package = "ru.cian.main";
+        var selected = new HashSet<string>(StringComparer.Ordinal);
+        var applications = new SplitTunnelApplicationList(selected, ReleaseTarget.AndroidArm64);
+        var window = new Window { Width = 390, Height = 320, Content = applications, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            applications.SetApplications(Enumerable.Range(0, 500).Select(index =>
+                new InstalledApplication($"example.app{index}", $"App {index:000}")).Append(new(package, "Cian")));
+            window.Show();
+            Layout();
+            var list = applications.GetVisualDescendants().OfType<ListBox>().Single();
+            Require(list.ItemCount == 501 && list.GetVisualDescendants().OfType<CheckBox>().Count() is > 0 and < 30,
+                "Only the visible application checkboxes are created");
+
+            applications.Filter("main.cian.ru");
+            Layout();
+            CheckBox VisibleCheck() => list.GetVisualDescendants().OfType<CheckBox>().Single(check => check.IsEffectivelyVisible);
+            Require(list.ItemCount == 1 && VisibleCheck().IsChecked == false, "The display ID finds the unchecked application");
+            VisibleCheck().SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            Require(selected.SetEquals([package]), "The checkbox updates the draft");
+
+            applications.Filter("App 040");
+            Layout();
+            Require(list.ItemCount == 1 && VisibleCheck().IsChecked == false, "A recycled checkbox uses the new application's state");
+            applications.Filter(package);
+            Layout();
+            Require(VisibleCheck().IsChecked == true, "Filtering preserves the selected application");
+            selected.Clear();
+            applications.RefreshSelection();
+            Layout();
+            Require(VisibleCheck().IsChecked == false, "Changing the draft updates the visible checkbox");
+        }
+        finally { window.Close(); }
+        Console.WriteLine("PASS_VIRTUALIZED_SPLIT_TUNNEL_APPLICATIONS_FILTER_AND_SELECTION");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
     }
 
     private static void VerifyAndroidProfileLayout()

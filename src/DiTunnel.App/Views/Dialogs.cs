@@ -296,7 +296,7 @@ public static class Dialogs
             var domains = new TextBox { Text = string.Join(Environment.NewLine, draftDomains[activeMode]), AcceptsReturn = true, MinHeight = 72, PlaceholderText = L.T(OperatingSystem.IsLinux() ? "Домены или IP-адреса, по одному в строке" : "Домены или IPv4-адреса, по одному в строке") };
             var splitRules = new StackPanel { Spacing = 12 };
             var selectedApplications = new HashSet<string>(draftApplications[activeMode], StringComparer.Ordinal);
-            Action rebuildApplicationRows = () => { };
+            SplitTunnelApplicationList? applicationList = null;
             splitRules.Children.Add(Label("Домены и IP-адреса"));
             splitRules.Children.Add(domains);
             if (OperatingSystem.IsAndroid() || OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
@@ -305,12 +305,16 @@ public static class Dialogs
                 if (OperatingSystem.IsLinux()) splitRules.Children.Add(Label("Для Snap/Flatpak и дочерних процессов добавьте фактический исполняемый файл, который использует сеть."));
                 var search = new TextBox { PlaceholderText = L.T("Поиск приложений"), HorizontalAlignment = HorizontalAlignment.Stretch };
                 splitRules.Children.Add(search);
+                applicationList = new SplitTunnelApplicationList(selectedApplications, vm.Platform.ReleaseTarget);
+                refreshInstalledApplications = () => applicationList.SetApplications(installedApplications);
+                if (applicationsLoaded) refreshInstalledApplications();
+                search.TextChanged += (_, _) => applicationList.Filter(search.Text);
                 var autoSelectStatus = Label("");
                 var autoSelect = Button("Автовыбор", () =>
                 {
                     var before = selectedApplications.Count;
                     selectedApplications.UnionWith(ApplicationSelectionPresets.Select(activeMode, installedApplications));
-                    rebuildApplicationRows();
+                    applicationList.RefreshSelection();
                     autoSelectStatus.Text = $"{L.T("Автовыбор добавил приложений:")} {selectedApplications.Count - before}.";
                 });
                 autoSelect.HorizontalAlignment = HorizontalAlignment.Left;
@@ -320,41 +324,12 @@ public static class Dialogs
                 var clearSelection = Button("Снять все галочки", () =>
                 {
                     selectedApplications.Clear();
-                    rebuildApplicationRows();
+                    applicationList.RefreshSelection();
                     autoSelectStatus.Text = L.T("Выбор приложений очищен.");
                 });
                 clearSelection.Margin = new Thickness(0, 0, 8, 4);
                 autoSelectRow.Children.Add(clearSelection);
                 splitRules.Children.Add(autoSelectRow);
-                var applicationRows = new StackPanel { Spacing = 2 };
-                void BuildApplicationRows()
-                {
-                    applicationRows.Children.Clear();
-                    if (!applicationsLoaded)
-                    {
-                        applicationRows.Children.Add(Label("Загружаем список приложений…"));
-                        return;
-                    }
-                    var query = search.Text?.Trim() ?? "";
-                    foreach (var application in installedApplications
-                        .Select(item => (item.Id, item.Name, DisplayId: ApplicationSelectionPresets.DisplayId(item.Id, vm.Platform.ReleaseTarget)))
-                        .Where(item => query.Length == 0 || item.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)
-                            || item.Id.Contains(query, StringComparison.OrdinalIgnoreCase) || item.DisplayId.Contains(query, StringComparison.OrdinalIgnoreCase))
-                        .OrderByDescending(item => selectedApplications.Contains(item.Id))
-                        .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase))
-                    {
-                        var check = new CheckBox { Content = new TextBlock { Text = $"{application.Name}\n{application.DisplayId}", TextWrapping = TextWrapping.Wrap },
-                            HorizontalContentAlignment = HorizontalAlignment.Stretch, IsChecked = selectedApplications.Contains(application.Id), Padding = new Thickness(8, 6) };
-                        check.IsCheckedChanged += (_, _) =>
-                        {
-                            if (check.IsChecked == true) selectedApplications.Add(application.Id);
-                            else selectedApplications.Remove(application.Id);
-                        };
-                        applicationRows.Children.Add(check);
-                    }
-                }
-                rebuildApplicationRows = BuildApplicationRows;
-                refreshInstalledApplications = BuildApplicationRows;
                 if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
                 {
                     var executableTitle = OperatingSystem.IsLinux() ? "Добавить исполняемый файл…" : "Добавить файл .exe…";
@@ -373,22 +348,13 @@ public static class Dialogs
                             .Select(path => new InstalledApplication(path, Path.GetFileNameWithoutExtension(path))).ToArray();
                         installedApplications = installedApplications.Concat(additions).DistinctBy(app => app.Id, vm.Platform.ApplicationPathComparer).ToArray();
                         selectedApplications.UnionWith(additions.Select(app => app.Id));
-                        rebuildApplicationRows();
+                        applicationList.SetApplications(installedApplications);
                     });
                     addExecutable.Margin = new Thickness(0, 0, 8, 4);
                     autoSelectRow.Children.Add(addExecutable);
                 }
                 splitRules.Children.Add(autoSelectStatus);
-                search.TextChanged += (_, _) => rebuildApplicationRows();
-                rebuildApplicationRows();
-                splitRules.Children.Add(new ScrollViewer
-                {
-                    Content = applicationRows,
-                    Height = 260,
-                    MinHeight = 140,
-                    MaxHeight = 320,
-                    VerticalScrollBarVisibility = OperatingSystem.IsAndroid() ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto
-                });
+                splitRules.Children.Add(applicationList);
             }
             void CaptureDraft()
             {
@@ -406,7 +372,7 @@ public static class Dialogs
                     domains.Text = string.Join(Environment.NewLine, draftDomains[activeMode]);
                     selectedApplications.Clear();
                     selectedApplications.UnionWith(draftApplications[activeMode]);
-                    rebuildApplicationRows();
+                    applicationList?.RefreshSelection();
                 }
                 UpdateSplitRulesVisibility();
             };
