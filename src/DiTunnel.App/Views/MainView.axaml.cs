@@ -39,7 +39,7 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel vm)
         {
             await vm.InitializeSplitDefaultsAsync();
-            await Dialogs.Settings(NavigationOwner, vm);
+            await SettingsPage.ShowAsync(NavigationOwner, vm);
         }
     }
     private void SubscriptionsClick(object? sender, RoutedEventArgs e)
@@ -47,7 +47,7 @@ public partial class MainView : UserControl
         if (DataContext is not MainViewModel vm) return;
         if (vm.Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 && this.FindAncestorOfType<ApplicationShell>() is { } shell)
             shell.OpenSubscriptions(vm);
-        else Dialogs.Subscriptions(NavigationOwner, vm);
+        else SubscriptionsPage.Show(NavigationOwner, vm);
     }
     private void AddClick(object? sender, RoutedEventArgs e)
     {

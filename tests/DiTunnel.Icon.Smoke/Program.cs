@@ -50,6 +50,11 @@ internal static class Program
             VerifySplitTunnelApplications();
             return;
         }
+        if (args is ["--settings-drafts"])
+        {
+            VerifySettingsDrafts();
+            return;
+        }
         if (OperatingSystem.IsWindows() && args is ["--managed-caption"])
         {
             WindowsCaptionSmoke.RunManaged();
@@ -137,7 +142,7 @@ internal static class Program
             if (OperatingSystem.IsWindows()) VerifyTaskbarRefresh(window);
         }
         var draft = new TextBox { Text = "ru\nрф" };
-        var section = Dialogs.SettingsSection("Соединение", draft);
+        var section = SettingsPage.CreateSection("Соединение", draft);
         Require(!section.IsExpanded, "Settings sections start collapsed");
         section.IsExpanded = true; draft.Text = "example.ru"; section.IsExpanded = false;
         Require(ReferenceEquals(section.Content, draft) && draft.Text == "example.ru", "Collapsing keeps settings drafts");
@@ -215,7 +220,7 @@ internal static class Program
             window.Show();
             Dispatcher.UIThread.RunJobs();
             var host = ((ApplicationShell)window.Content!).NavigationHost;
-            Dialogs.Settings(host, model).GetAwaiter().GetResult();
+            SettingsPage.ShowAsync(host, model).GetAwaiter().GetResult();
             Dispatcher.UIThread.RunJobs();
             var section = host.GetVisualDescendants().OfType<Expander>()
                 .Single(item => item.Header is TextBlock title && title.Text == L.T("Обновления"));
@@ -272,7 +277,7 @@ internal static class Program
             var content = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 4) };
             content.Children.Add(new TextBlock { Text = "Настройки раздела" });
             content.Children.Add(draft);
-            var section = Dialogs.SettingsSection(title, content);
+            var section = SettingsPage.CreateSection(title, content);
             sections.Add(section);
             panel.Children.Add(section);
         }
@@ -394,7 +399,7 @@ internal static class Program
         foreach (var platform in new[] { AppPlatform.Windows, AppPlatform.Android, AppPlatform.Linux })
         {
             var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: platform);
-            Dialogs.Subscriptions(window, model);
+            SubscriptionsPage.Show(window, model);
             window.ShowInTaskbar = false;
             window.Width = 420; window.Height = 850; window.Show();
             window.UpdateLayout(); Dispatcher.UIThread.RunJobs();
@@ -432,6 +437,75 @@ internal static class Program
             model.ShutdownAsync().GetAwaiter().GetResult();
         }
         Console.WriteLine("PASS_SUBSCRIPTIONS_SCROLL_DURING_PROBES_WINDOWS_ANDROID_LINUX_SELECTION_GUARDS");
+    }
+
+    private static void VerifySettingsDrafts()
+    {
+        var settings = UserSettings.Current;
+        settings.Language = "ru";
+        settings.SplitTunnelMode = SplitTunnelMode.BypassSelected;
+        L.Apply();
+        var model = new MainViewModel(null, new EmptyStore(), platform: AppPlatform.Windows);
+        var original = new Border();
+        var host = new ContentControl { Content = original };
+        var window = new Window { Width = 740, Height = 700, Content = host, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            window.Show();
+            SettingsPage.ShowAsync(host, model).GetAwaiter().GetResult();
+            Layout();
+            var (mode, domains) = Editor();
+            domains.Text = "direct.example";
+            mode.SelectedIndex = (int)SplitTunnelMode.ProxySelected;
+            domains.Text = "proxy.example";
+            mode.SelectedIndex = (int)SplitTunnelMode.BypassSelected;
+            Require(domains.Text == "direct.example", "Changing split modes restores the corresponding draft");
+            domains.Text = "updated.example";
+
+            var appearance = Section("Интерфейс");
+            appearance.IsExpanded = true;
+            Layout();
+            var language = appearance.GetVisualDescendants().OfType<ComboBox>().First();
+            language.SelectedIndex = L.Languages.ToList().FindIndex(option => option.Code == "en");
+            Layout();
+
+            var (rebuiltMode, rebuiltDomains) = Editor();
+            Require(!ReferenceEquals(rebuiltMode, mode) && settings.Language == "en", "Changing language rebuilds the localized settings page");
+            Require(rebuiltDomains.Text == "updated.example", "Rebuilding settings keeps the latest edit to the active rules");
+            rebuiltMode.SelectedIndex = (int)SplitTunnelMode.ProxySelected;
+            Require(rebuiltDomains.Text == "proxy.example", "Rebuilding settings keeps the other mode's draft");
+            rebuiltDomains.Text = "saved.example";
+            Require(AppBackNavigation.TryGoBack() && ReferenceEquals(host.Content, original), "Back returns from the settings page");
+            Require(settings.GetSplitTunnelRules(SplitTunnelMode.BypassSelected).Domains.SequenceEqual(["updated.example"]) &&
+                settings.GetSplitTunnelRules(SplitTunnelMode.ProxySelected).Domains.SequenceEqual(["saved.example"]),
+                "Closing settings saves both modes independently");
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine("PASS_SETTINGS_SPLIT_DRAFTS_MODE_LANGUAGE_AND_BACK");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+
+        Expander Section(string title) => host.GetVisualDescendants().OfType<Expander>()
+            .Single(item => item.Header is TextBlock header && header.Text == L.T(title));
+
+        (ComboBox Mode, TextBox Domains) Editor()
+        {
+            var section = Section("Раздельное туннелирование");
+            section.IsExpanded = true;
+            Layout();
+            return (section.GetVisualDescendants().OfType<ComboBox>().Single(),
+                section.GetVisualDescendants().OfType<TextBox>().Single(input => input.AcceptsReturn));
+        }
     }
 
     private static void VerifySplitTunnelApplications()
@@ -492,7 +566,7 @@ internal static class Program
         var window = new Window { Width = 960, Height = 720, Content = viewport, ShowInTaskbar = false, ShowActivated = false };
         try
         {
-            Dialogs.Subscriptions(owner, model);
+            SubscriptionsPage.Show(owner, model);
             window.Show();
             ResizeViewport(390);
             var list = owner.GetVisualDescendants().OfType<ListBox>().Single();

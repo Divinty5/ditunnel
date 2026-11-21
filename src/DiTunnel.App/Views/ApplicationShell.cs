@@ -35,7 +35,7 @@ public sealed class ApplicationShell : UserControl
 
     internal void OpenSubscriptions(MainViewModel model)
     {
-        Dialogs.Subscriptions(subscriptionsHost, model, CloseSubscriptions);
+        SubscriptionsPage.Show(subscriptionsHost, model, CloseSubscriptions);
         NavigationHost.IsVisible = false;
         subscriptionsHost.IsVisible = true;
     }

@@ -653,13 +653,19 @@ public sealed class SettingsAndRefreshTests
     [Fact] public void InactiveRulesDoNotRestartProxyAllOrTheOtherSplitMode()
     {
         var settings = new UserSettings { SplitTunnelMode = SplitTunnelMode.ProxyAll };
+        var draft = new SplitTunnelRulesDraft(settings);
         var all = settings.NetworkSettingsFingerprint();
-        settings.SetSplitTunnelRules(SplitTunnelMode.BypassSelected, [], ["direct.exe"]);
+        draft.Capture(SplitTunnelMode.BypassSelected, "direct.example", ["direct.exe"]);
+        draft.ApplyTo(settings, SplitTunnelMode.ProxyAll);
         Assert.Equal(all, settings.NetworkSettingsFingerprint());
-        settings.SplitTunnelMode = SplitTunnelMode.BypassSelected;
+        draft.ApplyTo(settings, SplitTunnelMode.BypassSelected);
         var bypass = settings.NetworkSettingsFingerprint();
-        settings.SetSplitTunnelRules(SplitTunnelMode.ProxySelected, [], ["proxy.exe"]);
+        draft.Capture(SplitTunnelMode.ProxySelected, "proxy.example\nproxy.example", ["proxy.exe"]);
+        draft.ApplyTo(settings, SplitTunnelMode.BypassSelected);
         Assert.Equal(bypass, settings.NetworkSettingsFingerprint());
+        Assert.Equal(["direct.exe"], settings.GetSplitTunnelRules(SplitTunnelMode.BypassSelected).Processes);
+        Assert.Equal(["proxy.exe"], settings.GetSplitTunnelRules(SplitTunnelMode.ProxySelected).Processes);
+        Assert.Equal("proxy.example", draft.DomainText(SplitTunnelMode.ProxySelected));
     }
 
     [Fact] public void AutoSelectionRecognizesDesktopAndAndroidWorkAppsWithoutMatchingUnrelatedTeams()
