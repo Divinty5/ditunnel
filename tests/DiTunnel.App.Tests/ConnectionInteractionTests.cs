@@ -141,6 +141,33 @@ public sealed class ConnectionInteractionTests
         finally { await vm.ShutdownAsync(); }
     }
     [Fact]
+    public void BulkSortPublishesTheFinalOrderAndLookupInOneNotification()
+    {
+        var store = new GroupedStore
+        {
+            Items = Enumerable.Range(0, 1000)
+                .Select(index => new ImportedProfile($"Profile {index:D4}", "VLESS", $"synthetic-{index % 999}", "a", "Subscription A"))
+                .ToList()
+        };
+        var catalog = new ProfileCatalog(store);
+        catalog.Load();
+        var original = catalog.ShowGroup("a", profile => new ServerItemViewModel(profile));
+        for (var index = 0; index < original.Length; index++) original[index].ProbeMilliseconds = original.Length - index;
+        var notifications = 0;
+        catalog.VisibleProfiles.CollectionChanged += (_, change) =>
+        {
+            notifications++;
+            Assert.Equal(NotifyCollectionChangedAction.Reset, change.Action);
+            Assert.Equal(original.Reverse(), catalog.VisibleProfiles);
+            Assert.Equal([original[^1], original[0]], catalog.FindVisibleRows(store.Items[0]));
+        };
+
+        Assert.True(catalog.SortByProbe());
+        Assert.False(catalog.SortByProbe());
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
     public async Task FilteringRemovesOnlyServersThatFailedAProbe()
     {
         var store = new SortingStore();

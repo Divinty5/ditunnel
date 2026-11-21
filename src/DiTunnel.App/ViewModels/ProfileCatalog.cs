@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using DiTunnel.Core.Profiles;
 
 namespace DiTunnel.App.ViewModels;
@@ -10,11 +12,14 @@ public sealed record ProfileGroup(string Id, string Name, string? SourceUrl = nu
 
 internal sealed class ProfileCatalog(IProfileStore store)
 {
+    private const int SmallSortLimit = 32;
+    private readonly ProfileRows visibleRows = [];
     private ILookup<(string SourceId, string Content), ServerItemViewModel>? visibleProfiles;
+    private string? visibleSourceId;
 
     public ProfileLibrary Library { get; private set; } = new([], []);
     public ObservableCollection<ProfileGroup> Groups { get; } = [];
-    public ObservableCollection<ServerItemViewModel> VisibleProfiles { get; } = [];
+    public ObservableCollection<ServerItemViewModel> VisibleProfiles => visibleRows;
 
     public void Load() => Library = store.LoadLibrary();
 
@@ -63,12 +68,28 @@ internal sealed class ProfileCatalog(IProfileStore store)
 
     public ServerItemViewModel[] ShowGroup(string? sourceId, Func<ImportedProfile, ServerItemViewModel> createRow)
     {
+        var profiles = Library.Profiles.Where(profile => profile.SourceId == sourceId)
+            .OrderBy(profile => profile.Name, StringComparer.OrdinalIgnoreCase);
+        if (visibleSourceId != sourceId)
+        {
+            var newGroup = profiles.Select(createRow).ToArray();
+            visibleSourceId = sourceId;
+            if (visibleRows.Count > 0 || newGroup.Length > 0)
+            {
+                ReindexVisibleProfiles(newGroup);
+                visibleRows.ReplaceAll(newGroup);
+            }
+            return newGroup;
+        }
+
         var existingRows = new Dictionary<ImportedProfile, ServerItemViewModel>();
-        foreach (var row in VisibleProfiles) existingRows.TryAdd(row.Profile, row);
-        var rows = Library.Profiles.Where(profile => profile.SourceId == sourceId)
-            .OrderBy(profile => profile.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(profile => existingRows.Remove(profile, out var row) ? row : createRow(profile)).ToArray();
-        UpdateOrder(rows);
+        foreach (var row in visibleRows) existingRows.TryAdd(row.Profile, row);
+        var rows = profiles.Select(profile => existingRows.Remove(profile, out var row) ? row : createRow(profile)).ToArray();
+        if (!visibleRows.SequenceEqual(rows))
+        {
+            ApplyChanges(rows);
+            ReindexVisibleProfiles(visibleRows);
+        }
         return rows;
     }
 
@@ -83,7 +104,7 @@ internal sealed class ProfileCatalog(IProfileStore store)
     public void RemoveVisibleProfiles(Func<ImportedProfile, bool> predicate)
     {
         foreach (var row in VisibleProfiles.Where(row => predicate(row.Profile)).ToArray()) VisibleProfiles.Remove(row);
-        ReindexVisibleProfiles();
+        ReindexVisibleProfiles(visibleRows);
     }
 
     public bool SortByProbe()
@@ -93,7 +114,12 @@ internal sealed class ProfileCatalog(IProfileStore store)
             .ThenBy(server => server.ProbeMilliseconds ?? double.MaxValue)
             .ThenBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        return UpdateOrder(ordered);
+        if (visibleRows.SequenceEqual(ordered)) return false;
+        // The order of lookup values only matters when several rows share the same profile key.
+        if (visibleProfiles?.Count != ordered.Length) ReindexVisibleProfiles(ordered);
+        if (ordered.Length > SmallSortLimit) visibleRows.ReplaceAll(ordered);
+        else ApplyChanges(ordered);
+        return true;
     }
 
     private ServerItemViewModel? FindSavedServer(ServerSelection? saved)
@@ -109,12 +135,11 @@ internal sealed class ProfileCatalog(IProfileStore store)
         return matchingName;
     }
 
-    private void ReindexVisibleProfiles() =>
-        visibleProfiles = VisibleProfiles.ToLookup(row => (row.Profile.SourceId, row.Profile.Content));
+    private void ReindexVisibleProfiles(IEnumerable<ServerItemViewModel> rows) =>
+        visibleProfiles = rows.ToLookup(row => (row.Profile.SourceId, row.Profile.Content));
 
-    private bool UpdateOrder(ServerItemViewModel[] rows)
+    private void ApplyChanges(ServerItemViewModel[] rows)
     {
-        if (VisibleProfiles.SequenceEqual(rows)) return false;
         var retained = rows.ToHashSet();
         for (var index = VisibleProfiles.Count - 1; index >= 0; index--)
             if (!retained.Contains(VisibleProfiles[index])) VisibleProfiles.RemoveAt(index);
@@ -127,7 +152,19 @@ internal sealed class ProfileCatalog(IProfileStore store)
             if (current < 0) VisibleProfiles.Insert(index, row);
             else VisibleProfiles.Move(current, index);
         }
-        ReindexVisibleProfiles();
-        return true;
+    }
+
+    private sealed class ProfileRows : ObservableCollection<ServerItemViewModel>
+    {
+        public void ReplaceAll(ServerItemViewModel[] rows)
+        {
+            CheckReentrancy();
+            var countChanged = Count != rows.Length;
+            Items.Clear();
+            foreach (var row in rows) Items.Add(row);
+            if (countChanged) OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        }
     }
 }

@@ -11,6 +11,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using DiTunnel.Core.Connection;
 using DiTunnel.App.Controls;
@@ -111,10 +112,28 @@ internal static class SubscriptionsPage
         // Keep the ListBox and its ScrollViewer enabled while probes run. Only
         // selecting a row is blocked; mouse wheel and touch scrolling stay active.
         list.Bind(ListBox.SelectedItemProperty, new Binding("SelectedProfile") { Mode = BindingMode.OneWay });
+        list.AttachedToVisualTree += (_, _) => vm.ProfileOrderChanged += PreserveSortOffset;
+        list.DetachedFromVisualTree += (_, _) => vm.ProfileOrderChanged -= PreserveSortOffset;
+
+        void PreserveSortOffset()
+        {
+            if (list.FindDescendantOfType<ScrollViewer>() is not { } scroll) return;
+            var offset = scroll.Offset;
+            var selected = vm.SelectedProfile;
+            var group = vm.SelectedGroup;
+            // Selection can queue a scroll to the selected card's new index during a reorder.
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (list.IsAttachedToVisualTree() && vm.SelectedGroup == group && ReferenceEquals(vm.SelectedProfile, selected))
+                    scroll.Offset = offset;
+            });
+        }
+
         // ListBox owns the touch gesture on Android, so child Tapped handlers are not
         // reliable. SelectionChanged is raised after the gesture has selected the row.
         list.SelectionChanged += (_, _) =>
         {
+            if (vm.IsRestoringProfileSelection) return;
             if (vm.CanSelectProfile && list.SelectedItem is ServerItemViewModel selected) vm.SelectedProfile = selected;
             else if (list.SelectedItem is not null && vm.SelectedProfile is { } current &&
                      !ReferenceEquals(list.SelectedItem, current) && vm.Profiles.Contains(current))

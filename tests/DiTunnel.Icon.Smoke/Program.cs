@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Collections.Specialized;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
@@ -50,6 +51,11 @@ internal static class Program
         {
             VerifyVirtualizedProfileGrid(AppPlatform.Android);
             VerifyVirtualizedProfileGrid(OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows);
+            return;
+        }
+        if (args is ["--profile-order"])
+        {
+            VerifyProfileOrder();
             return;
         }
         if (args is ["--split-tunnel-applications"])
@@ -715,6 +721,66 @@ internal static class Program
         }
     }
 
+    private static void VerifyProfileOrder()
+    {
+        var platform = OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows;
+        var model = new MainViewModel(null, new ProfileOrderStore(), new ReverseOrderProbe(), platform: platform,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var owner = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        var window = new Window { Width = 960, Height = 720, Content = owner, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            SubscriptionsPage.Show(owner, model);
+            window.Show();
+            Layout();
+            var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
+            var scroll = list.FindDescendantOfType<ScrollViewer>()!;
+            var groups = owner.GetVisualDescendants().OfType<ComboBox>().Single();
+            var changes = new List<NotifyCollectionChangedAction>();
+            model.Profiles.CollectionChanged += (_, change) => changes.Add(change.Action);
+
+            var selected = model.Profiles[100];
+            list.SelectedItem = selected;
+            list.ScrollIntoView(400);
+            Layout();
+            var offset = scroll.Offset.Y;
+            Require(offset > 0, "The profile list is scrolled before reordering");
+            model.ProbeAllCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            Layout();
+            Require(changes.SequenceEqual([NotifyCollectionChangedAction.Reset]), "A large probe sort publishes one reset");
+            Require(model.Profiles[899] == selected && ReferenceEquals(list.SelectedItem, selected), "Sorting restores the same selected card at its new index");
+            Require(Math.Abs(scroll.Offset.Y - offset) < 1, $"Sorting preserves the viewport offset ({offset} → {scroll.Offset.Y})");
+
+            changes.Clear();
+            groups.SelectedItem = model.Groups[1];
+            Layout();
+            Require(changes.SequenceEqual([NotifyCollectionChangedAction.Reset]), "Switching the subscription publishes one reset");
+            Require(model.Profiles.All(row => row.Profile.SourceId == "b") && ReferenceEquals(list.SelectedItem, model.Profiles[0]),
+                "The list selects and displays the new subscription's first profile");
+
+            changes.Clear();
+            groups.SelectedItem = model.Groups[0];
+            Layout();
+            Require(changes.SequenceEqual([NotifyCollectionChangedAction.Reset]), "Returning to the original subscription publishes one reset");
+            Require(list.SelectedItem is ServerItemViewModel restored && ReferenceEquals(restored, model.SelectedProfile) && restored.Profile == selected.Profile,
+                "Returning to the subscription restores its saved profile");
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine($"PASS_BULK_PROFILE_SORT_AND_GROUP_SWITCH {platform.ReleaseTarget}");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
     private static void VerifyAndroidSubscriptionActions()
     {
         var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: AppPlatform.Android,
@@ -916,6 +982,21 @@ internal static class Program
             await Task.Delay(Timeout.Infinite, cancellationToken);
             return new ServerProbeResult(null, "synthetic");
         }
+    }
+
+    private sealed class ProfileOrderStore : IProfileStore
+    {
+        public IReadOnlyList<ImportedProfile> Load() => new[] { "a", "b" }.SelectMany(source => Enumerable.Range(0, 1000)
+            .Select(index => new ImportedProfile($"{index:D4}", "VLESS", $"synthetic-{source}-{index}", source, $"Subscription {source}", $"https://example.invalid/{source}")))
+            .ToArray();
+
+        public void Save(IEnumerable<ImportedProfile> profiles) { }
+    }
+
+    private sealed class ReverseOrderProbe : IServerProbe
+    {
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            Task.FromResult(ProbePolicy.Success(1000 - int.Parse(profile.Name), "HTTPS", "HTTPS", true));
     }
 
     private static void VerifyWindowThemeAndBounds(Window window)

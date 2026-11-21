@@ -428,6 +428,8 @@ public sealed partial class MainViewModel : ViewModelBase
     public bool CanRefreshSelectedSubscription => CanRefreshSubscriptions && SelectedSubscriptionUrl is not null;
     public bool CanManageProfiles => storageAvailable && !IsBusy && !IsConnecting && !IsProbing;
     public bool CanSelectProfile => !IsBusy && !HasPendingConnection && !IsCancellingConnection && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting;
+    internal bool IsRestoringProfileSelection => restoringProfileSelection;
+    internal event Action? ProfileOrderChanged;
     public bool CanConnect => CanCancelConnection || (engine is not null && !IsCancellingConnection && !IsBusy && !IsProbing && ConnectionState != VpnConnectionState.Disconnecting);
     // A latency test never changes the selected VPN connection, so it remains safe while TUN is active.
     public bool CanProbe => CanProbeAll && SelectedProfile is not null;
@@ -1541,9 +1543,15 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         if (profilesRemovedDuringProbe) return;
         var selected = SelectedProfile;
-        if (!catalog.SortByProbe()) return;
-        SelectedProfile = selected;
-        OnPropertyChanged(nameof(SelectedProfile));
+        restoringProfileSelection = true;
+        try
+        {
+            if (!catalog.SortByProbe()) return;
+            if (ReferenceEquals(SelectedProfile, selected)) OnPropertyChanged(nameof(SelectedProfile));
+            else SelectedProfile = selected;
+            ProfileOrderChanged?.Invoke();
+        }
+        finally { restoringProfileSelection = false; }
     }
     private async Task<bool> SelectLowestProfileAsync()
     {
