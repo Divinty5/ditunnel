@@ -27,7 +27,8 @@ MinVersion=10.0.19041
 UninstallDisplayIcon={app}\Di-Tunnel.exe
 OutputDir=..\artifacts\installer
 OutputBaseFilename=Di-Tunnel-{#AppVersion}-Setup-x64
-Compression=lzma2
+Compression=lzma2/ultra64
+LZMANumBlockThreads=1
 SolidCompression=yes
 CloseApplications=no
 RestartApplications=no
@@ -68,7 +69,7 @@ chinesesimplified.ExitBeforeUninstall=Di-Tunnel：请通过系统托盘退出应
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"
 
 [Files]
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Excludes: "\libSkiaSharp.pdb,\libHarfBuzzSharp.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Languages\LICENSE-ChineseSimplified"; DestDir: "{app}\Licenses"; DestName: "Inno-Setup-ChineseSimplified-MIT.txt"; Flags: ignoreversion
 
 [Icons]
