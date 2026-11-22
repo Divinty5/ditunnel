@@ -18,9 +18,14 @@
 
 ## Android
 
-Нужны .NET Android workload, SDK API 36 и build-tools 36.0.0, JDK, Python 3.8+, libXray AAR и нативный мост AWG из manifests. Публичная цель — `android-arm64`, минимум API 27. `scripts/Build-Android.ps1` принимает пути к подготовленному AndroidRoot и JDK. Локальное окружение и ключи могут находиться в игнорируемой папке `.tools/android-build-local`.
+Для сборки в PowerShell нужен подготовленный каталог `$androidRoot` с `dotnet/dotnet.exe` и workload `android`, SDK API 36 и build-tools 36.0.0 в `android-sdk`, нативным мостом AWG в `amneziawg/native` и архивом `libxray/<версия>/libxray-android/libXray.aar`. Версии нативных компонентов заданы в `eng/android-runtime.json`. Также нужны JDK и `python` версии 3.8 или новее в `PATH`. Пакет рассчитан на `android-arm64`, минимум API 27. Окружение можно разместить в игнорируемой папке `.tools/android-build-local`.
 
-В APK включаются `geoip.dat` и `geosite.dat` из Windows-архива Xray 26.3.27. CI скачивает архив по `eng/xray-android-geodata-version.json`, проверяет его SHA-256 и распаковывает в `.tools/xray/26.3.27/windows-x64/`.
+Из корня репозитория укажите путь к JDK в `$javaSdkDirectory` и выполните команды. Первая подготавливает `geoip.dat` и `geosite.dat` из архива Xray, закреплённого для Android.
+
+```powershell
+./scripts/Install-Xray.ps1 -ManifestPath ./eng/xray-android-geodata-version.json
+./scripts/Build-Android.ps1 -AndroidRoot $androidRoot -JavaSdkDirectory $javaSdkDirectory
+```
 
 Проект Android сжимает исполняемые ELF-библиотеки в промежуточном Release APK перед выравниванием и подписью. Хранилище сборок .NET, кэш и конфигурация среды выполнения остаются в APK без ZIP-сжатия. `Build-Android.ps1` подписывает Release APK существующим ключом, проверяет сертификат и сохраняет один итоговый APK с `.sha256` в `<AndroidRoot>/releases`. По умолчанию конфигурация подписи читается из `<AndroidRoot>/signing/signing.local.json`. Другой путь можно передать через `-SigningConfig`.
 
@@ -47,9 +52,23 @@ python3 scripts/Build-LinuxPackage.py --test
 
 ## GitHub
 
-Workflow **Platform packages** автоматически запускается при отправке тега `vX.Y.Z`. Он берёт исходники из коммита тега и запускает сборку для каждой платформы, чья версия в `Directory.Build.props` совпадает с тегом. Тег должен указывать на коммит, в котором уже есть workflow. Для проверки кандидата до тега используйте **Actions → Platform packages → Run workflow** на `main`, укажите версию и отметьте нужные платформы. Можно также запустить проверку на существующем теге через `gh workflow run platform-packages.yml --ref v0.6.18` и задать выбор через `-f windows=true -f android=false -f linux=false`.
+Workflow **Platform packages** автоматически запускается при отправке тега `vX.Y.Z`. Он берёт исходники из коммита тега и собирает платформы, чьи версии в `Directory.Build.props` совпадают с тегом. Тег должен указывать на коммит с нужными сборочными скриптами и workflow. Для проверки кандидата до тега используйте **Actions → Platform packages → Run workflow** на `main`, укажите версию и отметьте нужные платформы. При ручном запуске на существующем теге версию можно взять из тега, выбрав только платформы с этой версией в `Directory.Build.props`.
 
 GitHub Actions использует те же настройки сжатия. Windows CI запускает общие и Windows-тесты, самопроверку ShellIcon и тесты Go, а также проверяет версию и SHA-256 установщика. Linux переиспользует **Linux release package**, включая тесты, проверки `.deb` и `.run`. Android запускает тесты политик VPN из Core, проверяет профиль сжатия ARM64 APK и сохраняет пакет с тестовой подписью и суффиксом `-ci.apk`. Для публикации Android используйте локально подписанный APK и команду проверки выше. Каждый job загружает только пакеты выбранной версии, их SHA-256 и файл с хешем коммита.
+
+## Файлы для автообновления
+
+Чтобы Di-Tunnel предложил обновление, опубликуйте стабильный GitHub Release с тегом `vX.Y.Z`. Для каждой выпускаемой платформы добавьте пакет с точным именем и отдельный файл с тем же именем и суффиксом `.sha256`. Внутри файла контрольной суммы указываются SHA-256 и имя пакета.
+
+| Платформа | Пакет |
+| --- | --- |
+| Windows x64 | `Di-Tunnel-X.Y.Z-Setup-x64.exe` |
+| Android ARM64 | `Di-Tunnel-X.Y.Z-arm64.apk` с прежней релизной подписью |
+| Ubuntu amd64 | `Di-Tunnel-X.Y.Z-linux-amd64.deb` |
+
+Для ручной установки на Ubuntu можно также опубликовать `Di-Tunnel-X.Y.Z-linux-amd64.run` и его `.sha256`.
+
+## Порядок выпуска
 
 1. Обновить версии выбранных платформ, CHANGELOG, README и матрицы. Исторические отчёты сохранить.
 2. Запустить сборку и проверки для выбранного коммита. Сверить `source-commit.txt` в артефактах с этим коммитом. Проверить имена и SHA-256 публикуемых файлов через `scripts/Test-ReleaseAssets.ps1`, передав только нужные параметры из `-WindowsInstaller`, `-AndroidApk`, `-LinuxDeb`, `-LinuxRun`.
@@ -57,4 +76,4 @@ GitHub Actions использует те же настройки сжатия. W
 4. Проверить публичные ссылки и выбор пакетов для обновлённых платформ. Номер в имени файла должен совпадать с тегом.
 5. При изменении диагностики сверить короткое сообщение и поля отчёта на Windows, Android и Linux. Одинаковый этап и причина дают одинаковый текст. При повторной проверке отчёт должен соответствовать текущей попытке, в том числе при переходе от успеха к ошибке.
 
-Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3. [Изменения выпуска](release-0.6.18.md).
+Пакеты включают runtime. Linux GUI и служба обновляются одним пакетом, версия протокола службы — 3.
