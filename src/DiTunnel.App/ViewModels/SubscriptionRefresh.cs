@@ -36,7 +36,32 @@ internal static class SubscriptionRefresh
         }
     }
 
-    public static bool TrySave(ProfileCatalog catalog, IReadOnlyList<Download> replacements, CancellationToken cancellationToken)
+    public static ApplyResult Apply(ProfileCatalog catalog, ILookup<string, ImportedProfile> initialProfiles,
+        IReadOnlyList<Download> downloads, CancellationToken cancellationToken)
+    {
+        // Imports and removals can finish while a background download is in flight.
+        var currentGroups = catalog.Groups.ToHashSet();
+        var currentProfiles = catalog.Library.Profiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
+        var eligible = downloads.Where(item => item.Profiles.Length > 0 && currentGroups.Contains(item.Source) &&
+            initialProfiles[item.Source.Id].SequenceEqual(currentProfiles[item.Source.Id])).ToArray();
+        var emptySources = catalog.Library.EmptySubscriptions.Select(source => source.SourceId).ToHashSet(StringComparer.Ordinal);
+        var replacements = eligible.Where(item => emptySources.Contains(item.Source.Id) ||
+            !currentProfiles[item.Source.Id].SequenceEqual(item.Profiles)).ToArray();
+        if (!TrySave(catalog, replacements, cancellationToken))
+            return new(eligible.Length - replacements.Length, false, []);
+
+        var removed = new List<ImportedProfile>();
+        foreach (var item in replacements)
+        {
+            var retained = item.Profiles.Select(profile => profile.Content).ToHashSet(StringComparer.Ordinal);
+            removed.AddRange(currentProfiles[item.Source.Id].Where(profile => !retained.Contains(profile.Content)));
+        }
+        return new(eligible.Length, true, removed);
+    }
+
+    internal sealed record ApplyResult(int UpdatedCount, bool Saved, IReadOnlyList<ImportedProfile> RemovedProfiles);
+
+    private static bool TrySave(ProfileCatalog catalog, IReadOnlyList<Download> replacements, CancellationToken cancellationToken)
     {
         if (replacements.Count == 0) return false;
         var replacedSources = replacements.Select(item => item.Source.Id).ToHashSet(StringComparer.Ordinal);

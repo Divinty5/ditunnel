@@ -377,6 +377,92 @@ public sealed class ConnectionInteractionTests
             return [result, result];
         }
     }
+    [Fact]
+    public async Task CancelledProgressiveProbeCannotOverwriteNewerResults()
+    {
+        var probe = new ControlledProgressiveProbe();
+        var vm = new MainViewModel(null, new Store(), probe);
+        try
+        {
+            var baseline = StartProbe();
+            probe.Current.Complete(42);
+            await baseline.WaitAsync(TimeSpan.FromSeconds(3));
+
+            // The cancel command can be invoked as soon as the UI sees IsProbing.
+            vm.PropertyChanged += CancelOnStart;
+            var cancelled = StartProbe();
+            vm.PropertyChanged -= CancelOnStart;
+            var obsolete = probe.Current;
+            Assert.True(obsolete.Token.IsCancellationRequested);
+            obsolete.Report(99);
+            obsolete.Complete(99);
+            await cancelled.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(42, vm.SelectedProfile!.ProbeMilliseconds);
+            Assert.Equal("Проверка отменена.", vm.DiagnosticText);
+
+            var next = StartProbe();
+            probe.Current.Complete(16);
+            await next.WaitAsync(TimeSpan.FromSeconds(3));
+            obsolete.Report(100);
+
+            Assert.Equal(16, vm.SelectedProfile!.ProbeMilliseconds);
+            Assert.Contains("Длительность: 16 мс", vm.DiagnosticText);
+        }
+        finally { await vm.ShutdownAsync(); }
+
+        Task StartProbe()
+        {
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(new InlineProgressContext());
+            try { return vm.ProbeSelectedCommand.ExecuteAsync(null); }
+            finally { SynchronizationContext.SetSynchronizationContext(previous); }
+        }
+
+        void CancelOnStart(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+        {
+            if (args.PropertyName == nameof(MainViewModel.IsProbing) && vm.IsProbing)
+                vm.CancelProbesCommand.Execute(null);
+        }
+    }
+
+    private sealed class InlineProgressContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) => callback(state);
+    }
+
+    private sealed class ControlledProgressiveProbe : IProgressiveServerProbe
+    {
+        public Attempt Current { get; private set; } = null!;
+
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile,
+            CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode)
+        {
+            Current = new(progress, cancellationToken);
+            return Current.Results.Task;
+        }
+
+        public sealed class Attempt(IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken token)
+        {
+            public CancellationToken Token => token;
+            public TaskCompletionSource<IReadOnlyList<ServerProbeResult>> Results { get; } =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public void Report(double milliseconds) => progress.Report((0, Result(milliseconds)));
+
+            public void Complete(double milliseconds) => Results.SetResult([Result(milliseconds)]);
+
+            private static ServerProbeResult Result(double milliseconds) => ProbePolicy.Success(milliseconds, "HTTPS", "HTTPS", true);
+        }
+    }
+
     [Fact] public async Task ProbeAllRemainsAvailableWhileVpnIsConnected()
     {
         var probe = new Probe();

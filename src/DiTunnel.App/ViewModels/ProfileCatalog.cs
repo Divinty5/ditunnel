@@ -21,6 +21,10 @@ internal sealed class ProfileCatalog(IProfileStore store)
     public ObservableCollection<ProfileGroup> Groups { get; } = [];
     public ObservableCollection<ServerItemViewModel> VisibleProfiles => visibleRows;
 
+    public static (string SourceId, string Content) Identity(ImportedProfile profile) => (profile.SourceId, profile.Content);
+
+    public static bool SameProfile(ImportedProfile first, ImportedProfile second) => Identity(first) == Identity(second);
+
     public void Load() => Library = store.LoadLibrary();
 
     public void Save(ProfileLibrary library)
@@ -99,7 +103,7 @@ internal sealed class ProfileCatalog(IProfileStore store)
     public ServerItemViewModel? FindVisible(ImportedProfile? profile) => FindVisibleRows(profile).FirstOrDefault();
 
     public IEnumerable<ServerItemViewModel> FindVisibleRows(ImportedProfile? profile) =>
-        profile is null || visibleProfiles is null ? [] : visibleProfiles[(profile.SourceId, profile.Content)];
+        profile is null || visibleProfiles is null ? [] : visibleProfiles[Identity(profile)];
 
     public void RemoveVisibleProfiles(Func<ImportedProfile, bool> predicate)
     {
@@ -136,7 +140,7 @@ internal sealed class ProfileCatalog(IProfileStore store)
     }
 
     private void ReindexVisibleProfiles(IEnumerable<ServerItemViewModel> rows) =>
-        visibleProfiles = rows.ToLookup(row => (row.Profile.SourceId, row.Profile.Content));
+        visibleProfiles = rows.ToLookup(row => Identity(row.Profile));
 
     private void ApplyChanges(ServerItemViewModel[] rows)
     {

@@ -3,7 +3,6 @@ using Avalonia.Threading;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using DiTunnel.Core.Connection;
 using DiTunnel.Core.Profiles;
 
@@ -21,24 +20,23 @@ public sealed partial class MainViewModel : ViewModelBase
 {
     public bool IsAndroid => OperatingSystem.IsAndroid();
     private readonly ProfileCatalog catalog;
+    private readonly ProfileProbeHistory probeHistory;
+    private readonly ProfileProbeCoordinator profileProbeCoordinator;
+    private readonly ActiveTunnelMonitor tunnelMonitor;
+    private readonly LowestProfileMonitor lowestMonitor = new();
     private readonly IProfileVpnEngine? engine;
     private readonly UserSettings selectionSettings;
     private readonly Action persistSelection;
     public AppPlatform Platform { get; }
     private bool storageAvailable = true;
-    private readonly IServerProbe? probe;
     private readonly IServerCountryResolver? countryResolver;
     private readonly IInstalledApplicationProvider? installedApplicationProvider;
     private readonly Func<HttpClient>? directSubscriptionClient;
-    private readonly Dictionary<string, ProbeSnapshot> probeSnapshots = new(StringComparer.Ordinal);
-    private readonly HashSet<string> pendingProbes = new(StringComparer.Ordinal);
     private IEnumerable<ServerItemViewModel> highlightedProfiles = [];
     private ServerItemViewModel? activeProfile;
     private ServerItemViewModel? connectingProfile;
     private CancellationTokenSource? connectionCancellation;
     private CancellationTokenSource? probeCancellation;
-    private CancellationTokenSource? lowestCancellation;
-    private CancellationTokenSource? activeLatencyCancellation;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly DispatcherTimer mapLightsTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private readonly Random mapLightsRandom = new();
@@ -47,144 +45,12 @@ public sealed partial class MainViewModel : ViewModelBase
     private int mapLightsChangeTick;
     private bool restoringProfileSelection;
     private bool profilesRemovedDuringProbe;
-    private double? activeDelayMilliseconds;
     private readonly DispatcherTimer subscriptionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
-    private bool activeTunnelConfirmed;
-    private bool activeTunnelProbeRunning;
-    private bool TunnelUnconfirmed => !activeTunnelConfirmed &&
-        (probe is IActiveTunnelProbe || Platform.ReleaseTarget is ReleaseTarget.LinuxX64 or ReleaseTarget.AndroidArm64);
+    private bool TunnelUnconfirmed => !tunnelMonitor.IsConfirmed &&
+        (tunnelMonitor.MeasuresTunnel || Platform.ReleaseTarget is ReleaseTarget.LinuxX64 or ReleaseTarget.AndroidArm64);
     private VpnStatus? lastEngineStatus;
     private bool noticeDescribesOperation;
     private ProbeDiagnostics? noticeDiagnostics;
-    private int activeProbeFailures;
-    private int activeTransportFailures;
-    private bool healthRecoveryAttempted;
-    private bool healthFailoverAttempted;
-    private int refreshToastGeneration;
-    private bool refreshingSubscriptions;
-    [ObservableProperty] private string subscriptionStatus = "";
-    [ObservableProperty] private string refreshToast = "";
-    [ObservableProperty] private bool isRefreshToastVisible;
-    [ObservableProperty] private IBrush refreshToastBackground = new SolidColorBrush(Color.Parse("#D92EBE39"));
-
-    public Task RefreshSubscriptionsAsync(Func<string, CancellationToken, Task<IReadOnlyList<ImportedProfile>>>? download = null, bool showToast = true)
-        => RefreshSubscriptionsCoreAsync(sourceId: null, download, showToast, includeEmpty: true);
-
-    internal Task RefreshSubscriptionsOnStartupAsync(Func<string, CancellationToken, Task<IReadOnlyList<ImportedProfile>>>? download = null)
-        => RefreshSubscriptionsCoreAsync(sourceId: null, download, showToast: false, includeEmpty: false);
-
-    public Task RefreshSelectedSubscriptionAsync(Func<string, CancellationToken, Task<IReadOnlyList<ImportedProfile>>>? download = null)
-        => CanRefreshSelectedSubscription && SelectedGroup is { } group
-            ? RefreshSubscriptionsCoreAsync(group.Id, download, showToast: true, includeEmpty: true) : Task.CompletedTask;
-
-    private async Task RefreshSubscriptionsCoreAsync(string? sourceId, Func<string, CancellationToken, Task<IReadOnlyList<ImportedProfile>>>? download,
-        bool showToast, bool includeEmpty)
-    {
-        if (!CanRefreshSubscriptions || !storageAvailable) return;
-        var sources = Groups.Where(g => g.SourceUrl is not null && (sourceId is null || g.Id == sourceId)).ToArray();
-        if (!includeEmpty)
-        {
-            var populatedSources = catalog.Library.Profiles.Select(profile => profile.SourceId).ToHashSet(StringComparer.Ordinal);
-            sources = sources.Where(group => populatedSources.Contains(group.Id)).ToArray();
-        }
-        if (sources.Length == 0) return;
-        var initialProfiles = catalog.Library.Profiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
-        var selectedOnly = sourceId is not null;
-        var useDirectRoute = download is null && selectionSettings.RefreshSubscriptionsDirectly;
-        var directBlocked = useDirectRoute && Platform.SupportsKillSwitch && engine?.IsNetworkProtectionActive == true;
-        refreshingSubscriptions = true;
-        OnPropertyChanged(nameof(CanRefreshSubscriptions));
-        OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
-        if (showToast) IsBusy = true;
-        var previousStatus = SubscriptionStatus;
-        SubscriptionStatus = selectedOnly ? "Обновляем подписку…" : "Обновляем подписки…";
-        try
-        {
-            var token = lifetimeCancellation.Token;
-            var downloads = await SubscriptionRefresh.DownloadAsync(sources, download, useDirectRoute,
-                directBlocked ? null : directSubscriptionClient, token);
-            token.ThrowIfCancellationRequested();
-            // Background refresh must not replace the selected profile while a connection
-            // or another profile operation is using it.
-            if (!showToast && (IsBusy || HasPendingOperation))
-            {
-                SubscriptionStatus = previousStatus;
-                return;
-            }
-            // Imports and removals can finish while a background download is in flight.
-            var currentGroups = Groups.ToHashSet();
-            var currentProfiles = catalog.Library.Profiles.ToLookup(profile => profile.SourceId, StringComparer.Ordinal);
-            var eligible = downloads.Where(item => item.Profiles.Length > 0 && currentGroups.Contains(item.Source) &&
-                initialProfiles[item.Source.Id].SequenceEqual(currentProfiles[item.Source.Id])).ToArray();
-            var emptySources = catalog.Library.EmptySubscriptions.Select(source => source.SourceId).ToHashSet(StringComparer.Ordinal);
-            var replacements = eligible.Where(item => emptySources.Contains(item.Source.Id) ||
-                !currentProfiles[item.Source.Id].SequenceEqual(item.Profiles)).ToArray();
-            var saved = SubscriptionRefresh.TrySave(catalog, replacements, token);
-            var updated = saved ? eligible.Length : eligible.Length - replacements.Length;
-            var failed = downloads.Length - updated;
-            if (saved)
-            {
-                foreach (var item in replacements)
-                {
-                    var retained = item.Profiles.Select(ProfileKey).ToHashSet(StringComparer.Ordinal);
-                    foreach (var previous in currentProfiles[item.Source.Id])
-                        if (!retained.Contains(ProfileKey(previous))) probeSnapshots.Remove(ProfileKey(previous));
-                }
-                RebuildGroups();
-                if (activeProfile is { } active)
-                {
-                    var profiles = catalog.Library.Profiles;
-                    var refreshed = profiles.FirstOrDefault(profile => SameProfile(profile, active.Profile));
-                    if (refreshed is null && profiles.FirstOrDefault(profile => profile.SourceId == active.Profile.SourceId) is { } sourcePeer)
-                        refreshed = active.Profile with { Usage = sourcePeer.Usage };
-                    if (refreshed is not null && refreshed != active.Profile)
-                        activeProfile = Profiles.FirstOrDefault(row => row.Profile == refreshed) ?? new ServerItemViewModel(refreshed);
-                }
-                RefreshSubscriptionPresentation();
-            }
-            var summary = selectedOnly
-                ? failed == 0 ? "Подписка успешно обновлена" : "Не удалось обновить подписку"
-                : failed == 0 ? $"Подписки успешно обновлены: {updated}"
-                : updated == 0 ? $"Не удалось обновить: {failed}" : $"Обновлено: {updated}. Не удалось обновить: {failed}";
-            var status = failed == 0 ? $"{summary} · {DateTime.Now:HH:mm}" : $"{summary}. Сохранены прежние серверы.";
-            var invalidFormats = downloads.Count(item => item.Error is FormatException);
-            var downloadErrors = downloads.Count(item => item.Error is HttpRequestException or OperationCanceledException);
-            var directFailed = useDirectRoute && updated == 0 && downloads.All(item =>
-                item.Error is HttpRequestException { StatusCode: null } or OperationCanceledException);
-            if (invalidFormats > 0) status += $" Ошибки формата: {invalidFormats}.";
-            if (downloadErrors > 0) status += $" Ошибки загрузки: {downloadErrors}.";
-            if (directFailed)
-                status = directBlocked ? "Прямое обновление подписок заблокировано защитой VPN."
-                    : "Прямое обновление подписок недоступно. Проверьте физическое подключение к сети.";
-            SubscriptionStatus = status;
-            if (showToast)
-            {
-                RefreshToast = directFailed ? status : summary;
-                RefreshToastBackground = new SolidColorBrush(Color.Parse(failed == 0 ? "#D92EBE39" : "#D9C8324A"));
-                IsRefreshToastVisible = true;
-                _ = HideRefreshToastAsync(++refreshToastGeneration);
-            }
-        }
-        catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested) { }
-        finally
-        {
-            refreshingSubscriptions = false;
-            if (showToast) IsBusy = false;
-            OnPropertyChanged(nameof(CanRefreshSubscriptions));
-            OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
-        }
-    }
-
-    private async Task HideRefreshToastAsync(int generation)
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(4), lifetimeCancellation.Token);
-            if (generation == refreshToastGeneration) IsRefreshToastVisible = false;
-        }
-        catch (OperationCanceledException) { }
-    }
-
     public void RefreshLanguage()
     {
         OnPropertyChanged(string.Empty);
@@ -219,7 +85,7 @@ public sealed partial class MainViewModel : ViewModelBase
     {
         VpnConnectionState.Connecting => "Подключаем VPN…",
         VpnConnectionState.Reconnecting => "Восстанавливаем VPN…",
-        VpnConnectionState.Connected when activeProbeFailures > 0 || TunnelUnconfirmed && activeTunnelProbeRunning => "Идёт проверка…",
+        VpnConnectionState.Connected when tunnelMonitor.Failures > 0 || TunnelUnconfirmed && tunnelMonitor.IsChecking => "Идёт проверка…",
         VpnConnectionState.Connected when TunnelUnconfirmed => "Идёт подключение…",
         VpnConnectionState.Connected => "VPN подключён",
         VpnConnectionState.Disconnecting => "Отключаем VPN…",
@@ -230,8 +96,8 @@ public sealed partial class MainViewModel : ViewModelBase
     public string CopyErrorText => "⧉";
     public bool HasConnectionError => ConnectionState == VpnConnectionState.Error && !string.IsNullOrWhiteSpace(Notice)
         || IsSubscriptionExhausted || noticeDiagnostics is not null || SelectedProbeDiagnostics is not null || Notice.Contains("Метод:", StringComparison.Ordinal);
-    private ProbeDiagnostics? SelectedProbeDiagnostics => SelectedProfile is { } server
-        && probeSnapshots.TryGetValue(ProfileKey(server.Profile), out var snapshot)
+    private ProbeDiagnostics? SelectedProbeDiagnostics =>
+        SelectedProfile is { } server && probeHistory.Find(server.Profile) is { } snapshot
             ? snapshot.ConnectionResult?.Diagnostics ?? snapshot.Diagnostics : null;
     private string DiagnosticNotice => IsSubscriptionExhausted ? SubscriptionAccess.ExhaustedMessage + "\n" + Notice : Notice;
     public string DiagnosticText => noticeDiagnostics is { } current
@@ -255,8 +121,8 @@ public sealed partial class MainViewModel : ViewModelBase
         noticeDiagnostics = diagnostics;
         OnPropertyChanged(nameof(HasConnectionError));
     }
-    internal double? DisplayDelay => ConnectionState == VpnConnectionState.Connected && activeProbeFailures == 0
-        ? probe is IActiveTunnelProbe ? activeDelayMilliseconds : activeDelayMilliseconds ?? engine?.Status.DelayMilliseconds
+    internal double? DisplayDelay => ConnectionState == VpnConnectionState.Connected && tunnelMonitor.Failures == 0
+        ? tunnelMonitor.MeasuresTunnel ? tunnelMonitor.Delay : tunnelMonitor.Delay ?? engine?.Status.DelayMilliseconds
         : null;
     public string ConnectionHint => DisplayDelay is { } delay
         ? $"≈  {delay:0} мс"
@@ -275,68 +141,13 @@ public sealed partial class MainViewModel : ViewModelBase
         : ConnectionState == VpnConnectionState.Connected && IsKillSwitchEnabled
             ? "Kill switch не активен"
         : IsKillSwitchEnabled ? "Kill switch включён · активируется при подключении" : "";
-    public void RefreshConnectionPolicy()
-    {
-        OnPropertyChanged(nameof(IsKillSwitchEnabled));
-        OnPropertyChanged(nameof(KillSwitchText));
-        OnPropertyChanged(nameof(ShowKillSwitchStatus));
-    }
-    public bool CanRestoreNetwork => engine is INetworkRecoveryEngine;
-    public async Task RestoreNetworkAsync()
-    {
-        if (engine is not INetworkRecoveryEngine recovery) return;
-        CancelProbes();
-        await CancelConnectionAsync();
-        await recovery.RestoreNetworkAsync(lifetimeCancellation.Token);
-        UserSettings.Current.KillSwitchEnabled = false;
-        UserSettings.Current.Save();
-        RefreshConnectionPolicy();
-    }
-
-    public async Task ApplyNetworkSettingsAsync()
-    {
-        if (!UserSettings.Current.KillSwitchEnabled && engine?.IsNetworkProtectionActive == true
-            && ConnectionState is VpnConnectionState.Disconnected or VpnConnectionState.Error
-            && engine is INetworkRecoveryEngine recovery)
-        {
-            try { await recovery.RestoreNetworkAsync(lifetimeCancellation.Token); RefreshConnectionPolicy(); }
-            catch { Notice = "Не удалось восстановить сеть. Повторите с правами администратора."; }
-            return;
-        }
-        var target = activeProfile ?? SelectedProfile;
-        if (engine is null || target is null || IsConnecting || ConnectionState != VpnConnectionState.Connected)
-            return;
-
-        IsConnecting = true;
-        ConnectionState = VpnConnectionState.Reconnecting;
-        activeDelayMilliseconds = null;
-        var cancellation = connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
-        Notice = "Применяем сетевые настройки и безопасно переподключаем VPN…";
-        try
-        {
-            await Task.Delay(150, cancellation.Token);
-            SubscriptionAccess.EnsureAvailable(target.Profile);
-            await engine.SwitchAsync(target.Profile, cancellation.Token);
-            activeProfile = target;
-        }
-        catch (OperationCanceledException) { Notice = "Применение сетевых настроек отменено."; }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { SetConnectionExceptionNotice(e); }
-        catch { Notice = "Не удалось применить сетевые настройки. VPN отключён; подключитесь снова."; }
-        finally
-        {
-            ConnectionState = engine.Status.State;
-            IsConnecting = false;
-            cancellation.Dispose();
-            if (ReferenceEquals(connectionCancellation, cancellation)) connectionCancellation = null;
-        }
-    }
     private ServerItemViewModel? DisplayProfile => connectingProfile ?? (ConnectionState is VpnConnectionState.Connected or
         VpnConnectionState.Reconnecting or VpnConnectionState.Disconnecting or VpnConnectionState.Error ? activeProfile : null) ?? SelectedProfile;
     internal ImportedProfile? RunningProfile => activeProfile?.Profile;
     internal DateTimeOffset? TunnelConnectedAt => lastEngineStatus?.ConnectedAt;
     public string SelectedName => DisplayProfile?.Name ?? L.T("Сервер не выбран");
     internal string DisplayProfileProbeText => DisplayProfile is { } server
-        ? GetSnapshot(server.Profile).ConnectionResult?.Message ?? server.ProbeStatusText : "Не проверен";
+        ? probeHistory.Get(server.Profile).ConnectionResult?.Message ?? server.ProbeStatusText : "Не проверен";
     public string SelectedSummary => DisplayProfile?.Summary.Replace(" · конфигурация сервера", "", StringComparison.OrdinalIgnoreCase) ?? "Импортируйте свою первую подписку";
     public string Tagline => "Твой VPN. Твой выбор.";
     public string ImportStorageDescription => Platform.ProfileStorageDescription;
@@ -376,7 +187,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private static bool IsLightTheme => Avalonia.Application.Current?.ActualThemeVariant == Avalonia.Styling.ThemeVariant.Light;
     public IBrush PowerBrush => new SolidColorBrush(Color.Parse(IsLightTheme ? "#E9DFFA" : "#292039"));
     internal VpnConnectionState DisplayConnectionState => ConnectionPalette.DisplayState(ConnectionState,
-        IsSubscriptionExhausted, activeProbeFailures > 0 || TunnelUnconfirmed, IsConnecting);
+        IsSubscriptionExhausted, tunnelMonitor.Failures > 0 || TunnelUnconfirmed, IsConnecting);
     public IBrush PowerBorderBrush => new SolidColorBrush(ConnectionPalette.AccentFor(DisplayConnectionState));
     public IBrush PowerGlowBrush => DisplayConnectionState == VpnConnectionState.Disconnected
         ? new SolidColorBrush(Color.Parse("#18000000"))
@@ -434,7 +245,7 @@ public sealed partial class MainViewModel : ViewModelBase
     // A latency test never changes the selected VPN connection, so it remains safe while TUN is active.
     public bool CanProbe => CanProbeAll && SelectedProfile is not null;
     public bool CanProbeAll => !IsBusy && !HasPendingOperation && ConnectionState != VpnConnectionState.Disconnecting
-        && probe is not null && Profiles.Count != 0;
+        && profileProbeCoordinator.IsAvailable && Profiles.Count != 0;
     public int UnavailableProfileCount => Profiles.Count(server => server.IsUnavailable);
     public bool CanRemoveUnavailable => !IsBusy && !IsConnecting && UnavailableProfileCount > 0;
     public string? SelectedSubscriptionUrl => SelectedGroup?.SourceUrl;
@@ -453,11 +264,13 @@ public sealed partial class MainViewModel : ViewModelBase
         this.selectionSettings = selectionSettings ?? UserSettings.Current;
         this.persistSelection = persistSelection ?? (() => this.selectionSettings.Save());
         Platform = platform ?? App.Platform;
-        this.probe = probe;
         this.countryResolver = countryResolver;
         this.installedApplicationProvider = installedApplicationProvider;
         this.directSubscriptionClient = directSubscriptionClient;
         catalog = new(store ?? new UnavailableProfileStore("Защищённое хранилище профилей не настроено."));
+        probeHistory = new(catalog);
+        profileProbeCoordinator = new(probe, Platform.ReleaseTarget);
+        tunnelMonitor = new(probe);
         if (engine is not null) engine.StatusChanged += EngineStatusChanged;
         mapLightsTimer.Tick += (_, _) => AdvanceMapLights();
         subscriptionTimer.Tick += (_, _) => RefreshSubscriptionPresentation();
@@ -487,124 +300,9 @@ public sealed partial class MainViewModel : ViewModelBase
         if (IsLowestMode) StartLowestMode(checkImmediately: false);
     }
 
-    private void EngineStatusChanged(object? sender, VpnStatus status)
-    {
-        // Capture the profile with its status, before a later switch changes the engine.
-        var running = status.Probe is not null && status.State is (VpnConnectionState.Error or VpnConnectionState.Reconnecting)
-            ? connectingProfile?.Profile ?? engine?.ActiveProfile ?? activeProfile?.Profile
-            : engine?.ActiveProfile;
-        Dispatcher.UIThread.Post(() => ApplyEngineStatus(status, running));
-    }
-
-    internal void ApplyEngineStatus(VpnStatus status, ImportedProfile? running)
-    {
-        var profileChanged = running is not null && (activeProfile is null || !SameProfile(activeProfile.Profile, running));
-        var previousStatus = lastEngineStatus;
-        var statusChanged = previousStatus != status || profileChanged;
-        var newSession = status.State == VpnConnectionState.Connected &&
-            (previousStatus?.State != status.State || previousStatus.ConnectedAt != status.ConnectedAt || profileChanged);
-        var androidVerificationChanged = Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 &&
-            previousStatus?.DelayMilliseconds != status.DelayMilliseconds;
-        lastEngineStatus = status;
-        if (status.State != VpnConnectionState.Connected || newSession)
-        {
-            activeTunnelConfirmed = false;
-            activeDelayMilliseconds = null;
-            activeProbeFailures = 0;
-            activeTransportFailures = 0;
-        }
-        if (status.State == VpnConnectionState.Connected)
-        {
-            var server = !profileChanged
-                ? activeProfile
-                : catalog.FindVisible(running);
-            if (server is null && running is not null)
-            {
-                var stored = catalog.Library.Profiles.FirstOrDefault(profile => SameProfile(profile, running)) ?? running;
-                server = new ServerItemViewModel(stored);
-                if (probeSnapshots.TryGetValue(ProfileKey(stored), out var snapshot))
-                {
-                    server.ProbeText = snapshot.Text;
-                    server.ProbeMilliseconds = snapshot.Milliseconds;
-                    server.ProbeTimedOut = snapshot.TimedOut;
-                    server.IsProbeUnconfirmed = snapshot.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
-                    server.CountryCode = snapshot.CountryCode;
-                }
-            }
-            if (server is not null) activeProfile = server;
-            if (androidVerificationChanged && status.DelayMilliseconds is null)
-            {
-                activeTunnelConfirmed = false;
-                activeDelayMilliseconds = null;
-            }
-            if (status.Probe is { } check && statusChanged)
-            {
-                activeTunnelConfirmed = check.Diagnostics?.ProfileConfirmed == true;
-                activeDelayMilliseconds = check.Milliseconds;
-                if (server is not null) RememberConnectionProbe(server.Profile, check, connectionAttempt: true);
-            }
-            else if (status.Probe is null && status.DelayMilliseconds is { } delay && (probe is not IActiveTunnelProbe ||
-                androidVerificationChanged || newSession && Platform.ReleaseTarget == ReleaseTarget.AndroidArm64))
-            {
-                activeTunnelConfirmed = Platform.ReleaseTarget == ReleaseTarget.AndroidArm64;
-                if (server is not null)
-                {
-                    server.ProbeText = $"HTTPS · {delay:0} мс";
-                    server.ProbeMilliseconds = delay;
-                    server.ProbeTimedOut = false;
-                    server.IsProbeUnconfirmed = false;
-                }
-                if (Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 && server is not null)
-                    RememberConnectionProbe(server.Profile, ProbePolicy.Success(delay, "HTTPS", "HTTPS", true));
-                activeDelayMilliseconds = delay;
-            }
-        }
-        else if (status.State == VpnConnectionState.Disconnected) activeProfile = null;
-        else if (statusChanged && status.State is (VpnConnectionState.Error or VpnConnectionState.Reconnecting) &&
-                 status.Probe is { } failure && (running ?? connectingProfile?.Profile) is { } target)
-        {
-            RememberConnectionProbe(target, failure, connectionAttempt: true);
-            if (status.State == VpnConnectionState.Error && connectingProfile is null)
-                activeProfile = catalog.FindVisible(target) ?? new ServerItemViewModel(target);
-        }
-        if (newSession && ConnectionState == status.State) StartActiveLatencyChecks();
-        ConnectionState = status.State;
-        // Connected -> Connected and external widget switches also need to invalidate
-        // the header. Setting SelectedProfile alone still displays the old active server.
-        OnPropertyChanged(nameof(SelectedName));
-        OnPropertyChanged(nameof(SelectedSummary));
-        OnPropertyChanged(nameof(SelectedFlag));
-        OnPropertyChanged(nameof(HasSelectedFlag));
-        OnPropertyChanged(nameof(StatusText));
-        OnPropertyChanged(nameof(SubscriptionLimits));
-        NotifyConnectionDelay();
-        if (statusChanged && status.Message is not null) SetEngineOperationNotice(status);
-        RefreshSubscriptionPresentation();
-    }
-
-    private void SetEngineOperationNotice(VpnStatus status)
-    {
-        if (status.Message is not { } message) return;
-        if (status.Probe?.Diagnostics is { } diagnostics)
-            SetOperationNotice(message.Split('\n', 2)[0], diagnostics);
-        else SetOperationNotice(message);
-    }
-
-    private void SetConnectionExceptionNotice(Exception error)
-    {
-        if (error is ProbeFailureException { Diagnostics: { } diagnostics })
-            SetOperationNotice(error.Message, diagnostics);
-        else if (noticeDiagnostics is null || Notice != error.Message.Split('\n', 2)[0])
-            SetOperationNotice(error.Message);
-    }
-
     partial void OnConnectionStateChanged(VpnConnectionState value)
     {
-        if (value != VpnConnectionState.Connected)
-        {
-            activeProbeFailures = 0;
-            activeTransportFailures = 0;
-        }
+        if (value != VpnConnectionState.Connected) tunnelMonitor.ResetFailures();
         NotifyConnectionCancellation();
         if (value == VpnConnectionState.Connected)
         {
@@ -622,7 +320,7 @@ public sealed partial class MainViewModel : ViewModelBase
             mapLightsFadeCursor = 0;
             mapLightsTimer.Start();
         }
-        if (value != VpnConnectionState.Connected) StopActiveLatencyChecks();
+        if (value != VpnConnectionState.Connected) tunnelMonitor.Stop();
         OnPropertyChanged(nameof(ShowKillSwitchStatus));
         NotifyConnectionPresentation();
         OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(KillSwitchText)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
@@ -690,900 +388,6 @@ public sealed partial class MainViewModel : ViewModelBase
     partial void OnIsProbingChanged(bool value) { OnPropertyChanged(nameof(HasPendingOperation)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll)); }
     partial void OnIsConnectingChanged(bool value) { NotifyConnectionCancellation(); NotifyConnectionPresentation(); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanRemoveUnavailable)); }
     partial void OnIsCancellingConnectionChanged(bool value) => NotifyConnectionCancellation();
-    private void NotifyConnectionCancellation()
-    {
-        OnPropertyChanged(nameof(HasPendingConnection));
-        OnPropertyChanged(nameof(HasPendingOperation));
-        OnPropertyChanged(nameof(CanCancelConnection));
-        OnPropertyChanged(nameof(CancelConnectionText));
-        OnPropertyChanged(nameof(CanProbe));
-        OnPropertyChanged(nameof(CanProbeAll));
-        OnPropertyChanged(nameof(CanConnect));
-        OnPropertyChanged(nameof(CanSelectProfile));
-        OnPropertyChanged(nameof(PowerText));
-    }
-
-    [RelayCommand] private async Task CancelConnectionAsync()
-    {
-        if (!CanCancelConnection || engine is null) return;
-        IsCancellingConnection = true;
-        connectionCancellation?.Cancel();
-        Notice = "Отменяем подключение и восстанавливаем сеть…";
-        try
-        {
-            await engine.DisconnectAsync();
-            Notice = "Подключение отменено.";
-        }
-        catch { Notice = "Не удалось отключить VPN; повторите отключение."; }
-        finally { ConnectionState = engine.Status.State; IsCancellingConnection = false; }
-    }
-    partial void OnSelectedGroupChanged(ProfileGroup? value)
-    {
-        if (value is not null && selectionSettings.SelectedSourceId != value.Id)
-        {
-            selectionSettings.SelectedSourceId = value.Id;
-            try { persistSelection(); } catch { }
-        }
-        var previous = SelectedProfile?.Profile;
-        ServerItemViewModel[] rows;
-        restoringProfileSelection = true;
-        try
-        {
-            rows = catalog.ShowGroup(value?.Id, CreateProfileRow);
-            selectionSettings.SelectedServers.TryGetValue(value?.Id ?? "", out var saved);
-            SelectedProfile = catalog.RestoreSelection(previous, saved, activeProfile?.Profile);
-        }
-        finally { restoringProfileSelection = false; }
-        NotifyConnectionPresentation();
-        NotifyProfileListChanged();
-        OnPropertyChanged(nameof(SelectedSubscriptionUrl)); OnPropertyChanged(nameof(CanShareSubscription));
-        OnPropertyChanged(nameof(CanRefreshSelectedSubscription));
-        _ = ResolveCountriesAsync(rows);
-    }
-
-    private ServerItemViewModel CreateProfileRow(ImportedProfile profile)
-    {
-        var key = ProfileKey(profile);
-        var row = new ServerItemViewModel(profile) { IsProbePending = pendingProbes.Contains(key) };
-        if (probeSnapshots.TryGetValue(key, out var snapshot))
-        {
-            row.ProbeText = snapshot.Text;
-            row.ProbeMilliseconds = snapshot.Milliseconds;
-            row.ProbeTimedOut = snapshot.TimedOut;
-            row.IsProbeUnconfirmed = snapshot.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
-            row.CountryCode = snapshot.CountryCode;
-            row.UpdateConnectionProbe(snapshot.ConnectionResult, snapshot.ConnectionAttemptFailed);
-        }
-        return row;
-    }
-
-    private void NotifyProfileListChanged()
-    {
-        OnPropertyChanged(nameof(ProfileCount));
-        OnPropertyChanged(nameof(CanProbeAll));
-        OnPropertyChanged(nameof(UnavailableProfileCount));
-        OnPropertyChanged(nameof(CanRemoveUnavailable));
-        OnPropertyChanged(nameof(IsSelectedSubscriptionEmpty));
-    }
-    private async Task ResolveCountriesAsync(ServerItemViewModel[] rows)
-    {
-        if (countryResolver is null) return;
-        foreach (var row in rows)
-        {
-            if (lifetimeCancellation.IsCancellationRequested) return;
-            if (row.CountryCode is not null) continue;
-            string? code;
-            try { code = await countryResolver.ResolveAsync(row.Profile, lifetimeCancellation.Token); }
-            catch { continue; }
-            Dispatcher.UIThread.Post(() =>
-            {
-                var visible = catalog.FindVisible(row.Profile);
-                if (visible is null || !ReferenceEquals(visible.Profile, row.Profile)) return;
-                var key = ProfileKey(row.Profile);
-                probeSnapshots[key] = GetSnapshot(visible.Profile) with { CountryCode = code };
-                visible.CountryCode = code;
-                var displayed = DisplayProfile;
-                if (displayed is not null && SameProfile(displayed.Profile, visible.Profile))
-                {
-                    displayed.CountryCode = code;
-                    OnPropertyChanged(nameof(SelectedFlag));
-                    OnPropertyChanged(nameof(HasSelectedFlag));
-                }
-            });
-        }
-    }
-    partial void OnSelectedProfileChanged(ServerItemViewModel? value)
-    {
-        OnPropertyChanged(nameof(HasConnectionError));
-        RefreshSubscriptionPresentation();
-        if (value is not null && !restoringProfileSelection)
-        {
-            var selected = ServerSelection.From(value.Profile);
-            if (selectionSettings.SelectedServers.GetValueOrDefault(value.Profile.SourceId) != selected)
-            {
-                selectionSettings.SelectedServers[value.Profile.SourceId] = selected;
-                try { persistSelection(); } catch { }
-            }
-        }
-        OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag));
-        OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
-        OnPropertyChanged(nameof(SelectedServerUri)); OnPropertyChanged(nameof(CanShareServer));
-    }
-
-    internal async Task ActivateProfileFromUserAsync(ServerItemViewModel value)
-    {
-        if (!CanSelectProfile || !Profiles.Contains(value)) return;
-        SelectedProfile = value;
-        if (ConnectionState == VpnConnectionState.Connected)
-        {
-            healthRecoveryAttempted = false;
-            healthFailoverAttempted = false;
-            await ReconnectSelectedProfileSafelyAsync(value);
-        }
-        else if (ConnectionState is VpnConnectionState.Disconnected or VpnConnectionState.Error)
-            await ConnectAsync();
-    }
-
-    private async Task ReconnectSelectedProfileSafelyAsync(ServerItemViewModel target)
-    {
-        try
-        {
-            await ReconnectSelectedProfileAsync(target);
-        }
-        catch
-        {
-            ConnectionState = engine?.Status.State ?? VpnConnectionState.Error;
-            Notice = "Не удалось переключить сервер. VPN отключён; выберите профиль и подключитесь снова.";
-        }
-    }
-
-    private async Task ReconnectSelectedProfileAsync(ServerItemViewModel target, bool restartCurrent = false)
-    {
-        if (engine is null || IsConnecting || ConnectionState is not (VpnConnectionState.Connected or VpnConnectionState.Reconnecting or VpnConnectionState.Error)
-            || (!restartCurrent && activeProfile is { } active && SameProfile(target.Profile, active.Profile))) return;
-        var wasConnected = ConnectionState == VpnConnectionState.Connected;
-        var wasRecovering = ConnectionState == VpnConnectionState.Reconnecting;
-        connectingProfile = target;
-        IsConnecting = true;
-        ConnectionState = VpnConnectionState.Reconnecting;
-        activeDelayMilliseconds = null;
-        var cancellation = connectionCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
-        Notice = restartCurrent ? $"Перезапускаем VPN через {target.Name}…" : $"Переключаемся на сервер {target.Name}…";
-        try
-        {
-            if (wasConnected)
-            {
-                SubscriptionAccess.EnsureAvailable(target.Profile);
-                await engine.SwitchAsync(target.Profile, cancellation.Token);
-                activeProfile = target;
-                return;
-            }
-            if (wasRecovering)
-            {
-                await engine.DisconnectAsync(cancellation.Token);
-                if (SelectedProfile != target || cancellation.IsCancellationRequested) return;
-            }
-            if (SelectedProfile != target || cancellation.IsCancellationRequested)
-            {
-                return;
-            }
-            SubscriptionAccess.EnsureAvailable(target.Profile);
-            await engine.ConnectAsync(target.Profile, cancellation.Token);
-            activeProfile = target;
-        }
-        catch (OperationCanceledException) { SetOperationNotice("Переключение сервера отменено."); }
-        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or FormatException or TimeoutException) { SetConnectionExceptionNotice(e); }
-        catch { SetOperationNotice("Не удалось переключить сервер. Предыдущее подключение отключено; выберите сервер и подключитесь снова."); }
-        finally
-        {
-            if (engine.Status.State == VpnConnectionState.Error) activeProfile = target;
-            connectingProfile = null;
-            ConnectionState = engine.Status.State;
-            IsConnecting = false;
-            cancellation.Dispose();
-            if (ReferenceEquals(connectionCancellation, cancellation)) connectionCancellation = null;
-        }
-    }
-    private void RebuildGroups(string? preferred = null)
-    {
-        var groupToSelect = catalog.RebuildGroups(preferred ?? SelectedGroup?.Id ?? selectionSettings.SelectedSourceId);
-        // A record-equal selection does not raise a property change after importing into an existing group.
-        if (SelectedGroup == groupToSelect)
-        {
-            OnSelectedGroupChanged(SelectedGroup);
-            OnPropertyChanged(nameof(SelectedGroup));
-        }
-        else SelectedGroup = groupToSelect;
-    }
-    [RelayCommand] private void OpenImport() { if (!CanImport) return; ImportMessage = ""; IsManualImportOpen = false; IsImportOpen = true; }
-    [RelayCommand] private void OpenManualImport() { if (!CanImport) return; ImportMessage = ""; IsManualImportOpen = true; }
-    [RelayCommand] private void CloseImport() { if (!IsBusy) { IsImportOpen = false; IsManualImportOpen = false; ImportText = ""; ImportName = ""; } }
-    [RelayCommand(AllowConcurrentExecutions = true)] private async Task ConnectAsync()
-    {
-        if (CanCancelConnection) { await CancelConnectionAsync(); return; }
-        if (!CanConnect) return;
-        if (engine is null) { Notice = "Сетевой движок недоступен на этой платформе."; return; }
-        connectingProfile = ConnectionState is VpnConnectionState.Disconnected or VpnConnectionState.Error ? SelectedProfile : activeProfile;
-        IsConnecting = true;
-        connectionCancellation = new CancellationTokenSource();
-        try
-        {
-            await InitializeSplitDefaultsAsync().WaitAsync(connectionCancellation.Token);
-            if (ConnectionState == VpnConnectionState.Connected)
-            {
-                await engine.DisconnectAsync();
-                Notice = engine.Status.Message ?? "VPN отключён.";
-            }
-            else if (ConnectionState == VpnConnectionState.Reconnecting)
-            {
-                var target = activeProfile ?? SelectedProfile;
-                if (target is null) Notice = "Сначала выберите сервер.";
-                else
-                {
-                    Notice = $"Перезапускаем VPN через {target.Name}…";
-                    await engine.DisconnectAsync(connectionCancellation.Token);
-                    SubscriptionAccess.EnsureAvailable(target.Profile);
-                    await engine.ConnectAsync(target.Profile, connectionCancellation.Token);
-                    if (engine.Status.State == VpnConnectionState.Connected) activeProfile = target;
-                }
-            }
-            else if (SelectedProfile is null) Notice = "Сначала выберите сервер.";
-            else
-            {
-                healthRecoveryAttempted = false;
-                healthFailoverAttempted = false;
-                Notice = "Подключаем VPN…";
-                SubscriptionAccess.EnsureAvailable(SelectedProfile.Profile);
-                await engine.ConnectAsync(SelectedProfile.Profile, connectionCancellation.Token);
-                if (engine.Status.State == VpnConnectionState.Connected)
-                {
-                    activeProfile = SelectedProfile;
-                    if (engine.Status.Message is null) SetOperationNotice("VPN подключён");
-                    else SetEngineOperationNotice(engine.Status);
-                }
-            }
-        }
-        catch (OperationCanceledException) { SetOperationNotice("Подключение отменено."); }
-        catch (Exception e) when (e is TimeoutException or InvalidOperationException or NotSupportedException or FormatException) { SetConnectionExceptionNotice(e); }
-        catch { SetOperationNotice("Не удалось изменить состояние VPN. Сетевые изменения отменены; проверьте права и доступность сервера."); }
-        finally
-        {
-            if (engine.Status.State == VpnConnectionState.Error) activeProfile = connectingProfile;
-            else if (engine.Status.State == VpnConnectionState.Disconnected) activeProfile = null;
-            connectingProfile = null;
-            ConnectionState = engine.Status.State;
-            IsConnecting = false;
-            connectionCancellation.Dispose();
-            connectionCancellation = null;
-        }
-    }
-    [RelayCommand] private void RemoveProfile()
-    {
-        if (SelectedProfile is not { } selected || !CanManageProfiles) return;
-        bool Matches(ImportedProfile profile) => SameProfile(profile, selected.Profile);
-        if (activeProfile is { } active && Matches(active.Profile) && ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Error)
-        {
-            _ = SwitchOrDisconnectAndRemoveAsync(Matches, "Сервер удалён.");
-            return;
-        }
-        RemoveWhere(Matches, "Сервер удалён.");
-    }
-
-    public Task<IReadOnlyList<InstalledApplication>> GetInstalledApplicationsAsync(CancellationToken cancellationToken = default) =>
-        installedApplicationProvider?.GetInstalledApplicationsAsync(cancellationToken)
-        ?? Task.FromResult<IReadOnlyList<InstalledApplication>>([]);
-
-    public async Task InitializeSplitDefaultsAsync()
-    {
-        if (installedApplicationProvider is null) return;
-        try
-        {
-            if (await UserSettings.Current.InitializeSplitTunnelDefaultsAsync(() => GetInstalledApplicationsAsync()))
-                await ApplyNetworkSettingsAsync();
-        }
-        catch { Notice = "Не удалось применить начальные настройки раздельного туннелирования."; }
-    }
-    [RelayCommand] private void RemoveGroup()
-    {
-        if (SelectedGroup is not { } group || !CanManageProfiles) return;
-        if (activeProfile?.Profile.SourceId == group.Id && ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Error)
-        {
-            _ = SwitchOrDisconnectAndRemoveAsync(p => p.SourceId == group.Id, "Профиль и все его серверы удалены.", group.Id);
-            return;
-        }
-        RemoveWhere(p => p.SourceId == group.Id, "Профиль и все его серверы удалены.", deletedGroupId: group.Id);
-    }
-    [RelayCommand] private void RemoveUnavailable()
-    {
-        var sourceId = SelectedGroup?.Id;
-        var unavailable = Profiles.Where(server => server.IsUnavailable)
-            .Select(server => server.Profile.Content).ToHashSet(StringComparer.Ordinal);
-        if (sourceId is null || unavailable.Count == 0 || !CanRemoveUnavailable) return;
-        bool Predicate(ImportedProfile profile) => profile.SourceId == sourceId && unavailable.Contains(profile.Content);
-        var message = $"Удалено недоступных серверов: {unavailable.Count}.";
-        if (activeProfile is not null && Predicate(activeProfile.Profile) && ConnectionState is VpnConnectionState.Connected or VpnConnectionState.Error)
-            _ = SwitchOrDisconnectAndRemoveAsync(Predicate, message);
-        else RemoveWhere(Predicate, message);
-    }
-    private async Task SwitchOrDisconnectAndRemoveAsync(Func<ImportedProfile, bool> predicate, string message, string? deletedGroupId = null)
-    {
-        if (engine is null) return;
-        var selectedSourceId = SelectedGroup?.Id;
-        IsConnecting = true;
-        try
-        {
-            var remaining = catalog.Library.Profiles.Where(profile => !predicate(profile));
-            var best = remaining
-                .Select(profile => (Profile: profile, Delay: Profiles.FirstOrDefault(row => row.Profile.Content == profile.Content)?.ProbeMilliseconds))
-                .OrderBy(candidate => candidate.Profile.SourceId == SelectedGroup?.Id ? 0 : 1)
-                .ThenBy(candidate => candidate.Delay ?? double.MaxValue)
-                .ThenBy(candidate => candidate.Profile.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(candidate => candidate.Profile)
-                .FirstOrDefault();
-            if (best is null)
-            {
-                Notice = "Отключаем VPN перед удалением последнего профиля…";
-                await engine.DisconnectAsync();
-                activeProfile = null;
-            }
-            else
-            {
-                Notice = $"Переключаем VPN на сервер {best.Name} перед удалением…";
-                await engine.SwitchAsync(best);
-                activeProfile = Profiles.FirstOrDefault(row => row.Profile == best) ?? new ServerItemViewModel(best);
-            }
-            ConnectionState = engine.Status.State;
-            RemoveWhere(predicate, message, deletedGroupId is null ? selectedSourceId : best?.SourceId, deletedGroupId);
-        }
-        catch (Exception error) { Notice = error is InvalidOperationException ? error.Message : "Не удалось отключить VPN; профиль не удалён."; }
-        finally { IsConnecting = false; }
-    }
-    private void RemoveWhere(Func<ImportedProfile, bool> predicate, string message, string? preferredSourceId = null, string? deletedGroupId = null)
-    {
-        try
-        {
-            if (!storageAvailable) throw new IOException();
-            var removedProfiles = catalog.RemoveProfiles(predicate, deletedGroupId);
-            preferredSourceId ??= SelectedGroup?.Id ?? activeProfile?.Profile.SourceId;
-            foreach (var removed in removedProfiles) probeSnapshots.Remove(ProfileKey(removed));
-            if (IsProbing) profilesRemovedDuringProbe = true;
-            if (deletedGroupId is null && SelectedGroup is { } selectedGroup && selectedGroup.Id == preferredSourceId &&
-                (selectedGroup.SourceUrl is not null || catalog.Library.Profiles.Any(profile => profile.SourceId == selectedGroup.Id)))
-                RemoveDisplayedProfiles(predicate);
-            else RebuildGroups(preferredSourceId);
-            if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } running)
-                activeProfile = catalog.FindVisible(running.Profile) ?? running;
-            Notice = message;
-        }
-        catch { Notice = "Не удалось сохранить изменения. Профили не удалены."; }
-    }
-
-    private void RemoveDisplayedProfiles(Func<ImportedProfile, bool> predicate)
-    {
-        var selected = SelectedProfile;
-        restoringProfileSelection = true;
-        try
-        {
-            catalog.RemoveVisibleProfiles(predicate);
-            SelectedProfile = selected is not null && Profiles.Contains(selected) ? selected
-                : catalog.FindVisible(activeProfile?.Profile) ?? Profiles.FirstOrDefault();
-        }
-        finally { restoringProfileSelection = false; }
-        UpdateHighlightedProfiles();
-        NotifyProfileListChanged();
-    }
-    [RelayCommand] private async Task ImportAsync()
-    {
-        if (!CanImport) return;
-        IsBusy = true; ImportMessage = "Проверяем конфигурацию…";
-        try
-        {
-            var input = ImportText.Trim();
-            var importer = new ProfileImporter();
-            var isSubscription = Uri.TryCreate(input, UriKind.Absolute, out var uri) && uri.Scheme == "https";
-            var sourceUrl = isSubscription ? new UriBuilder(uri!) { Fragment = "" }.Uri.AbsoluteUri : null;
-            var existing = sourceUrl is null ? null : Groups.FirstOrDefault(group => group.SourceUrl == sourceUrl);
-            var sourceId = existing?.Id ?? Guid.NewGuid().ToString("N");
-            var fragmentName = isSubscription && !string.IsNullOrWhiteSpace(uri!.Fragment)
-                ? Uri.UnescapeDataString(uri.Fragment.TrimStart('#')).Trim()
-                : null;
-            var pathName = isSubscription
-                ? Uri.UnescapeDataString(uri!.Segments.LastOrDefault()?.Trim('/') ?? "").Trim()
-                : null;
-            var sourceName = string.IsNullOrWhiteSpace(ImportName)
-                ? existing?.Name ?? fragmentName ?? (string.IsNullOrWhiteSpace(pathName) ? null : pathName)
-                    ?? (sourceUrl is null ? "Ручной профиль" : "Подписка") + $" {Groups.Count + 1}"
-                : ImportName.Trim();
-            var imported = await importer.ImportAsync(input, subscriptionName: sourceName);
-            if (!storageAvailable) { ImportMessage = "Хранилище недоступно. Сохранённый файл защищён от перезаписи."; return; }
-            var added = catalog.AddImportedProfiles(new(sourceId, sourceName, sourceUrl), imported);
-            RebuildGroups(ConnectionState == VpnConnectionState.Connected ? SelectedGroup?.Id : sourceId);
-            Notice = added == 0 ? "Эти серверы уже есть в подписке."
-                : importer.SkippedEntries > 0 ? $"Добавлено серверов: {added}. Пропущено записей: {importer.SkippedEntries}."
-                : $"Добавлено серверов: {added}.";
-            ImportText = ""; ImportName = ""; IsImportOpen = false;
-        }
-        catch (FormatException e) { ImportMessage = e.Message; }
-        catch (HttpRequestException) { ImportMessage = "Не удалось импортировать. Проверьте адрес и доступность подписки."; }
-        catch (OperationCanceledException) { ImportMessage = "Не удалось импортировать: сервер не ответил вовремя."; }
-        catch { ImportMessage = "Не удалось импортировать или сохранить профили. Существующие профили сохранены."; }
-        finally { IsBusy = false; }
-    }
-    [RelayCommand] private Task ProbeSelectedAsync() => RunProbesAsync(false);
-    [RelayCommand] private Task ProbeAllAsync() => RunProbesAsync(true);
-    [RelayCommand] private void CancelProbes() => probeCancellation?.Cancel();
-
-    public void SetLowestMode(bool enabled)
-    {
-        selectionSettings.LowestMode = enabled;
-        try { selectionSettings.Save(); } catch { Notice = "Не удалось сохранить настройки режима lowest."; return; }
-        OnPropertyChanged(nameof(IsLowestMode));
-        lowestCancellation?.Cancel();
-        if (enabled) StartLowestMode(checkImmediately: true);
-        else Notice = "Режим lowest выключен.";
-    }
-
-    private void StartLowestMode(bool checkImmediately)
-    {
-        lowestCancellation?.Cancel();
-        lowestCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
-        _ = RunLowestLoopAsync(lowestCancellation.Token, checkImmediately);
-    }
-
-    private async Task RunLowestLoopAsync(CancellationToken cancellationToken, bool checkImmediately)
-    {
-        var step = 0;
-        try
-        {
-            if (checkImmediately)
-            {
-                var changed = await CheckLowestAsync(cancellationToken);
-                step = changed ? 0 : 1;
-            }
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var delay = TimeSpan.FromMinutes(step switch { 0 => 5, 1 => 10, _ => 15 });
-                Notice = $"Lowest: следующая проверка через {(int)delay.TotalMinutes} мин.";
-                await Task.Delay(delay, cancellationToken);
-                var changed = await CheckLowestAsync(cancellationToken);
-                step = changed ? 0 : Math.Min(step + 1, 2);
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    internal async Task<bool> CheckLowestAsync(CancellationToken cancellationToken)
-    {
-        if (!CanProbeAll || probe is null) return false;
-        var servers = Profiles.ToArray();
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        probeCancellation = cancellation;
-        IsProbing = true;
-        try
-        {
-            var results = await ProbeServersAsync(servers, cancellation.Token);
-            SortProfilesByProbe();
-            return await SelectLowestProfileAsync();
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { Notice = "Проверка отменена."; return false; }
-        catch (OperationCanceledException) { throw; }
-        catch { Notice = "Lowest: не удалось проверить серверы."; return false; }
-        finally
-        {
-            ClearPendingProbes();
-            if (ReferenceEquals(probeCancellation, cancellation)) probeCancellation = null;
-            IsProbing = false;
-        }
-    }
-
-    private async Task RunProbesAsync(bool all)
-    {
-        if ((!all && !CanProbe) || (all && !CanProbeAll) || probe is null) return;
-        var servers = all ? Profiles.ToArray() : [SelectedProfile!];
-        IsProbing = true;
-        probeCancellation = new CancellationTokenSource();
-        try
-        {
-            SetOperationNotice(servers.Length == 1 ? $"Проверяем сервер {servers[0].Name}…" : $"Проверяем серверы: {servers.Length}…");
-            var results = await ProbeServersAsync(servers, probeCancellation.Token);
-            SortProfilesByProbe();
-            if (all && results[0].IsDeferred && results.All(result => result.IsDeferred && result.Message == results[0].Message))
-            {
-                SetOperationNotice(results[0].Message, results[0].Diagnostics);
-                return;
-            }
-            var changed = all && IsLowestMode && await SelectLowestProfileAsync();
-            if (!changed && all)
-            {
-                var deferred = results.Count(result => result.IsDeferred);
-                Notice = $"Проверены: {results.Length - deferred}. Ответили: {results.Count(result => result.Milliseconds is not null)}. Ошибки: {results.Count(result => !result.IsDeferred && result.Milliseconds is null)}."
-                    + (deferred > 0 ? $" Пропущены: {deferred}." : "");
-            }
-            else if (!changed) SetOperationNotice($"{servers[0].Name}: {results[0].Message}.", results[0].Diagnostics);
-        }
-        catch (OperationCanceledException) { SetOperationNotice("Проверка отменена."); }
-        catch { SetOperationNotice("Не удалось выполнить проверку сервера."); }
-        finally
-        {
-            ClearPendingProbes();
-            probeCancellation.Dispose(); probeCancellation = null; IsProbing = false;
-        }
-    }
-    private void ApplyProbeResult(ServerItemViewModel server, ServerProbeResult result)
-    {
-        var timedOut = !result.IsDeferred && result.Milliseconds is null && result.Message != "Не проверен";
-        var previous = GetSnapshot(server.Profile);
-        var key = ProfileKey(server.Profile);
-        if (catalog.Library.Profiles.Any(profile => SameProfile(profile, server.Profile)))
-            probeSnapshots[key] = previous with
-            {
-                Text = result.Message,
-                Milliseconds = result.Milliseconds,
-                TimedOut = timedOut,
-                Diagnostics = result.Diagnostics,
-                ConnectionResult = null,
-                ConnectionAttemptFailed = false
-            };
-        pendingProbes.Remove(key);
-        var rows = catalog.FindVisibleRows(server.Profile);
-        var visible = rows.FirstOrDefault() ?? server;
-        visible.ProbeText = result.Message;
-        visible.ProbeMilliseconds = result.Milliseconds;
-        visible.ProbeTimedOut = timedOut;
-        visible.IsProbeUnconfirmed = result.Diagnostics is { Method: "TCP", ProfileConfirmed: false };
-        visible.IsProbePending = false;
-        visible.UpdateConnectionProbe(null, false);
-        foreach (var duplicate in rows.Skip(1)) duplicate.UpdateConnectionProbe(null, false);
-        if (ConnectionState == VpnConnectionState.Connected && activeProfile is { } active && SameProfile(visible.Profile, active.Profile) && probe is not IActiveTunnelProbe &&
-            Platform.ReleaseTarget != ReleaseTarget.AndroidArm64)
-            activeDelayMilliseconds = result.Milliseconds;
-        OnPropertyChanged(nameof(UnavailableProfileCount));
-        OnPropertyChanged(nameof(CanRemoveUnavailable));
-        OnPropertyChanged(nameof(HasConnectionError));
-        if (visible == SelectedProfile)
-        {
-            OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay));
-            OnPropertyChanged(nameof(DelayBrush));
-            OnPropertyChanged(nameof(ConnectionHintBrush));
-        }
-    }
-
-    private void ApplyPreciseProfileFailure(ServerItemViewModel server, ServerProbeResult result, ServerProbeMode mode)
-    {
-        var running = activeProfile ?? SelectedProfile;
-        if (mode != ServerProbeMode.Https || result.IsDeferred || result.Milliseconds is not null ||
-            ConnectionState != VpnConnectionState.Connected || running is null ||
-            !SameProfile(running.Profile, server.Profile)) return;
-        if (probe is not IActiveTunnelProbe) SetActiveProbeFailures(Math.Max(1, activeProbeFailures));
-        StartActiveLatencyChecks();
-    }
-
-    private void SetActiveProbeFailures(int failures)
-    {
-        if (activeProbeFailures == failures) return;
-        activeProbeFailures = failures;
-        NotifyConnectionPresentation();
-        NotifyConnectionDelay();
-    }
-
-    private void NotifyConnectionDelay()
-    {
-        OnPropertyChanged(nameof(ConnectionHint));
-        OnPropertyChanged(nameof(HasDisplayDelay));
-        OnPropertyChanged(nameof(DelayBrush));
-        OnPropertyChanged(nameof(ConnectionHintBrush));
-    }
-
-    private static string ProfileKey(ImportedProfile profile) => $"{profile.SourceId}\n{profile.Content}";
-    private static bool SameProfile(ImportedProfile first, ImportedProfile second) =>
-        first.SourceId == second.SourceId && first.Content == second.Content;
-
-    private ProbeSnapshot GetSnapshot(ImportedProfile profile)
-    {
-        if (probeSnapshots.TryGetValue(ProfileKey(profile), out var snapshot)) return snapshot;
-        var row = catalog.FindVisible(profile);
-        return row is null
-            ? new ProbeSnapshot("Не проверен", null, false, null)
-            : new ProbeSnapshot(row.ProbeText, row.ProbeMilliseconds, row.ProbeTimedOut, row.CountryCode);
-    }
-
-    private void RememberConnectionProbe(ImportedProfile profile, ServerProbeResult result, bool connectionAttempt = false)
-    {
-        var key = ProfileKey(profile);
-        if (catalog.Library.Profiles.Any(candidate => SameProfile(candidate, profile)))
-        {
-            var snapshot = GetSnapshot(profile);
-            var updated = snapshot with
-            {
-                ConnectionResult = result,
-                ConnectionAttemptFailed = result.Milliseconds is null && !result.IsDeferred &&
-                    result.Diagnostics?.ErrorType != "ControlService" && (connectionAttempt || snapshot.ConnectionAttemptFailed)
-            };
-            probeSnapshots[key] = updated;
-            var unavailableChanged = false;
-            foreach (var row in catalog.FindVisibleRows(profile))
-                unavailableChanged |= row.UpdateConnectionProbe(result, updated.ConnectionAttemptFailed);
-            if (unavailableChanged)
-            {
-                OnPropertyChanged(nameof(UnavailableProfileCount));
-                OnPropertyChanged(nameof(CanRemoveUnavailable));
-            }
-        }
-    }
-
-    private sealed record ProbeSnapshot(string Text, double? Milliseconds, bool TimedOut, string? CountryCode,
-        ProbeDiagnostics? Diagnostics = null, ServerProbeResult? ConnectionResult = null, bool ConnectionAttemptFailed = false);
-
-    private void ClearPendingProbes()
-    {
-        if (pendingProbes.Count == 0) return;
-        pendingProbes.Clear();
-        foreach (var row in Profiles) row.IsProbePending = false;
-        OnPropertyChanged(nameof(UnavailableProfileCount));
-        OnPropertyChanged(nameof(CanRemoveUnavailable));
-    }
-
-    public void ToggleProbeMode()
-    {
-        UserSettings.Current.ServerProbeMode = UserSettings.Current.ServerProbeMode == ServerProbeMode.Fast ? ServerProbeMode.Https : ServerProbeMode.Fast;
-        try { UserSettings.Current.Save(); Notice = "Тип проверки изменён."; }
-        catch { Notice = "Не удалось сохранить тип проверки."; }
-    }
-
-    private async Task<ServerProbeResult[]> ProbeServersAsync(ServerItemViewModel[] servers, CancellationToken cancellationToken)
-    {
-        if (probe is null) return [];
-        profilesRemovedDuringProbe = false;
-        foreach (var server in servers)
-        {
-            pendingProbes.Add(ProfileKey(server.Profile));
-            server.IsProbePending = true;
-        }
-        OnPropertyChanged(nameof(UnavailableProfileCount));
-        OnPropertyChanged(nameof(CanRemoveUnavailable));
-        var mode = UserSettings.Current.ServerProbeMode;
-        if (probe is IProgressiveServerProbe progressive)
-        {
-            var completed = new bool[servers.Length];
-            var progressGate = new object();
-            var receivingProgress = true;
-            void Apply(int index, ServerProbeResult result)
-            {
-                if (cancellationToken.IsCancellationRequested || (uint)index >= (uint)completed.Length || completed[index]) return;
-                completed[index] = true;
-                ApplyProbeResult(servers[index], result);
-                ApplyPreciseProfileFailure(servers[index], result, mode);
-            }
-            var progress = new Progress<(int Index, ServerProbeResult Result)>(item =>
-            {
-                lock (progressGate)
-                    if (receivingProgress) Apply(item.Index, item.Result);
-            });
-            IReadOnlyList<ServerProbeResult> progressiveResults;
-            try { progressiveResults = await progressive.ProbeManyAsync(servers.Select(server => server.Profile).ToArray(), progress, cancellationToken, mode); }
-            finally { lock (progressGate) receivingProgress = false; }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (progressiveResults.Count != servers.Length) throw new InvalidOperationException("Проверка вернула неполный результат.");
-            for (var index = 0; index < progressiveResults.Count; index++) Apply(index, progressiveResults[index]);
-            return progressiveResults.ToArray();
-        }
-        if (probe is IServerBatchProbe batchProbe)
-        {
-            var completed = new List<ServerProbeResult>(servers.Length);
-            for (var offset = 0; offset < servers.Length; offset += 5)
-            {
-                var count = Math.Min(5, servers.Length - offset);
-                var batchResults = await batchProbe.ProbeManyAsync(
-                    servers.Skip(offset).Take(count).Select(server => server.Profile).ToArray(), cancellationToken, mode);
-                cancellationToken.ThrowIfCancellationRequested();
-                if (batchResults.Count != count) throw new InvalidOperationException("Проверка вернула неполный результат.");
-                for (var index = 0; index < count; index++)
-                {
-                    ApplyProbeResult(servers[offset + index], batchResults[index]);
-                    ApplyPreciseProfileFailure(servers[offset + index], batchResults[index], mode);
-                }
-                completed.AddRange(batchResults);
-            }
-            return completed.ToArray();
-        }
-        var results = new ServerProbeResult[servers.Length];
-        using var concurrency = new SemaphoreSlim(mode == ServerProbeMode.Fast ? 8 : 2);
-        await Task.WhenAll(servers.Select(async (server, index) =>
-        {
-            await concurrency.WaitAsync(cancellationToken);
-            try
-            {
-                ServerProbeResult result;
-                try { result = await probe.ProbeAsync(server.Profile, cancellationToken, mode); }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                catch (Exception error)
-                {
-                    var platform = Platform.ReleaseTarget == ReleaseTarget.LinuxX64 ? "Linux"
-                        : Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 ? "Android" : "Windows";
-                    result = ProbePolicy.Failure(error, "Служба проверки", mode == ServerProbeMode.Https ? "HTTPS" : "TCP", 0, platform);
-                }
-                cancellationToken.ThrowIfCancellationRequested();
-                results[index] = result;
-                ApplyProbeResult(server, result);
-                ApplyPreciseProfileFailure(server, result, mode);
-            }
-            finally { concurrency.Release(); }
-        }));
-        return results;
-    }
-
-    private void StartActiveLatencyChecks()
-    {
-        StopActiveLatencyChecks();
-        if (probe is null) return;
-        activeLatencyCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
-        _ = RunActiveLatencyLoopAsync(activeLatencyCancellation.Token);
-    }
-
-    private void StopActiveLatencyChecks()
-    {
-        activeLatencyCancellation?.Cancel();
-        activeLatencyCancellation?.Dispose();
-        activeLatencyCancellation = null;
-    }
-
-    private async Task RunActiveLatencyLoopAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var firstCheck = true;
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var delay = firstCheck ? TimeSpan.FromSeconds(1) : activeProbeFailures == 1
-                    ? TimeSpan.FromSeconds(3) : TimeSpan.FromMinutes(1);
-                await Task.Delay(delay, cancellationToken);
-                while (IsBusy || IsConnecting || IsProbing || activeTunnelProbeRunning)
-                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-                firstCheck = false;
-                await CheckActiveConnectionAsync(cancellationToken);
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    internal async Task CheckActiveConnectionAsync(CancellationToken cancellationToken)
-    {
-        var server = activeProfile ?? SelectedProfile;
-        if (probe is null || server is null || IsProbing || activeTunnelProbeRunning ||
-            ConnectionState != VpnConnectionState.Connected) return;
-        var tunnel = probe as IActiveTunnelProbe;
-        var connectedAt = engine?.Status.ConnectedAt;
-        activeTunnelProbeRunning = true;
-        OnPropertyChanged(nameof(StatusText));
-        try
-        {
-            var result = tunnel is not null ? await tunnel.ProbeActiveTunnelAsync(cancellationToken)
-                : await probe.ProbeAsync(server.Profile, cancellationToken, ServerProbeMode.Https);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (ConnectionState != VpnConnectionState.Connected || engine?.Status.ConnectedAt != connectedAt ||
-                IsConnecting || IsProbing || (activeProfile ?? SelectedProfile) is not { } current
-                || !SameProfile(current.Profile, server.Profile)) return;
-            if (result.IsDeferred)
-            {
-                activeTransportFailures = 0;
-                var offline = result.Diagnostics?.ErrorType == "Offline";
-                if (!offline &&
-                    (activeTunnelConfirmed || GetSnapshot(server.Profile).ConnectionResult is not null)) return;
-                if (offline)
-                {
-                    activeTunnelConfirmed = false;
-                    activeDelayMilliseconds = null;
-                    NotifyConnectionDelay();
-                }
-                if (tunnel is not null) RememberConnectionProbe(server.Profile, result);
-                NotifyConnectionPresentation();
-                if (!IsBusy && result.Diagnostics is not null)
-                {
-                    SetActiveProbeFailures(0);
-                    SetOperationNotice("Туннель запущен. " + result.Message, result.Diagnostics);
-                }
-                return;
-            }
-            if (tunnel is null) ApplyProbeResult(server, result);
-            else
-            {
-                activeTunnelConfirmed = result.Diagnostics?.ProfileConfirmed == true;
-                RememberConnectionProbe(server.Profile, result);
-            }
-            activeDelayMilliseconds = result.Milliseconds;
-            var failed = result.Milliseconds is null;
-            activeTransportFailures = tunnel is not null && result.Diagnostics?.ErrorType is "Timeout" or "Connection"
-                ? Math.Min(2, activeTransportFailures + 1) : 0;
-            SetActiveProbeFailures(failed ? Math.Min(2, activeProbeFailures + 1) : 0);
-            if (!failed && tunnel is not null)
-            {
-                healthRecoveryAttempted = false;
-                healthFailoverAttempted = false;
-            }
-            NotifyConnectionPresentation();
-            NotifyConnectionDelay();
-            if (IsBusy) return;
-            if (!failed && tunnel is null && engine?.Status is { State: VpnConnectionState.Connected, Message: { } networkMessage })
-                SetOperationNotice(networkMessage);
-            else
-                SetOperationNotice(failed ? "Туннель запущен. " + result.Message
-                    : tunnel is not null ? "VPN подключён." : "Туннель запущен. Профиль проверен.", result.Diagnostics);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
-        catch { return; }
-        finally
-        {
-            activeTunnelProbeRunning = false;
-            OnPropertyChanged(nameof(StatusText));
-        }
-        if (activeTransportFailures < 2 || engine is null ||
-            IsBusy || IsConnecting || cancellationToken.IsCancellationRequested) return;
-        if (!healthRecoveryAttempted)
-        {
-            healthRecoveryAttempted = true;
-            await ReconnectSelectedProfileAsync(server, restartCurrent: true);
-            return;
-        }
-        if (healthFailoverAttempted) return;
-        var alternative = IsLowestMode ? Profiles.Where(candidate => candidate.Profile.SourceId == server.Profile.SourceId &&
-                candidate.Profile.Content != server.Profile.Content && IsUsableProfile(candidate) &&
-                GetSnapshot(candidate.Profile).Diagnostics?.ProfileConfirmed == true)
-            .OrderBy(candidate => candidate.ProbeMilliseconds).ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault() : null;
-        if (alternative is null) return;
-        healthFailoverAttempted = true;
-        await ReconnectSelectedProfileAsync(alternative);
-    }
-
-    private bool IsUsableProfile(ServerItemViewModel server) => server.ProbeMilliseconds is not null
-        && server.Profile.Usage?.IsExhausted(DateTimeOffset.UtcNow) != true
-        && (Platform.ReleaseTarget != ReleaseTarget.AndroidArm64
-            || probeSnapshots.TryGetValue(ProfileKey(server.Profile), out var snapshot) && snapshot.Diagnostics?.ProfileConfirmed == true);
-
-    private void SortProfilesByProbe()
-    {
-        if (profilesRemovedDuringProbe) return;
-        var selected = SelectedProfile;
-        restoringProfileSelection = true;
-        try
-        {
-            if (!catalog.SortByProbe()) return;
-            if (ReferenceEquals(SelectedProfile, selected)) OnPropertyChanged(nameof(SelectedProfile));
-            else SelectedProfile = selected;
-            ProfileOrderChanged?.Invoke();
-        }
-        finally { restoringProfileSelection = false; }
-    }
-    private async Task<bool> SelectLowestProfileAsync()
-    {
-        if (ConnectionState == VpnConnectionState.Connected && (activeProbeFailures > 0 || healthRecoveryAttempted)) return false;
-        var best = Profiles.Where(IsUsableProfile)
-            .OrderBy(server => server.ProbeMilliseconds).ThenBy(server => server.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
-        if (best is null) return false;
-        if (ConnectionState == VpnConnectionState.Connected)
-        {
-            if (activeProfile is { } active && SameProfile(active.Profile, best.Profile)) return false;
-        }
-        else
-        {
-            if (best == SelectedProfile) return false;
-            SelectedProfile = best;
-        }
-        Notice = $"Lowest выбрал сервер {best.Name}.";
-        if (ConnectionState == VpnConnectionState.Connected)
-            await ReconnectSelectedProfileSafelyAsync(best);
-        return true;
-    }
-    internal async Task DisconnectForUpdateAsync()
-    {
-        CancelProbes();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        await CancelConnectionAsync().WaitAsync(timeout.Token);
-        if (engine is null) return;
-        await engine.DisconnectAsync(timeout.Token).WaitAsync(timeout.Token);
-        if (engine.Status.State is not (VpnConnectionState.Disconnected or VpnConnectionState.Error))
-            throw new UpdateInstallException("VPN ещё отключается. Повторите обновление после отключения.");
-    }
-
     public async Task PrepareToCloseAsync(TimeSpan timeout)
     {
         try { await ShutdownAsync().WaitAsync(timeout); }
@@ -1596,8 +400,8 @@ public sealed partial class MainViewModel : ViewModelBase
         lifetimeCancellation.Cancel();
         connectionCancellation?.Cancel();
         probeCancellation?.Cancel();
-        lowestCancellation?.Cancel();
-        activeLatencyCancellation?.Cancel();
+        lowestMonitor.Stop();
+        tunnelMonitor.Stop();
         if (engine is null) return;
         await engine.DisconnectAsync();
         engine.StatusChanged -= EngineStatusChanged;
