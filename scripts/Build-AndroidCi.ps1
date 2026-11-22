@@ -47,7 +47,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Android publish failed.' }
 $project = ([xml](Get-Content -Raw (Join-Path $root 'src/DiTunnel.Android/DiTunnel.Android.csproj'))).Project.PropertyGroup
 $appId = $project.ApplicationId
 $signedApk = Join-Path $publishDirectory "$appId-Signed.apk"
-& (Join-Path $PSScriptRoot 'Test-AndroidApk.ps1') -Apk $signedApk -BuildTools $buildTools
+& (Join-Path $PSScriptRoot 'Test-AndroidApk.ps1') -Apk $signedApk -BuildTools $buildTools -RequireCompressedNativeLibraries
 
 $properties = ([xml](Get-Content -Raw (Join-Path $root 'Directory.Build.props'))).Project.PropertyGroup
 $version = ([string]$properties.AndroidVersion).Trim()

@@ -37,30 +37,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y desktop-file-utils xvfb libfontconfig1 libfreetype6 libx11-6 libxcb1 libxext6 libxrender1 libxrandr2 libxi6 libxcursor1 libxfixes3 libgl1 libice6 libsm6 libsecret-1-0
-      - name: Build and validate Linux package
+      - name: Build and validate the compressed Linux package
         run: python3 scripts/Build-LinuxPackage.py --test
       - name: Verify colour changes in the X11 window icon
         run: xvfb-run -a dotnet run --project tests/DiTunnel.Icon.Smoke/DiTunnel.Icon.Smoke.csproj --configuration Release
       - name: Record source and check packaged application version
+        id: package
         run: |
           git rev-parse HEAD > artifacts/linux/release/source-commit.txt
-          deb=$(find artifacts/linux/release -maxdepth 1 -name 'Di-Tunnel-*-linux-amd64.deb' -print)
-          test -n "$deb"
-          dpkg-deb --extract "$deb" artifacts/linux/version-check
           expected=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("Directory.Build.props").findtext(".//LinuxVersion"))')
+          filename="Di-Tunnel-$expected-linux-amd64"
+          dpkg-deb --extract "artifacts/linux/release/$filename.deb" artifacts/linux/version-check
           actual=$(artifacts/linux/version-check/usr/lib/ditunnel/ui/Di-Tunnel.Linux --version)
           test "$actual" = "$expected"
-      - name: Check graphical installer SHA-256
-        working-directory: artifacts/linux/release
-        run: sha256sum -c Di-Tunnel-*-linux-amd64.run.sha256
+          (cd artifacts/linux/release && sha256sum -c "$filename.deb.sha256" "$filename.run.sha256")
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-release-package
           path: |
-            artifacts/linux/release/Di-Tunnel-*-linux-amd64.deb
-            artifacts/linux/release/Di-Tunnel-*-linux-amd64.deb.sha256
-            artifacts/linux/release/Di-Tunnel-*-linux-amd64.run
-            artifacts/linux/release/Di-Tunnel-*-linux-amd64.run.sha256
+            artifacts/linux/release/${{ steps.package.outputs.filename }}.deb
+            artifacts/linux/release/${{ steps.package.outputs.filename }}.deb.sha256
+            artifacts/linux/release/${{ steps.package.outputs.filename }}.run
+            artifacts/linux/release/${{ steps.package.outputs.filename }}.run.sha256
             artifacts/linux/release/source-commit.txt
           if-no-files-found: error
           compression-level: 0
