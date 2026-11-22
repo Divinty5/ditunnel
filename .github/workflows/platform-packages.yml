@@ -107,7 +107,8 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
-      - name: Build and verify Windows installer
+      - name: Build and verify the compressed Windows installer
+        id: package
         run: |
           ./scripts/Build-WindowsInstaller.ps1 -Test
           $version = ([string]([xml](Get-Content -Raw Directory.Build.props)).Project.PropertyGroup.WindowsVersion).Trim()
@@ -121,6 +122,7 @@ jobs:
             throw 'Windows installer SHA-256 mismatch.'
           }
           git rev-parse HEAD > artifacts/installer/source-commit.txt
+          "filename=$($installer.Name)" >> $env:GITHUB_OUTPUT
       - name: Run Windows and shared tests
         run: |
           $runtime = Get-Content -Raw eng/xray-version.json | ConvertFrom-Json
@@ -136,8 +138,8 @@ jobs:
         with:
           name: windows-package
           path: |
-            artifacts/installer/Di-Tunnel-*-Setup-x64.exe
-            artifacts/installer/Di-Tunnel-*-Setup-x64.exe.sha256
+            artifacts/installer/${{ steps.package.outputs.filename }}
+            artifacts/installer/${{ steps.package.outputs.filename }}.sha256
             artifacts/installer/source-commit.txt
           if-no-files-found: error
           compression-level: 0
@@ -161,17 +163,20 @@ jobs:
         run: dotnet run --project tests/DiTunnel.Icon.Smoke/DiTunnel.Icon.Smoke.csproj -c Release -- --android-profile-layout
       - name: Install .NET Android workload
         run: dotnet workload install android
-      - name: Build APK and verify its debug signature and contents
+      - name: Build the compressed APK and verify its CI signature and contents
+        id: package
         run: |
           ./scripts/Build-AndroidCi.ps1 -RuntimeDirectory (Join-Path $env:RUNNER_TEMP 'ditunnel-android') `
             -AndroidSdkDirectory $env:ANDROID_HOME -JavaSdkDirectory $env:JAVA_HOME_21_X64
+          $version = ([string]([xml](Get-Content -Raw Directory.Build.props)).Project.PropertyGroup.AndroidVersion).Trim()
+          "filename=Di-Tunnel-$version-arm64-ci.apk" >> $env:GITHUB_OUTPUT
           git rev-parse HEAD > artifacts/android/ci/source-commit.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-package
           path: |
-            artifacts/android/ci/Di-Tunnel-*-arm64-ci.apk
-            artifacts/android/ci/Di-Tunnel-*-arm64-ci.apk.sha256
+            artifacts/android/ci/${{ steps.package.outputs.filename }}
+            artifacts/android/ci/${{ steps.package.outputs.filename }}.sha256
             artifacts/android/ci/source-commit.txt
           if-no-files-found: error
           compression-level: 0

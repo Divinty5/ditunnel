@@ -13,6 +13,7 @@
     </intent>
   </queries>
   <application
+      android:extractNativeLibs="true"
       android:icon="@mipmap/app_icon"
       android:roundIcon="@mipmap/app_icon"
       android:enableOnBackInvokedCallback="false"

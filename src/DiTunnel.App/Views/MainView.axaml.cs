@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -12,6 +13,11 @@ namespace DiTunnel.App.Views;
 public partial class MainView : UserControl
 {
     private bool updateChecked;
+    private bool mapHostVisible = !OperatingSystem.IsAndroid();
+    private Visual[] mapAncestors = [];
+    private Window? mapWindow;
+    private MainViewModel? mapModel;
+
     public MainView()
     {
         InitializeComponent();
@@ -24,11 +30,49 @@ public partial class MainView : UserControl
         };
         AttachedToVisualTree += async (_, _) =>
         {
+            mapAncestors = this.GetVisualAncestors().ToArray();
+            mapWindow = TopLevel.GetTopLevel(this) as Window;
+            foreach (var ancestor in mapAncestors) ancestor.PropertyChanged += MapVisibilityChanged;
+            UpdateMapVisibility();
             if (updateChecked || !OperatingSystem.IsAndroid() || DataContext is not MainViewModel vm) return;
             updateChecked = true;
             await vm.InitializeSplitDefaultsAsync();
             await UpdateFlow.CheckAsync(NavigationOwner, vm, false);
         };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            foreach (var ancestor in mapAncestors) ancestor.PropertyChanged -= MapVisibilityChanged;
+            mapAncestors = [];
+            mapWindow = null;
+            mapModel?.SetMapViewVisible(false);
+            mapModel = null;
+        };
+        DataContextChanged += (_, _) => UpdateMapVisibility();
+        PropertyChanged += MapVisibilityChanged;
+    }
+
+    internal void SetMapHostVisible(bool visible)
+    {
+        mapHostVisible = visible;
+        UpdateMapVisibility();
+    }
+
+    private void MapVisibilityChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
+    {
+        if (change.Property == IsVisibleProperty || change.Property == Window.WindowStateProperty)
+            UpdateMapVisibility();
+    }
+
+    private void UpdateMapVisibility()
+    {
+        var current = mapAncestors.Length > 0 ? DataContext as MainViewModel : null;
+        if (!ReferenceEquals(mapModel, current))
+        {
+            mapModel?.SetMapViewVisible(false);
+            mapModel = current;
+        }
+        mapModel?.SetMapViewVisible(mapHostVisible && IsVisible && mapWindow?.WindowState != WindowState.Minimized &&
+            mapAncestors.All(ancestor => ancestor.IsVisible));
     }
 
     private ContentControl NavigationOwner => this.GetVisualAncestors().OfType<ApplicationShell>().FirstOrDefault()?.NavigationHost
@@ -39,7 +83,7 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel vm)
         {
             await vm.InitializeSplitDefaultsAsync();
-            await Dialogs.Settings(NavigationOwner, vm);
+            await SettingsPage.ShowAsync(NavigationOwner, vm);
         }
     }
     private void SubscriptionsClick(object? sender, RoutedEventArgs e)
@@ -47,7 +91,7 @@ public partial class MainView : UserControl
         if (DataContext is not MainViewModel vm) return;
         if (vm.Platform.ReleaseTarget == ReleaseTarget.AndroidArm64 && this.FindAncestorOfType<ApplicationShell>() is { } shell)
             shell.OpenSubscriptions(vm);
-        else Dialogs.Subscriptions(NavigationOwner, vm);
+        else SubscriptionsPage.Show(NavigationOwner, vm);
     }
     private void AddClick(object? sender, RoutedEventArgs e)
     {

@@ -34,6 +34,19 @@ public sealed class MainActivity : AvaloniaMainActivity
         base.OnNewIntent(intent);
         HandleControlIntent(intent);
     }
+
+    protected override void OnStart()
+    {
+        base.OnStart();
+        if (Content is ApplicationShell shell) shell.SetMapHostVisible(true);
+    }
+
+    protected override void OnStop()
+    {
+        if (Content is ApplicationShell shell) shell.SetMapHostVisible(false);
+        base.OnStop();
+    }
+
     protected override void OnResume()
     {
         base.OnResume();

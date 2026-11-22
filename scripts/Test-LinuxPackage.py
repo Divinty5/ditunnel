@@ -2,11 +2,19 @@
 """Read-only validation of the Linux release artifact and its checksum."""
 import argparse
 import hashlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import tarfile
 import tempfile
 import xml.etree.ElementTree as ET
+
+
+def runtime_path(name):
+    parts = PurePosixPath(name).parts
+    if (len(parts) > 4 and parts[:3] == ("usr", "lib", "ditunnel") and
+            parts[3] in ("ui", "host") and ".." not in parts):
+        return parts[3], parts[4:]
+    return None
 
 
 def main():
@@ -27,6 +35,7 @@ def main():
     binaries = {"./usr/lib/ditunnel/ui/Di-Tunnel.Linux", "./usr/lib/ditunnel/host/DiTunnel.NetworkHost.Linux", "./usr/lib/ditunnel/runtime/xray", "./usr/lib/ditunnel/runtime/ditunnel-awg"}
     found = set()
     bus_policy_found = False
+    runtime_files = {}
     # Stream the payload without extracting paths into the caller's filesystem.
     with subprocess.Popen(["dpkg-deb", "--fsys-tarfile", args.package], stdout=subprocess.PIPE) as process:
         with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
@@ -35,6 +44,14 @@ def main():
                     raise RuntimeError("Unexpected payload ownership or write permissions")
                 if member.isdir() and member.mode & 0o555 != 0o555:
                     raise RuntimeError("Payload directories must remain traversable")
+                path = runtime_path(member.name)
+                if member.islnk():
+                    target = runtime_path(member.linkname)
+                    if (path is None or target is None or path[0] == target[0] or
+                            path[1] != target[1] or runtime_files.get(target) != member.mode):
+                        raise RuntimeError("Unexpected payload hard link: " + member.name)
+                elif member.isfile() and path is not None:
+                    runtime_files[path] = member.mode
                 if member.name in binaries:
                     if not member.isfile() or member.mode & 0o111 != 0o111 or archive.extractfile(member).read(4) != b"\x7fELF":
                         raise RuntimeError("Missing executable Linux ELF: " + member.name)

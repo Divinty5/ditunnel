@@ -8,7 +8,7 @@
     <ApplicationTitle>Di-Tunnel</ApplicationTitle>
     <Version>$(AndroidVersion)</Version>
     <ApplicationDisplayVersion>$(AndroidVersion)</ApplicationDisplayVersion>
-    <ApplicationVersion>60024</ApplicationVersion>
+    <ApplicationVersion>70001</ApplicationVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <AndroidStripNativeLibraries>true</AndroidStripNativeLibraries>
@@ -30,5 +30,17 @@
     <ProjectReference Include="..\DiTunnel.App\DiTunnel.App.csproj" />
     <ProjectReference Include="..\DiTunnel.Platform.Android\DiTunnel.Platform.Android.csproj" />
   </ItemGroup>
+
+  <!-- Compress the intermediate APK before the SDK copies, aligns and signs it. -->
+  <Target Name="CompressDiTunnelReleaseApk" AfterTargets="_BuildApkEmbed"
+          Condition="'$(Configuration)' == 'Release' and '$(AndroidPackageFormat)' == 'apk'">
+    <Error Condition="'$(_EmbeddedDSOsEnabled)' != 'False'"
+           Text="Compressed APK libraries require android:extractNativeLibs=true." />
+    <PropertyGroup>
+      <_DiTunnelPython Condition="'$(OS)' == 'Windows_NT'">python</_DiTunnelPython>
+      <_DiTunnelPython Condition="'$(OS)' != 'Windows_NT'">python3</_DiTunnelPython>
+    </PropertyGroup>
+    <Exec Command="$(_DiTunnelPython) &quot;$(MSBuildThisFileDirectory)../../scripts/Compress-AndroidApk.py&quot; &quot;$(ApkFileIntermediate)&quot;" />
+  </Target>
 
 </Project>

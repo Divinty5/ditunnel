@@ -122,12 +122,14 @@ public sealed class SettingsAndRefreshTests
     {
         public List<ImportedProfile> Items = [new("Old", "VLESS", "old", "sub", "Subscription", "https://example.com/sub"), new("Manual", "SS", "manual", "manual", "Manual")];
         public bool Fail;
+        public int SaveLibraryCalls { get; private set; }
         public EmptySubscription[] EmptySubscriptions { get; private set; } = [];
         public IReadOnlyList<ImportedProfile> Load() => Items;
         public void Save(IEnumerable<ImportedProfile> profiles) { if (Fail) throw new IOException(); Items = profiles.ToList(); }
         public ProfileLibrary LoadLibrary() => new(Items.ToArray(), EmptySubscriptions);
         public void SaveLibrary(ProfileLibrary library)
         {
+            SaveLibraryCalls++;
             Save(library.Profiles);
             EmptySubscriptions = library.EmptySubscriptions;
         }
@@ -256,14 +258,118 @@ public sealed class SettingsAndRefreshTests
     [Fact] public async Task FailedDownloadOrSaveNeverDestroysSnapshot()
     {
         var store = new Store(); var vm = new MainViewModel(null, store);
-        await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException());
-        Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
-        Assert.Equal("#d9c8324a", vm.RefreshToastBackground.ToString());
-        store.Fail = true;
-        await vm.RefreshSubscriptionsAsync((_, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new")]));
-        Assert.Equal("old", vm.SelectedProfile!.Profile.Content);
-        Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
-        Assert.False(vm.IsBusy);
+        try
+        {
+            var selected = vm.SelectedProfile;
+            await vm.RefreshSubscriptionsAsync((_, _) => throw new HttpRequestException());
+            Assert.Same(selected, vm.SelectedProfile);
+            Assert.Equal(0, store.SaveLibraryCalls);
+            Assert.Equal("#d9c8324a", vm.RefreshToastBackground.ToString());
+            store.Fail = true;
+            await vm.RefreshSubscriptionsAsync((_, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new")]));
+            Assert.Same(selected, vm.SelectedProfile);
+            Assert.Equal(1, store.SaveLibraryCalls);
+            Assert.Contains("Не удалось обновить: 1", vm.SubscriptionStatus);
+            Assert.False(vm.IsBusy);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task StartupRefreshDoesNotRestoreDeletedSource()
+    {
+        var store = new Store();
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2"));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        var download = new TaskCompletionSource<IReadOnlyList<ImportedProfile>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var refresh = vm.RefreshSubscriptionsOnStartupAsync((_, _) => download.Task);
+            Assert.Equal("sub", vm.SelectedGroup?.Id);
+            vm.RemoveGroupCommand.Execute(null);
+            download.SetResult([new("Fresh", "VLESS", "fresh")]);
+            await refresh;
+
+            Assert.DoesNotContain(vm.Groups, group => group.Id == "sub");
+            Assert.Equal("fresh", Assert.Single(store.Items, profile => profile.SourceId == "sub2").Content);
+            Assert.Equal(2, store.SaveLibraryCalls);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task ShutdownCancelsRefreshBeforeAnySourceIsSaved()
+    {
+        var store = new Store();
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2"));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        var download = new TaskCompletionSource<IReadOnlyList<ImportedProfile>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var refresh = vm.RefreshSubscriptionsAsync((url, _) => url.EndsWith("/sub2")
+            ? download.Task : Task.FromResult<IReadOnlyList<ImportedProfile>>([new("Fresh", "VLESS", "fresh")]));
+
+        await vm.ShutdownAsync();
+        await refresh.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(0, store.SaveLibraryCalls);
+        Assert.Equal(["old", "manual", "second"], store.Items.Select(profile => profile.Content));
+    }
+
+    [Fact]
+    public async Task RefreshOfUnchangedSubscriptionKeepsSelectionWithoutSavingOrRebuildingGroups()
+    {
+        var store = new Store();
+        store.Items.Add(new("Selected", "VLESS", "selected", "sub", "Subscription", "https://example.com/sub"));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var rows = vm.Profiles.ToArray();
+            vm.SelectedProfile = rows[1];
+            var changes = 0;
+            var groupChanges = 0;
+            vm.Profiles.CollectionChanged += (_, _) => changes++;
+            vm.Groups.CollectionChanged += (_, _) => groupChanges++;
+            store.Fail = true;
+
+            await vm.RefreshSubscriptionsAsync((_, _) =>
+                Task.FromResult<IReadOnlyList<ImportedProfile>>([new("Old", "VLESS", "old"), new("Selected", "VLESS", "selected")]));
+
+            Assert.Equal(0, changes);
+            Assert.Equal(0, groupChanges);
+            Assert.Equal(0, store.SaveLibraryCalls);
+            Assert.Equal("Подписки успешно обновлены: 1", vm.RefreshToast);
+            Assert.Equal(rows, vm.Profiles);
+            Assert.Same(rows[1], vm.SelectedProfile);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshWritesUpdatedUsageAndReportsUnchangedSourceAsSuccessful(bool failSave)
+    {
+        var store = new Store { Fail = failSave };
+        var previousUsage = new SubscriptionUsage(0, 1, 10, null);
+        var currentUsage = new SubscriptionUsage(0, 2, 10, 4_000_000_000L);
+        store.Items.Add(new("Second", "VLESS", "second", "sub2", "Subscription 2", "https://example.com/sub2", previousUsage));
+        var vm = new MainViewModel(null, store, selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var groups = vm.Groups.ToArray();
+            var groupChanges = 0;
+            vm.Groups.CollectionChanged += (_, _) => groupChanges++;
+            await vm.RefreshSubscriptionsAsync((url, _) => Task.FromResult<IReadOnlyList<ImportedProfile>>(
+                url.EndsWith("/sub2", StringComparison.Ordinal)
+                    ? [new("Second", "VLESS", "second", Usage: currentUsage)]
+                    : [new("Old", "VLESS", "old")]));
+
+            Assert.Equal(1, store.SaveLibraryCalls);
+            Assert.Equal(0, groupChanges);
+            Assert.Same(groups[2], vm.Groups[2]);
+            Assert.Equal(failSave ? previousUsage : currentUsage, Assert.Single(store.Items, profile => profile.SourceId == "sub2").Usage);
+            Assert.Equal(failSave ? "Обновлено: 1. Не удалось обновить: 1" : "Подписки успешно обновлены: 2", vm.RefreshToast);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
     [Fact] public async Task AutomaticStartupRefreshKeepsFailureSilent()
     {
@@ -295,13 +401,50 @@ public sealed class SettingsAndRefreshTests
         finally { await vm.ShutdownAsync(); }
     }
 
-    private sealed class RefreshTestEngine : IProfileVpnEngine
+    [Fact]
+    public async Task StartupRefreshKeepsRunningServerWhenItsSourceReplacesIt()
     {
-        public VpnStatus Status => VpnStatus.Disconnected;
+        var store = new Store();
+        var running = store.Items[0];
+        var usage = new SubscriptionUsage(0, 1, 10, null);
+        var engine = new RefreshTestEngine(running);
+        var vm = new MainViewModel(engine, store, platform: AppPlatform.Windows,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "manual");
+            var selected = vm.SelectedProfile;
+
+            await vm.RefreshSubscriptionsOnStartupAsync((_, _) =>
+                Task.FromResult<IReadOnlyList<ImportedProfile>>([new("New", "VLESS", "new", Usage: usage)]));
+
+            Assert.Same(selected, vm.SelectedProfile);
+            Assert.Equal("manual", vm.SelectedGroup?.Id);
+            Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
+            Assert.Equal(running with { Usage = usage }, vm.RunningProfile);
+            Assert.DoesNotContain(store.Items, profile => profile.Content == running.Content);
+            Assert.Equal(0, engine.ConnectionChanges);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    private sealed class RefreshTestEngine(ImportedProfile? running = null) : IProfileVpnEngine
+    {
+        public VpnStatus Status => running is null ? VpnStatus.Disconnected : new(VpnConnectionState.Connected);
+        public ImportedProfile? ActiveProfile => running;
+        public int ConnectionChanges { get; private set; }
         public bool RequiresAdministrator => false;
         public event EventHandler<VpnStatus>? StatusChanged { add { } remove { } }
-        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task DisconnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task ConnectAsync(ImportedProfile profile, CancellationToken cancellationToken = default)
+        {
+            ConnectionChanges++;
+            return Task.CompletedTask;
+        }
+        public Task DisconnectAsync(CancellationToken cancellationToken = default)
+        {
+            ConnectionChanges++;
+            return Task.CompletedTask;
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -351,6 +494,7 @@ public sealed class SettingsAndRefreshTests
             release.TrySetResult();
             await refresh;
             Assert.Equal(6, store.Items.Count);
+            Assert.Equal(1, store.SaveLibraryCalls);
             Assert.Contains(store.Items, item => item.Content == "old-2");
             Assert.Equal(5, store.Items.Count(item => item.Content.StartsWith("new-")));
             Assert.True(vm.IsRefreshToastVisible);
@@ -509,13 +653,19 @@ public sealed class SettingsAndRefreshTests
     [Fact] public void InactiveRulesDoNotRestartProxyAllOrTheOtherSplitMode()
     {
         var settings = new UserSettings { SplitTunnelMode = SplitTunnelMode.ProxyAll };
+        var draft = new SplitTunnelRulesDraft(settings);
         var all = settings.NetworkSettingsFingerprint();
-        settings.SetSplitTunnelRules(SplitTunnelMode.BypassSelected, [], ["direct.exe"]);
+        draft.Capture(SplitTunnelMode.BypassSelected, "direct.example", ["direct.exe"]);
+        draft.ApplyTo(settings, SplitTunnelMode.ProxyAll);
         Assert.Equal(all, settings.NetworkSettingsFingerprint());
-        settings.SplitTunnelMode = SplitTunnelMode.BypassSelected;
+        draft.ApplyTo(settings, SplitTunnelMode.BypassSelected);
         var bypass = settings.NetworkSettingsFingerprint();
-        settings.SetSplitTunnelRules(SplitTunnelMode.ProxySelected, [], ["proxy.exe"]);
+        draft.Capture(SplitTunnelMode.ProxySelected, "proxy.example\nproxy.example", ["proxy.exe"]);
+        draft.ApplyTo(settings, SplitTunnelMode.BypassSelected);
         Assert.Equal(bypass, settings.NetworkSettingsFingerprint());
+        Assert.Equal(["direct.exe"], settings.GetSplitTunnelRules(SplitTunnelMode.BypassSelected).Processes);
+        Assert.Equal(["proxy.exe"], settings.GetSplitTunnelRules(SplitTunnelMode.ProxySelected).Processes);
+        Assert.Equal("proxy.example", draft.DomainText(SplitTunnelMode.ProxySelected));
     }
 
     [Fact] public void AutoSelectionRecognizesDesktopAndAndroidWorkAppsWithoutMatchingUnrelatedTeams()

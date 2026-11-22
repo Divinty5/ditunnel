@@ -1,8 +1,6 @@
 # Документация Di-Tunnel
 
-Сведения о текущем общем выпуске и пакетах приведены в [примечаниях к 0.6.18](release-0.6.18.md). [Последний публичный выпуск](https://github.com/Divinty5/ditunnel/releases/latest).
-
-Для Android доступен отдельный [выпуск 0.6.20](release-0.6.20-android.md) с исправлением меню подписок и профилей.
+[Заметки к 0.7.1](release-0.7.1.md) содержат сведения о пакетах Windows, Android и Ubuntu, результаты и сценарии проверки. [Последний общий выпуск](https://github.com/Divinty5/ditunnel/releases/latest).
 
 ## Действующие инструкции
 
@@ -21,7 +19,7 @@
 
 ## История
 
-- [Android 0.6.5](release-0.6.5-android.md), [Android 0.6.6](release-0.6.6-android.md), [Windows 0.6.8 / Android и Linux 0.6.7](release-0.6.8-windows-0.6.7-mobile-linux.md), [Windows 0.6.7](windows-0.6.7-test.md).
+- [Android 0.6.20](release-0.6.20-android.md), [Android 0.6.5](release-0.6.5-android.md), [Android 0.6.6](release-0.6.6-android.md), [Windows 0.6.8 / Android и Linux 0.6.7](release-0.6.8-windows-0.6.7-mobile-linux.md), [Windows 0.6.7](windows-0.6.7-test.md).
 - Общие релизы — [0.6.18](release-0.6.18.md), [0.6.13](release-0.6.13.md), [0.6.12](release-0.6.12.md), [0.6.10](release-0.6.10.md), [0.6.9](release-0.6.9.md), [0.6.4](release-0.6.4.md), [0.6.3](release-0.6.3.md), [0.6.2](release-0.6.2.md), [0.6.1](release-0.6.1.md), [0.5.13](release-0.5.13.md).
 - [Windows 0.6.11](release-0.6.11-windows.md) снят из-за сбоя автообновления.
 - Linux: [0.6.6](release-0.6.6-linux.md), [VM 0.6.6](linux-0.6.6-validation.md), [0.6.5](linux-0.6.5-validation.md), [0.6.0](release-0.6.0-linux.md).

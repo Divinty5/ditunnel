@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$Apk,
     [Parameter(Mandatory)][string]$BuildTools,
-    [string]$SigningCertificateSha256
+    [string]$SigningCertificateSha256,
+    [switch]$RequireCompressedNativeLibraries
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,15 @@ foreach ($expected in @(
     if (-not ($badging -cmatch [regex]::Escape($expected))) { throw "Missing APK metadata: $expected" }
 }
 if (-not ($badging -cmatch "^native-code: 'arm64-v8a'\s*$")) { throw 'Expected only the arm64-v8a ABI.' }
+
+if ($RequireCompressedNativeLibraries) {
+    $manifest = & (Join-Path $BuildTools 'aapt.exe') dump xmltree $apkPath AndroidManifest.xml
+    if ($LASTEXITCODE -ne 0 -or -not ($manifest -match 'android:extractNativeLibs.*0xffffffff\s*$')) {
+        throw 'APK must extract compressed native libraries during installation.'
+    }
+    & python (Join-Path $PSScriptRoot 'Compress-AndroidApk.py') --check $apkPath
+    if ($LASTEXITCODE -ne 0) { throw 'Invalid Android release compression profile.' }
+}
 
 $archive = [IO.Compression.ZipFile]::OpenRead($apkPath)
 try {

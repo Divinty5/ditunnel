@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using Avalonia;
 using DiTunnel.App.Controls;
 using DiTunnel.App.ViewModels;
@@ -69,9 +70,7 @@ public sealed class ConnectionInteractionTests
         {
             vm.Notice = warning;
             vm.ConnectionState = VpnConnectionState.Connected;
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while (vm.Profiles[0].ProbeMilliseconds is null || vm.IsProbing)
-                await Task.Delay(20, deadline.Token);
+            await vm.CheckActiveConnectionAsync(CancellationToken.None);
             Assert.True(probe.Calls > 0);
             Assert.Equal(42d, vm.Profiles[0].ProbeMilliseconds);
             Assert.Equal(warning, vm.Notice);
@@ -122,10 +121,52 @@ public sealed class ConnectionInteractionTests
     }
     [Fact] public async Task ProbeSortsSuccessfulServersBeforeTimeouts()
     {
-        var vm = new MainViewModel(null, new SortingStore(), new SortingProbe());
-        await vm.ProbeAllCommand.ExecuteAsync(null);
-        Assert.Equal(["C", "A", "B"], vm.Profiles.Select(profile => profile.Name));
+        var vm = new MainViewModel(null, new SortingStore(), new SortingProbe(),
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var selected = vm.SelectedProfile;
+            var changes = new List<NotifyCollectionChangedAction>();
+            vm.Profiles.CollectionChanged += (_, change) => changes.Add(change.Action);
+
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.Equal(["C", "A", "B"], vm.Profiles.Select(profile => profile.Name));
+            Assert.Equal([NotifyCollectionChangedAction.Move], changes);
+            Assert.Same(selected, vm.SelectedProfile);
+
+            changes.Clear();
+            await vm.ProbeAllCommand.ExecuteAsync(null);
+            Assert.Empty(changes);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
+    [Fact]
+    public void BulkSortPublishesTheFinalOrderAndLookupInOneNotification()
+    {
+        var store = new GroupedStore
+        {
+            Items = Enumerable.Range(0, 1000)
+                .Select(index => new ImportedProfile($"Profile {index:D4}", "VLESS", $"synthetic-{index % 999}", "a", "Subscription A"))
+                .ToList()
+        };
+        var catalog = new ProfileCatalog(store);
+        catalog.Load();
+        var original = catalog.ShowGroup("a", profile => new ServerItemViewModel(profile));
+        for (var index = 0; index < original.Length; index++) original[index].ProbeMilliseconds = original.Length - index;
+        var notifications = 0;
+        catalog.VisibleProfiles.CollectionChanged += (_, change) =>
+        {
+            notifications++;
+            Assert.Equal(NotifyCollectionChangedAction.Reset, change.Action);
+            Assert.Equal(original.Reverse(), catalog.VisibleProfiles);
+            Assert.Equal([original[^1], original[0]], catalog.FindVisibleRows(store.Items[0]));
+        };
+
+        Assert.True(catalog.SortByProbe());
+        Assert.False(catalog.SortByProbe());
+        Assert.Equal(1, notifications);
+    }
+
     [Fact]
     public async Task FilteringRemovesOnlyServersThatFailedAProbe()
     {
@@ -194,6 +235,33 @@ public sealed class ConnectionInteractionTests
             catch (OperationCanceledException) { SuccessfulProbeWasCancelled = true; throw; }
             return new(48, "HTTP · 48 мс");
         }
+    }
+
+    [Fact]
+    public async Task ProbeResultRemainsWithItsSourceAfterChangingGroups()
+    {
+        var store = new GroupedStore();
+        store.Items[1] = store.Items[1] with { Content = store.Items[0].Content };
+        var probe = new ProgressiveProbe();
+        var vm = new MainViewModel(null, store, probe, selectionSettings: new UserSettings(), persistSelection: () => { });
+        try
+        {
+            var first = vm.Groups.Single(group => group.Id == "a");
+            vm.SelectedGroup = first;
+            var checking = vm.ProbeAllCommand.ExecuteAsync(null);
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "b");
+            var other = vm.Profiles.Single(row => row.Name == "B1");
+
+            probe.ReleaseSuccessfulProbe.SetResult();
+            await checking.WaitAsync(TimeSpan.FromSeconds(3));
+
+            Assert.Same(other, vm.SelectedProfile);
+            Assert.Null(other.ProbeMilliseconds);
+            Assert.False(other.IsProbePending);
+            vm.SelectedGroup = first;
+            Assert.Equal(48d, Assert.Single(vm.Profiles).ProbeMilliseconds);
+        }
+        finally { await vm.ShutdownAsync(); }
     }
 
     [Fact]
@@ -309,6 +377,92 @@ public sealed class ConnectionInteractionTests
             return [result, result];
         }
     }
+    [Fact]
+    public async Task CancelledProgressiveProbeCannotOverwriteNewerResults()
+    {
+        var probe = new ControlledProgressiveProbe();
+        var vm = new MainViewModel(null, new Store(), probe);
+        try
+        {
+            var baseline = StartProbe();
+            probe.Current.Complete(42);
+            await baseline.WaitAsync(TimeSpan.FromSeconds(3));
+
+            // The cancel command can be invoked as soon as the UI sees IsProbing.
+            vm.PropertyChanged += CancelOnStart;
+            var cancelled = StartProbe();
+            vm.PropertyChanged -= CancelOnStart;
+            var obsolete = probe.Current;
+            Assert.True(obsolete.Token.IsCancellationRequested);
+            obsolete.Report(99);
+            obsolete.Complete(99);
+            await cancelled.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(42, vm.SelectedProfile!.ProbeMilliseconds);
+            Assert.Equal("Проверка отменена.", vm.DiagnosticText);
+
+            var next = StartProbe();
+            probe.Current.Complete(16);
+            await next.WaitAsync(TimeSpan.FromSeconds(3));
+            obsolete.Report(100);
+
+            Assert.Equal(16, vm.SelectedProfile!.ProbeMilliseconds);
+            Assert.Contains("Длительность: 16 мс", vm.DiagnosticText);
+        }
+        finally { await vm.ShutdownAsync(); }
+
+        Task StartProbe()
+        {
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(new InlineProgressContext());
+            try { return vm.ProbeSelectedCommand.ExecuteAsync(null); }
+            finally { SynchronizationContext.SetSynchronizationContext(previous); }
+        }
+
+        void CancelOnStart(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+        {
+            if (args.PropertyName == nameof(MainViewModel.IsProbing) && vm.IsProbing)
+                vm.CancelProbesCommand.Execute(null);
+        }
+    }
+
+    private sealed class InlineProgressContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) => callback(state);
+    }
+
+    private sealed class ControlledProgressiveProbe : IProgressiveServerProbe
+    {
+        public Attempt Current { get; private set; } = null!;
+
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile,
+            CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<ServerProbeResult>> ProbeManyAsync(IReadOnlyList<ImportedProfile> profiles,
+            IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken cancellationToken, ServerProbeMode mode)
+        {
+            Current = new(progress, cancellationToken);
+            return Current.Results.Task;
+        }
+
+        public sealed class Attempt(IProgress<(int Index, ServerProbeResult Result)> progress, CancellationToken token)
+        {
+            public CancellationToken Token => token;
+            public TaskCompletionSource<IReadOnlyList<ServerProbeResult>> Results { get; } =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public void Report(double milliseconds) => progress.Report((0, Result(milliseconds)));
+
+            public void Complete(double milliseconds) => Results.SetResult([Result(milliseconds)]);
+
+            private static ServerProbeResult Result(double milliseconds) => ProbePolicy.Success(milliseconds, "HTTPS", "HTTPS", true);
+        }
+    }
+
     [Fact] public async Task ProbeAllRemainsAvailableWhileVpnIsConnected()
     {
         var probe = new Probe();
@@ -415,6 +569,84 @@ public sealed class ConnectionInteractionTests
             Assert.Equal(VpnConnectionState.Connected, vm.ConnectionState);
             Assert.Null(active.ActiveConnectionBrush);
             Assert.NotNull(selected.ActiveConnectionBrush);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(500)]
+    public async Task ConnectionRefreshOnlyChangesHighlightsWhenTheActiveServerChanges(int profileCount)
+    {
+        var store = new GroupedStore
+        {
+            Items = Enumerable.Range(0, profileCount)
+                .Select(index => new ImportedProfile($"Server {index:D3}", "VLESS", $"test-{index}", "sub", "Subscription"))
+                .ToList()
+        };
+        var vm = new MainViewModel(null, store, platform: AppPlatform.Windows, selectionSettings: new(), persistSelection: () => { });
+        try
+        {
+            var first = vm.Profiles[0];
+            var second = vm.Profiles[1];
+            var connected = new VpnStatus(VpnConnectionState.Connected);
+            vm.ApplyEngineStatus(connected, first.Profile);
+            var brush = Assert.IsAssignableFrom<Avalonia.Media.IBrush>(first.ActiveConnectionBrush);
+            var changes = new List<ServerItemViewModel>();
+            foreach (var row in vm.Profiles)
+                row.PropertyChanged += (_, change) =>
+                {
+                    if (change.PropertyName == nameof(ServerItemViewModel.ActiveConnectionBrush)) changes.Add(row);
+                };
+
+            vm.RefreshSubscriptionPresentation();
+            Assert.Empty(changes);
+            Assert.Same(brush, first.ActiveConnectionBrush);
+
+            vm.ApplyEngineStatus(connected, second.Profile);
+            Assert.Equal([first, second], changes);
+            Assert.Null(first.ActiveConnectionBrush);
+            Assert.NotNull(second.ActiveConnectionBrush);
+
+            changes.Clear();
+            vm.ApplyEngineStatus(VpnStatus.Disconnected, null);
+            Assert.Equal([second], changes);
+            Assert.Null(second.ActiveConnectionBrush);
+        }
+        finally { await vm.ShutdownAsync(); }
+    }
+
+    [Fact]
+    public async Task MatchingRowsRestoreTheConnectionResultAndHighlightAfterBrowsingAnotherSource()
+    {
+        var store = new GroupedStore();
+        var profile = store.Items[0];
+        store.Items.Insert(1, profile with { Name = "A2" });
+        store.Items[2] = store.Items[2] with { Content = profile.Content };
+        var vm = new MainViewModel(null, store, platform: AppPlatform.Windows, selectionSettings: new(), persistSelection: () => { });
+        try
+        {
+            var original = vm.Profiles.ToArray();
+            var failure = ProbePolicy.Failure(new TimeoutException(), "HTTPS", "HTTPS", 75, "Windows");
+            vm.ApplyEngineStatus(new(VpnConnectionState.Error, failure.Message, Probe: failure), profile);
+            Assert.Equal(2, vm.UnavailableProfileCount);
+            Assert.All(original, row => Assert.NotNull(row.ActiveConnectionBrush));
+
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "b");
+            Assert.All(original, row => Assert.Null(row.ActiveConnectionBrush));
+            Assert.All(vm.Profiles, row =>
+            {
+                Assert.Null(row.ActiveConnectionBrush);
+                Assert.Null(row.ActiveProbeResult);
+            });
+
+            vm.SelectedGroup = vm.Groups.Single(group => group.Id == "a");
+            Assert.All(vm.Profiles, row =>
+            {
+                Assert.NotNull(row.ActiveConnectionBrush);
+                Assert.Equal("HTTPS · Тайм-аут", row.ProbeDisplayText);
+            });
+            Assert.Equal(2, vm.UnavailableProfileCount);
         }
         finally { await vm.ShutdownAsync(); }
     }

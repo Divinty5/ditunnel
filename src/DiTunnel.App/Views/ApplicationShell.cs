@@ -12,13 +12,15 @@ namespace DiTunnel.App.Views;
 // Navigation changes only the page; notification remains above pages and their overlays.
 public sealed class ApplicationShell : UserControl
 {
-    public ContentControl NavigationHost { get; } = new() { Content = new MainView(),
-        HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+    private readonly MainView mainView = new();
+    public ContentControl NavigationHost { get; }
     private readonly ContentControl subscriptionsHost = new() { IsVisible = false,
         HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
 
     public ApplicationShell()
     {
+        NavigationHost = new ContentControl { Content = mainView,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         var root = new Grid();
         root.Children.Add(NavigationHost);
         root.Children.Add(subscriptionsHost);
@@ -33,9 +35,11 @@ public sealed class ApplicationShell : UserControl
         Content = root;
     }
 
+    internal void SetMapHostVisible(bool visible) => mainView.SetMapHostVisible(visible);
+
     internal void OpenSubscriptions(MainViewModel model)
     {
-        Dialogs.Subscriptions(subscriptionsHost, model, CloseSubscriptions);
+        SubscriptionsPage.Show(subscriptionsHost, model, CloseSubscriptions);
         NavigationHost.IsVisible = false;
         subscriptionsHost.IsVisible = true;
     }

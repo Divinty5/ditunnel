@@ -58,10 +58,18 @@ public sealed partial class ServerItemViewModel(ImportedProfile profile) : Obser
     [NotifyPropertyChangedFor(nameof(ProbeBrush))]
     private ServerProbeResult? activeProbeResult;
 
-    internal bool ConnectionAttemptFailed { get; set; }
+    private bool connectionAttemptFailed;
     internal bool IsUnavailable => !IsProbePending && (ActiveProbeResult is { } connection
-        ? !connection.IsDeferred && connection.Milliseconds is null && (ProbeTimedOut || ConnectionAttemptFailed)
+        ? !connection.IsDeferred && connection.Milliseconds is null && (ProbeTimedOut || connectionAttemptFailed)
         : ProbeTimedOut);
+
+    internal bool UpdateConnectionProbe(ServerProbeResult? result, bool attemptFailed)
+    {
+        var wasUnavailable = IsUnavailable;
+        connectionAttemptFailed = attemptFailed;
+        ActiveProbeResult = result;
+        return wasUnavailable != IsUnavailable;
+    }
     private double? DisplayedProbeMilliseconds => ActiveProbeResult is { } active ? active.Milliseconds : ProbeMilliseconds;
     public string ProbeStatusText => IsProbePending ? "Проверяем…" : ActiveProbeResult?.Message ?? ProbeText;
     public string ProbeDisplayText => IsProbePending || DisplayedProbeMilliseconds is not { } delay

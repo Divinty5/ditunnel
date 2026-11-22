@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Collections.Specialized;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Avalonia;
@@ -13,6 +14,7 @@ using Avalonia.Layout;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.Styling;
+using DiTunnel.App.Controls;
 using DiTunnel.App.Views;
 using DiTunnel.App.ViewModels;
 using DiTunnel.App;
@@ -43,6 +45,32 @@ internal static class Program
         {
             VerifyAndroidProfileLayout();
             VerifyAndroidSubscriptionActions();
+            return;
+        }
+        if (args is ["--virtualized-profile-grid"])
+        {
+            VerifyVirtualizedProfileGrid(AppPlatform.Android);
+            VerifyVirtualizedProfileGrid(OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows);
+            return;
+        }
+        if (args is ["--profile-order"])
+        {
+            VerifyProfileOrder();
+            return;
+        }
+        if (args is ["--map-animation"])
+        {
+            VerifyMapAnimationVisibility();
+            return;
+        }
+        if (args is ["--split-tunnel-applications"])
+        {
+            VerifySplitTunnelApplications();
+            return;
+        }
+        if (args is ["--settings-drafts"])
+        {
+            VerifySettingsDrafts();
             return;
         }
         if (OperatingSystem.IsWindows() && args is ["--managed-caption"])
@@ -132,7 +160,7 @@ internal static class Program
             if (OperatingSystem.IsWindows()) VerifyTaskbarRefresh(window);
         }
         var draft = new TextBox { Text = "ru\nрф" };
-        var section = Dialogs.SettingsSection("Соединение", draft);
+        var section = SettingsPage.CreateSection("Соединение", draft);
         Require(!section.IsExpanded, "Settings sections start collapsed");
         section.IsExpanded = true; draft.Text = "example.ru"; section.IsExpanded = false;
         Require(ReferenceEquals(section.Content, draft) && draft.Text == "example.ru", "Collapsing keeps settings drafts");
@@ -210,7 +238,7 @@ internal static class Program
             window.Show();
             Dispatcher.UIThread.RunJobs();
             var host = ((ApplicationShell)window.Content!).NavigationHost;
-            Dialogs.Settings(host, model).GetAwaiter().GetResult();
+            SettingsPage.ShowAsync(host, model).GetAwaiter().GetResult();
             Dispatcher.UIThread.RunJobs();
             var section = host.GetVisualDescendants().OfType<Expander>()
                 .Single(item => item.Header is TextBlock title && title.Text == L.T("Обновления"));
@@ -267,7 +295,7 @@ internal static class Program
             var content = new StackPanel { Spacing = 14, Margin = new Thickness(0, 12, 0, 4) };
             content.Children.Add(new TextBlock { Text = "Настройки раздела" });
             content.Children.Add(draft);
-            var section = Dialogs.SettingsSection(title, content);
+            var section = SettingsPage.CreateSection(title, content);
             sections.Add(section);
             panel.Children.Add(section);
         }
@@ -389,7 +417,7 @@ internal static class Program
         foreach (var platform in new[] { AppPlatform.Windows, AppPlatform.Android, AppPlatform.Linux })
         {
             var model = new MainViewModel(null, new ManyServersStore(), new PendingProbe(), platform: platform);
-            Dialogs.Subscriptions(window, model);
+            SubscriptionsPage.Show(window, model);
             window.ShowInTaskbar = false;
             window.Width = 420; window.Height = 850; window.Show();
             window.UpdateLayout(); Dispatcher.UIThread.RunJobs();
@@ -429,6 +457,120 @@ internal static class Program
         Console.WriteLine("PASS_SUBSCRIPTIONS_SCROLL_DURING_PROBES_WINDOWS_ANDROID_LINUX_SELECTION_GUARDS");
     }
 
+    private static void VerifySettingsDrafts()
+    {
+        var settings = UserSettings.Current;
+        settings.Language = "ru";
+        settings.SplitTunnelMode = SplitTunnelMode.BypassSelected;
+        L.Apply();
+        var model = new MainViewModel(null, new EmptyStore(), platform: AppPlatform.Windows);
+        var original = new Border();
+        var host = new ContentControl { Content = original };
+        var window = new Window { Width = 740, Height = 700, Content = host, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            window.Show();
+            SettingsPage.ShowAsync(host, model).GetAwaiter().GetResult();
+            Layout();
+            var (mode, domains) = Editor();
+            domains.Text = "direct.example";
+            mode.SelectedIndex = (int)SplitTunnelMode.ProxySelected;
+            domains.Text = "proxy.example";
+            mode.SelectedIndex = (int)SplitTunnelMode.BypassSelected;
+            Require(domains.Text == "direct.example", "Changing split modes restores the corresponding draft");
+            domains.Text = "updated.example";
+
+            var appearance = Section("Интерфейс");
+            appearance.IsExpanded = true;
+            Layout();
+            var language = appearance.GetVisualDescendants().OfType<ComboBox>().First();
+            language.SelectedIndex = L.Languages.ToList().FindIndex(option => option.Code == "en");
+            Layout();
+
+            var (rebuiltMode, rebuiltDomains) = Editor();
+            Require(!ReferenceEquals(rebuiltMode, mode) && settings.Language == "en", "Changing language rebuilds the localized settings page");
+            Require(rebuiltDomains.Text == "updated.example", "Rebuilding settings keeps the latest edit to the active rules");
+            rebuiltMode.SelectedIndex = (int)SplitTunnelMode.ProxySelected;
+            Require(rebuiltDomains.Text == "proxy.example", "Rebuilding settings keeps the other mode's draft");
+            rebuiltDomains.Text = "saved.example";
+            Require(AppBackNavigation.TryGoBack() && ReferenceEquals(host.Content, original), "Back returns from the settings page");
+            Require(settings.GetSplitTunnelRules(SplitTunnelMode.BypassSelected).Domains.SequenceEqual(["updated.example"]) &&
+                settings.GetSplitTunnelRules(SplitTunnelMode.ProxySelected).Domains.SequenceEqual(["saved.example"]),
+                "Closing settings saves both modes independently");
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine("PASS_SETTINGS_SPLIT_DRAFTS_MODE_LANGUAGE_AND_BACK");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+
+        Expander Section(string title) => host.GetVisualDescendants().OfType<Expander>()
+            .Single(item => item.Header is TextBlock header && header.Text == L.T(title));
+
+        (ComboBox Mode, TextBox Domains) Editor()
+        {
+            var section = Section("Раздельное туннелирование");
+            section.IsExpanded = true;
+            Layout();
+            return (section.GetVisualDescendants().OfType<ComboBox>().Single(),
+                section.GetVisualDescendants().OfType<TextBox>().Single(input => input.AcceptsReturn));
+        }
+    }
+
+    private static void VerifySplitTunnelApplications()
+    {
+        const string package = "ru.cian.main";
+        var selected = new HashSet<string>(StringComparer.Ordinal);
+        var applications = new SplitTunnelApplicationList(selected, ReleaseTarget.AndroidArm64);
+        var window = new Window { Width = 390, Height = 320, Content = applications, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            applications.SetApplications(Enumerable.Range(0, 500).Select(index =>
+                new InstalledApplication($"example.app{index}", $"App {index:000}")).Append(new(package, "Cian")));
+            window.Show();
+            Layout();
+            var list = applications.GetVisualDescendants().OfType<ListBox>().Single();
+            Require(list.ItemCount == 501 && list.GetVisualDescendants().OfType<CheckBox>().Count() is > 0 and < 30,
+                "Only the visible application checkboxes are created");
+
+            applications.Filter("main.cian.ru");
+            Layout();
+            CheckBox VisibleCheck() => list.GetVisualDescendants().OfType<CheckBox>().Single(check => check.IsEffectivelyVisible);
+            Require(list.ItemCount == 1 && VisibleCheck().IsChecked == false, "The display ID finds the unchecked application");
+            VisibleCheck().SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            Require(selected.SetEquals([package]), "The checkbox updates the draft");
+
+            applications.Filter("App 040");
+            Layout();
+            Require(list.ItemCount == 1 && VisibleCheck().IsChecked == false, "A recycled checkbox uses the new application's state");
+            applications.Filter(package);
+            Layout();
+            Require(VisibleCheck().IsChecked == true, "Filtering preserves the selected application");
+            selected.Clear();
+            applications.RefreshSelection();
+            Layout();
+            Require(VisibleCheck().IsChecked == false, "Changing the draft updates the visible checkbox");
+        }
+        finally { window.Close(); }
+        Console.WriteLine("PASS_VIRTUALIZED_SPLIT_TUNNEL_APPLICATIONS_FILTER_AND_SELECTION");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
     private static void VerifyAndroidProfileLayout()
     {
         var model = new MainViewModel(null, new ManyServersStore(), platform: AppPlatform.Android,
@@ -442,7 +584,7 @@ internal static class Program
         var window = new Window { Width = 960, Height = 720, Content = viewport, ShowInTaskbar = false, ShowActivated = false };
         try
         {
-            Dialogs.Subscriptions(owner, model);
+            SubscriptionsPage.Show(owner, model);
             window.Show();
             ResizeViewport(390);
             var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
@@ -481,6 +623,262 @@ internal static class Program
         void ResizeViewport(double width)
         {
             viewport.Width = width;
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
+    private static void VerifyVirtualizedProfileGrid(AppPlatform platform)
+    {
+        var model = new MainViewModel(null, new ManyServersStore(1000), platform: platform,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var owner = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        var viewport = new Border { Child = owner, Width = 860 };
+        var window = new Window { Width = 960, Height = 720, Content = viewport, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            SubscriptionsPage.Show(owner, model);
+            window.Show();
+            Layout();
+            var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
+            var panel = list.FindDescendantOfType<AdaptiveTilePanel>()!;
+            var scroll = list.FindDescendantOfType<ScrollViewer>()!;
+            Require(scroll.Extent.Height > scroll.Viewport.Height, "The grid exposes the full scrollable extent");
+            Require(list.ContainerFromIndex(0) is not null && list.ContainerFromIndex(999) is null, "Only nearby cards are realized initially");
+            Require(panel.Children.Count is > 0 and < 40, "The number of realized cards is bounded by the viewport");
+
+            var below = panel.Children.OfType<ListBoxItem>().First(card =>
+                card.TranslatePoint(default, scroll.Presenter!)!.Value.Y >= scroll.Viewport.Height);
+            list.ScrollIntoView(list.IndexFromContainer(below));
+            var revealedOffset = scroll.Offset.Y;
+            Require(revealedOffset > 0, "Revealing a card in the next row scrolls the grid");
+            below.BringIntoView();
+            Require(scroll.Offset.Y == revealedOffset, "A focus request before layout does not scroll the same card twice");
+            scroll.ScrollToHome();
+            Layout();
+
+            viewport.Width = 390;
+            Layout();
+            var secondRow = list.ContainerFromIndex(1)!.TranslatePoint(default, panel)!.Value.Y -
+                list.ContainerFromIndex(0)!.TranslatePoint(default, panel)!.Value.Y;
+            scroll.Offset = new Vector(0, secondRow);
+            Layout();
+            viewport.Width = 860;
+            Layout();
+            Require(scroll.Offset.Y < 1 && CardIsVisible(1), $"A profile in the first grid row can be anchored at zero offset (was {secondRow}, now {scroll.Offset.Y})");
+            viewport.Width = 390;
+            Layout();
+            Require(Math.Abs(scroll.Offset.Y - secondRow) < 1, "Narrowing restores the anchor even when the wider offset was zero");
+            viewport.Width = 860;
+            Layout();
+
+            var selected = model.Profiles[713];
+            list.ScrollIntoView(713);
+            Layout();
+            list.SelectedItem = selected;
+            Layout();
+            Require(CardIsVisible(713) && list.ContainerFromIndex(713) is ListBoxItem { IsSelected: true }, "A distant card can be selected and brought into view");
+            var anchor = panel.Children.OfType<ListBoxItem>().Select(list.IndexFromContainer).Where(CardIsVisible).Min();
+            var offset = scroll.Offset.Y;
+
+            viewport.Width = 390;
+            Layout();
+            Require(CardIsVisible(anchor), "Narrowing keeps the first visible profile in view");
+            Require(ReferenceEquals(model.SelectedProfile, selected) && ReferenceEquals(list.SelectedItem, selected), "Narrowing preserves logical selection");
+            viewport.Width = 860;
+            Layout();
+            Require(CardIsVisible(anchor) && Math.Abs(scroll.Offset.Y - offset) < 1, "Widening restores the same scroll position");
+
+            var first = list.ContainerFromIndex(anchor)!;
+            var down = ((INavigableContainer)panel).GetControl(NavigationDirection.Down, first, false) as ListBoxItem;
+            Require(down is not null && list.IndexFromContainer(down) > anchor + 1, "Down moves to the same column in the next grid row");
+            list.ScrollIntoView(999);
+            Layout();
+            Require(CardIsVisible(999) && list.ContainerFromIndex(0) is null, "Scrolling to the end releases cards near the start");
+            Require(ReferenceEquals(list.SelectedItem, selected), "Recycling off-screen cards keeps the selection");
+
+            model.Profiles.Move(999, 0);
+            Layout();
+            list.ScrollIntoView(0);
+            Layout();
+            var moved = list.ContainerFromIndex(0) as ListBoxItem;
+            Require(moved is not null && CardIsVisible(0), $"The moved first card can be scrolled into view (offset {scroll.Offset.Y})");
+            Require(ReferenceEquals(moved!.DataContext, model.Profiles[0]), "After a move recycled containers display their current profile");
+            Require(ReferenceEquals(list.SelectedItem, selected) && panel.Children.Count < 40, "Moving a card preserves selection and virtualization");
+
+            bool CardIsVisible(int index) => list.ContainerFromIndex(index) is { } card &&
+                card.TranslatePoint(default, scroll.Presenter!) is { } position && position.Y < scroll.Viewport.Height && position.Y + card.Bounds.Height > 0;
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine($"PASS_VIRTUALIZED_PROFILE_GRID {platform.ReleaseTarget}");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
+    private static void VerifyMapAnimationVisibility()
+    {
+        var platform = OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows;
+        var model = new MainViewModel(null, new ManyServersStore(), platform: platform,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var timer = (DispatcherTimer)typeof(MainViewModel).GetField("mapLightsTimer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(model)!;
+        var shell = new ApplicationShell { DataContext = model };
+        var window = new Window { Width = 960, Height = 720, Content = shell, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            model.ConnectionState = VpnConnectionState.Connected;
+            Require(!timer.IsEnabled, "A connected model with no attached map runs no animation");
+            window.Show();
+            Layout();
+            Require(timer.IsEnabled, "Showing the connected map starts the animation");
+            using (var settle = new CancellationTokenSource(450)) Dispatcher.UIThread.MainLoop(settle.Token);
+            Require(model.MapLights.Any(light => light.Opacity > 0), "The visible map changes opacity");
+
+            shell.OpenSubscriptions(model);
+            Layout();
+            Require(!timer.IsEnabled, "Hiding the main page behind subscriptions pauses the animation");
+            Require(AppBackNavigation.TryGoBack(), "Subscriptions can be closed");
+            Layout();
+            Require(timer.IsEnabled, "Going back to the main page resumes the animation");
+
+            SettingsPage.ShowAsync(shell.NavigationHost, model).GetAwaiter().GetResult();
+            Layout();
+            Require(!timer.IsEnabled, "Replacing the main page with settings pauses the animation");
+            Require(AppBackNavigation.TryGoBack(), "Settings can be closed");
+            Layout();
+            Require(timer.IsEnabled, "Restoring the main page resumes the animation");
+
+            SetWindowState(WindowState.Minimized);
+            Require(!timer.IsEnabled, "A minimized window pauses the animation");
+            var light = model.MapLights[0];
+            var opacityWhileMinimized = light.Opacity;
+            light.TargetOpacity = opacityWhileMinimized < 0.5 ? 1 : 0;
+            using (var settle = new CancellationTokenSource(250)) Dispatcher.UIThread.MainLoop(settle.Token);
+            Require(light.Opacity == opacityWhileMinimized, "The light stays still while minimized");
+            SetWindowState(WindowState.Normal);
+            Require(timer.IsEnabled, "Restoring a minimized window resumes the animation");
+            using (var settle = new CancellationTokenSource(250)) Dispatcher.UIThread.MainLoop(settle.Token);
+            Require(light.Opacity != opacityWhileMinimized, "The light changes opacity after restoring the window");
+            window.Hide();
+            Layout();
+            Require(!timer.IsEnabled, "A hidden window pauses the animation");
+            window.Show();
+            Layout();
+            Require(timer.IsEnabled, "Showing a hidden window resumes the animation");
+
+            shell.SetMapHostVisible(false);
+            Require(!timer.IsEnabled, "The Android visibility signal pauses the animation");
+            shell.SetMapHostVisible(true);
+            Require(timer.IsEnabled, "Returning to the Android map while connected resumes the animation");
+            shell.SetMapHostVisible(false);
+            model.ConnectionState = VpnConnectionState.Disconnected;
+            Require(!model.MapLightsVisible && model.MapLights.All(light => light.Opacity == 0), "A hidden disconnect clears the map without a fade");
+            shell.SetMapHostVisible(true);
+            Require(!timer.IsEnabled, "Returning while disconnected keeps the map stopped");
+            model.ConnectionState = VpnConnectionState.Connected;
+            Require(timer.IsEnabled, "Reconnecting starts the animation again");
+            model.ConnectionState = VpnConnectionState.Disconnected;
+            Require(timer.IsEnabled && model.MapLightsVisible, "Disconnecting on the visible map still starts the fade");
+            window.Hide();
+            Require(!timer.IsEnabled && !model.MapLightsVisible, "Hiding during a fade finishes the unseen animation");
+            window.Show();
+            model.ConnectionState = VpnConnectionState.Connected;
+            model.ShutdownAsync().GetAwaiter().GetResult();
+            Require(!timer.IsEnabled, "App shutdown stops the map timer");
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine($"PASS_MAP_ANIMATION_VISIBILITY {platform.ReleaseTarget}");
+
+        void SetWindowState(WindowState state)
+        {
+            window.WindowState = state;
+            // An X11 window manager acknowledges minimize/restore asynchronously.
+            if (OperatingSystem.IsLinux())
+            {
+                using var settle = new CancellationTokenSource(500);
+                Dispatcher.UIThread.MainLoop(settle.Token);
+            }
+            Layout();
+            Require(window.WindowState == state, $"Expected window state {state}, got {window.WindowState}");
+        }
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
+    private static void VerifyProfileOrder()
+    {
+        var platform = OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows;
+        var model = new MainViewModel(null, new ProfileOrderStore(), new ReverseOrderProbe(), platform: platform,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var owner = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        var window = new Window { Width = 960, Height = 720, Content = owner, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            SubscriptionsPage.Show(owner, model);
+            window.Show();
+            Layout();
+            var list = owner.GetVisualDescendants().OfType<ListBox>().Single();
+            var scroll = list.FindDescendantOfType<ScrollViewer>()!;
+            var groups = owner.GetVisualDescendants().OfType<ComboBox>().Single();
+            var changes = new List<NotifyCollectionChangedAction>();
+            model.Profiles.CollectionChanged += (_, change) => changes.Add(change.Action);
+
+            var selected = model.Profiles[100];
+            list.SelectedItem = selected;
+            list.ScrollIntoView(400);
+            Layout();
+            var offset = scroll.Offset.Y;
+            Require(offset > 0, "The profile list is scrolled before reordering");
+            model.ProbeAllCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            Layout();
+            Require(changes.SequenceEqual([NotifyCollectionChangedAction.Reset]), "A large probe sort publishes one reset");
+            Require(model.Profiles[899] == selected && ReferenceEquals(list.SelectedItem, selected), "Sorting restores the same selected card at its new index");
+            Require(Math.Abs(scroll.Offset.Y - offset) < 1, $"Sorting preserves the viewport offset ({offset} → {scroll.Offset.Y})");
+
+            changes.Clear();
+            groups.SelectedItem = model.Groups[1];
+            Layout();
+            Require(changes.SequenceEqual([NotifyCollectionChangedAction.Reset]), "Switching the subscription publishes one reset");
+            Require(model.Profiles.All(row => row.Profile.SourceId == "b") && ReferenceEquals(list.SelectedItem, model.Profiles[0]),
+                "The list selects and displays the new subscription's first profile");
+
+            changes.Clear();
+            groups.SelectedItem = model.Groups[0];
+            Layout();
+            Require(changes.SequenceEqual([NotifyCollectionChangedAction.Reset]), "Returning to the original subscription publishes one reset");
+            Require(list.SelectedItem is ServerItemViewModel restored && ReferenceEquals(restored, model.SelectedProfile) && restored.Profile == selected.Profile,
+                "Returning to the subscription restores its saved profile");
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine($"PASS_BULK_PROFILE_SORT_AND_GROUP_SWITCH {platform.ReleaseTarget}");
+
+        void Layout()
+        {
             window.UpdateLayout();
             Dispatcher.UIThread.RunJobs();
             window.UpdateLayout();
@@ -675,9 +1073,9 @@ internal static class Program
         Console.WriteLine("PASS_LINUX_DOCK_CUSTOM_ICON_LEASE_CRASH_RECOVERY_PERMISSIONS_AND_USER_EDITS");
     }
 
-    private sealed class ManyServersStore : IProfileStore
+    private sealed class ManyServersStore(int count = 30) : IProfileStore
     {
-        public IReadOnlyList<ImportedProfile> Load() => Enumerable.Range(1, 30)
+        public IReadOnlyList<ImportedProfile> Load() => Enumerable.Range(1, count)
             .Select(index => new ImportedProfile("Test " + index, "VLESS", "synthetic-" + index, "test", "Test subscription")).ToArray();
         public void Save(IEnumerable<ImportedProfile> profiles) { }
     }
@@ -688,6 +1086,21 @@ internal static class Program
             await Task.Delay(Timeout.Infinite, cancellationToken);
             return new ServerProbeResult(null, "synthetic");
         }
+    }
+
+    private sealed class ProfileOrderStore : IProfileStore
+    {
+        public IReadOnlyList<ImportedProfile> Load() => new[] { "a", "b" }.SelectMany(source => Enumerable.Range(0, 1000)
+            .Select(index => new ImportedProfile($"{index:D4}", "VLESS", $"synthetic-{source}-{index}", source, $"Subscription {source}", $"https://example.invalid/{source}")))
+            .ToArray();
+
+        public void Save(IEnumerable<ImportedProfile> profiles) { }
+    }
+
+    private sealed class ReverseOrderProbe : IServerProbe
+    {
+        public Task<ServerProbeResult> ProbeAsync(ImportedProfile profile, CancellationToken cancellationToken = default, ServerProbeMode mode = ServerProbeMode.Fast) =>
+            Task.FromResult(ProbePolicy.Success(1000 - int.Parse(profile.Name), "HTTPS", "HTTPS", true));
     }
 
     private static void VerifyWindowThemeAndBounds(Window window)

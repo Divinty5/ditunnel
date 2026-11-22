@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a self-contained Ubuntu 24.04 amd64 .deb without installing anything."""
 import argparse
+import filecmp
 import hashlib
 import json
 import os
@@ -48,6 +49,26 @@ def verify_runtime(directory):
     for name in ("LICENSE-XRAY", "LICENSE-DITUNNEL", "THIRD-PARTY-NOTICES.txt", "xray-process-source/process_lookup.py"):
         if not (directory / name).is_file():
             raise RuntimeError("Missing runtime source/license: " + name)
+
+
+def share_identical_runtime_files(ui, host):
+    """Store identical UI and service files once, preserving both publish paths."""
+    shared_bytes = 0
+    shared_files = 0
+    for host_file in sorted(host.rglob("*")):
+        ui_file = ui / host_file.relative_to(host)
+        if (host_file.is_symlink() or ui_file.is_symlink() or
+                not host_file.is_file() or not ui_file.is_file()):
+            continue
+        host_stat = host_file.stat()
+        if host_stat.st_mode != ui_file.stat().st_mode or not filecmp.cmp(host_file, ui_file, shallow=False):
+            continue
+        host_file.unlink()
+        host_file.hardlink_to(ui_file)
+        shared_bytes += host_stat.st_size
+        shared_files += 1
+    print(f"Shared {shared_files} identical UI/host files ({shared_bytes} bytes).", flush=True)
+    return shared_bytes
 
 
 def main():
@@ -132,7 +153,9 @@ def main():
         (doc / "NUGET-DEPENDENCIES.txt").write_text("\n".join(sorted(set(manifests))) + "\n")
         control = stage / "DEBIAN"
         control.mkdir()
-        size = sum(path.stat().st_size for path in stage.rglob("*") if path.is_file()) // 1024
+        size = sum(path.stat().st_size for path in stage.rglob("*") if path.is_file())
+        app = stage / "usr/lib/ditunnel"
+        size = (size - share_identical_runtime_files(app / "ui", app / "host")) // 1024
         dependencies = "libc6 (>= 2.38), libgcc-s1, libstdc++6, libicu74, libssl3t64, zlib1g, libfontconfig1, libfreetype6, libx11-6, libxcb1, libxext6, libxrender1, libxrandr2, libxi6, libxcursor1, libxfixes3, libgl1, libice6, libsm6, libdbus-1-3, libsecret-tools, gnome-keyring, polkitd, pkexec, dbus, systemd, systemd-resolved, iproute2, nftables, apt"
         (control / "control").write_text(f"Package: ditunnel\nVersion: {version}\nArchitecture: amd64\nSection: net\nPriority: optional\nMaintainer: Di Vinty Interactive <divinty5@users.noreply.github.com>\nInstalled-Size: {size}\nDepends: {dependencies}\nHomepage: https://github.com/Divinty5/ditunnel\nDescription: Di-Tunnel VPN client for Ubuntu 24.04\n Avalonia interface, encrypted profiles, Linux TUN, split tunneling and kill switch.\n Includes self-contained .NET and pinned Xray/AmneziaWG runtimes.\n")
         for name in ("preinst", "postinst", "prerm", "postrm"):
@@ -146,7 +169,7 @@ def main():
         run("desktop-file-validate", stage / "usr/share/applications/di-tunnel.desktop")
         stage.chmod(0o755)
         artifact = output / f"Di-Tunnel-{version}-linux-amd64.deb"
-        run("dpkg-deb", "--root-owner-group", "-Zxz", "-z6", "--build", stage, artifact)
+        run("dpkg-deb", "--root-owner-group", "-Zxz", "-z9", "-Sextreme", "--threads-max=1", "--build", stage, artifact)
     checksum = digest(artifact)
     (output / (artifact.name + ".sha256")).write_text(checksum + "  " + artifact.name + "\n")
     run(sys.executable, root / "scripts/Test-LinuxPackage.py", artifact)
