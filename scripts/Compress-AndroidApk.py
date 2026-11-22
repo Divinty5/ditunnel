@@ -16,7 +16,9 @@ def executable_libraries(archive):
             continue
         name = path[2]
         # Data-only ELF wrappers used by the runtime keep their original layout.
-        assembly_store = name.startswith("libassemblies.") and name.endswith(".blob.so")
+        assembly_store = name == "libassembly-store.so" or (
+            name.startswith("libassemblies.") and name.endswith(".blob.so")
+        )
         if assembly_store or name in ("libarc.bin.so", "libxamarin-app.so"):
             if entry.compress_type != ZIP_STORED:
                 raise ValueError(f"Runtime data must be stored uncompressed: {entry.filename}")
