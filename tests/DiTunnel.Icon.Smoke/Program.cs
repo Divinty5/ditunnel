@@ -58,6 +58,11 @@ internal static class Program
             VerifyProfileOrder();
             return;
         }
+        if (args is ["--map-animation"])
+        {
+            VerifyMapAnimationVisibility();
+            return;
+        }
         if (args is ["--split-tunnel-applications"])
         {
             VerifySplitTunnelApplications();
@@ -712,6 +717,105 @@ internal static class Program
             model.ShutdownAsync().GetAwaiter().GetResult();
         }
         Console.WriteLine($"PASS_VIRTUALIZED_PROFILE_GRID {platform.ReleaseTarget}");
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+        }
+    }
+
+    private static void VerifyMapAnimationVisibility()
+    {
+        var platform = OperatingSystem.IsLinux() ? AppPlatform.Linux : AppPlatform.Windows;
+        var model = new MainViewModel(null, new ManyServersStore(), platform: platform,
+            selectionSettings: new UserSettings(), persistSelection: () => { });
+        var timer = (DispatcherTimer)typeof(MainViewModel).GetField("mapLightsTimer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(model)!;
+        var shell = new ApplicationShell { DataContext = model };
+        var window = new Window { Width = 960, Height = 720, Content = shell, ShowInTaskbar = false, ShowActivated = false };
+        try
+        {
+            model.ConnectionState = VpnConnectionState.Connected;
+            Require(!timer.IsEnabled, "A connected model with no attached map runs no animation");
+            window.Show();
+            Layout();
+            Require(timer.IsEnabled, "Showing the connected map starts the animation");
+            using (var settle = new CancellationTokenSource(450)) Dispatcher.UIThread.MainLoop(settle.Token);
+            Require(model.MapLights.Any(light => light.Opacity > 0), "The visible map changes opacity");
+
+            shell.OpenSubscriptions(model);
+            Layout();
+            Require(!timer.IsEnabled, "Hiding the main page behind subscriptions pauses the animation");
+            Require(AppBackNavigation.TryGoBack(), "Subscriptions can be closed");
+            Layout();
+            Require(timer.IsEnabled, "Going back to the main page resumes the animation");
+
+            SettingsPage.ShowAsync(shell.NavigationHost, model).GetAwaiter().GetResult();
+            Layout();
+            Require(!timer.IsEnabled, "Replacing the main page with settings pauses the animation");
+            Require(AppBackNavigation.TryGoBack(), "Settings can be closed");
+            Layout();
+            Require(timer.IsEnabled, "Restoring the main page resumes the animation");
+
+            SetWindowState(WindowState.Minimized);
+            Require(!timer.IsEnabled, "A minimized window pauses the animation");
+            var light = model.MapLights[0];
+            var opacityWhileMinimized = light.Opacity;
+            light.TargetOpacity = opacityWhileMinimized < 0.5 ? 1 : 0;
+            using (var settle = new CancellationTokenSource(250)) Dispatcher.UIThread.MainLoop(settle.Token);
+            Require(light.Opacity == opacityWhileMinimized, "The light stays still while minimized");
+            SetWindowState(WindowState.Normal);
+            Require(timer.IsEnabled, "Restoring a minimized window resumes the animation");
+            using (var settle = new CancellationTokenSource(250)) Dispatcher.UIThread.MainLoop(settle.Token);
+            Require(light.Opacity != opacityWhileMinimized, "The light changes opacity after restoring the window");
+            window.Hide();
+            Layout();
+            Require(!timer.IsEnabled, "A hidden window pauses the animation");
+            window.Show();
+            Layout();
+            Require(timer.IsEnabled, "Showing a hidden window resumes the animation");
+
+            shell.SetMapHostVisible(false);
+            Require(!timer.IsEnabled, "The Android visibility signal pauses the animation");
+            shell.SetMapHostVisible(true);
+            Require(timer.IsEnabled, "Returning to the Android map while connected resumes the animation");
+            shell.SetMapHostVisible(false);
+            model.ConnectionState = VpnConnectionState.Disconnected;
+            Require(!model.MapLightsVisible && model.MapLights.All(light => light.Opacity == 0), "A hidden disconnect clears the map without a fade");
+            shell.SetMapHostVisible(true);
+            Require(!timer.IsEnabled, "Returning while disconnected keeps the map stopped");
+            model.ConnectionState = VpnConnectionState.Connected;
+            Require(timer.IsEnabled, "Reconnecting starts the animation again");
+            model.ConnectionState = VpnConnectionState.Disconnected;
+            Require(timer.IsEnabled && model.MapLightsVisible, "Disconnecting on the visible map still starts the fade");
+            window.Hide();
+            Require(!timer.IsEnabled && !model.MapLightsVisible, "Hiding during a fade finishes the unseen animation");
+            window.Show();
+            model.ConnectionState = VpnConnectionState.Connected;
+            model.ShutdownAsync().GetAwaiter().GetResult();
+            Require(!timer.IsEnabled, "App shutdown stops the map timer");
+        }
+        finally
+        {
+            AppBackNavigation.Clear();
+            window.Close();
+            model.ShutdownAsync().GetAwaiter().GetResult();
+        }
+        Console.WriteLine($"PASS_MAP_ANIMATION_VISIBILITY {platform.ReleaseTarget}");
+
+        void SetWindowState(WindowState state)
+        {
+            window.WindowState = state;
+            // An X11 window manager acknowledges minimize/restore asynchronously.
+            if (OperatingSystem.IsLinux())
+            {
+                using var settle = new CancellationTokenSource(500);
+                Dispatcher.UIThread.MainLoop(settle.Token);
+            }
+            Layout();
+            Require(window.WindowState == state, $"Expected window state {state}, got {window.WindowState}");
+        }
 
         void Layout()
         {

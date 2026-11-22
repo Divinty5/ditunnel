@@ -40,6 +40,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly DispatcherTimer mapLightsTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private readonly Random mapLightsRandom = new();
+    private bool mapViewVisible;
     private bool mapLightsFading;
     private int mapLightsFadeCursor;
     private int mapLightsChangeTick;
@@ -312,27 +313,53 @@ public sealed partial class MainViewModel : ViewModelBase
             foreach (var light in MapLights) light.TargetOpacity = 0;
             foreach (var light in MapLights.OrderBy(_ => mapLightsRandom.Next()).Take(10)) light.TargetOpacity = .7 + mapLightsRandom.NextDouble() * .25;
             mapLightsChangeTick = 0;
-            mapLightsTimer.Start();
+            UpdateMapLightsTimer();
         }
         else if (MapLightsVisible)
         {
-            mapLightsFading = true;
-            mapLightsFadeCursor = 0;
-            mapLightsTimer.Start();
+            if (mapViewVisible)
+            {
+                mapLightsFading = true;
+                mapLightsFadeCursor = 0;
+                UpdateMapLightsTimer();
+            }
+            else ClearMapLights();
         }
         if (value != VpnConnectionState.Connected) tunnelMonitor.Stop();
         OnPropertyChanged(nameof(ShowKillSwitchStatus));
         NotifyConnectionPresentation();
         OnPropertyChanged(nameof(PowerText)); OnPropertyChanged(nameof(CopyErrorText)); OnPropertyChanged(nameof(HasConnectionError)); OnPropertyChanged(nameof(ConnectionHint)); OnPropertyChanged(nameof(HasDisplayDelay)); OnPropertyChanged(nameof(KillSwitchText)); OnPropertyChanged(nameof(DelayBrush)); OnPropertyChanged(nameof(ConnectionHintBrush)); OnPropertyChanged(nameof(PowerBrush)); OnPropertyChanged(nameof(SelectedName)); OnPropertyChanged(nameof(SelectedSummary)); OnPropertyChanged(nameof(SelectedFlag)); OnPropertyChanged(nameof(HasSelectedFlag)); OnPropertyChanged(nameof(SubscriptionLimits)); OnPropertyChanged(nameof(CanConnect)); OnPropertyChanged(nameof(CanImport)); OnPropertyChanged(nameof(CanRefreshSubscriptions)); OnPropertyChanged(nameof(CanManageProfiles)); OnPropertyChanged(nameof(CanSelectProfile)); OnPropertyChanged(nameof(CanProbe)); OnPropertyChanged(nameof(CanProbeAll));
     }
+    internal void SetMapViewVisible(bool visible)
+    {
+        if (mapViewVisible == visible) return;
+        mapViewVisible = visible;
+        if (!visible && mapLightsFading) ClearMapLights();
+        else UpdateMapLightsTimer();
+    }
+
+    private void UpdateMapLightsTimer() =>
+        mapLightsTimer.IsEnabled = mapViewVisible && MapLightsVisible && !lifetimeCancellation.IsCancellationRequested;
+
+    private void ClearMapLights()
+    {
+        MapLightsVisible = false;
+        mapLightsFading = false;
+        UpdateMapLightsTimer();
+        foreach (var light in MapLights)
+        {
+            light.TargetOpacity = 0;
+            light.Opacity = 0;
+        }
+    }
+
     private void AdvanceMapLights()
     {
         if (mapLightsFading)
         {
             if (mapLightsFadeCursor >= MapLights.Count)
             {
-                mapLightsTimer.Stop();
-                MapLightsVisible = false;
+                ClearMapLights();
                 return;
             }
 
@@ -397,6 +424,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public async Task ShutdownAsync()
     {
         subscriptionTimer.Stop();
+        mapLightsTimer.Stop();
         lifetimeCancellation.Cancel();
         connectionCancellation?.Cancel();
         probeCancellation?.Cancel();

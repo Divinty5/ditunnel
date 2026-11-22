@@ -23,7 +23,7 @@
 
 ## Интерфейс и сторонние данные
 
-Карта построена на береговых линиях Natural Earth 1:110m из общественного достояния. Материки и точки используют общий SVG viewport. Воспроизводимый генератор находится в [Generate-WorldMap.py](../scripts/Generate-WorldMap.py). [Natural Earth](https://www.naturalearthdata.com/).
+Карта построена на береговых линиях Natural Earth 1:110m из общественного достояния. Материки и огоньки используют общий SVG viewport. Таймер огоньков работает, пока карта видна. Воспроизводимый генератор находится в [Generate-WorldMap.py](../scripts/Generate-WorldMap.py). [Natural Earth](https://www.naturalearthdata.com/).
 
 Компонент Windows для панели задач использует MinHook 1.3.4 и кэш публичных символов Microsoft. При несовместимости символов перехват не включается. Для ExplorerPatcher используются экспорты его модуля. [Устройство значка панели задач](windows-taskbar-icon-investigation.md).
 
